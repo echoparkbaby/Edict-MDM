@@ -36,6 +36,30 @@ struct MDMEnrollment: Decodable, Identifiable, Hashable {
     }()
 }
 
+/// The MDM push certificate's identity + expiry, served by the sidecar.
+struct PushCertInfo: Decodable {
+    let topic: String
+    let notAfter: String
+
+    enum CodingKeys: String, CodingKey {
+        case topic
+        case notAfter = "not_after"
+    }
+
+    var expiryDate: Date? {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f.date(from: notAfter)
+    }
+
+    var daysLeft: Int? {
+        guard let d = expiryDate else { return nil }
+        return Calendar.current.dateComponents([.day], from: Date(), to: d).day
+    }
+}
+
 /// Client for the enrollments sidecar. Auth matches NanoMDM's admin API
 /// (Basic, user `nanomdm`, same key) so the operator configures one key.
 struct EnrollmentsAPI {
@@ -65,6 +89,18 @@ struct EnrollmentsAPI {
     func purge(deviceID: String) async throws {
         let esc = deviceID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? deviceID
         _ = try await request("v1/enrollments/\(esc)", method: "DELETE")
+    }
+
+    /// `GET /v1/pushcert` → the APNs push certificate's topic and expiry,
+    /// read from NanoMDM's store. An expired push cert silently kills the
+    /// whole MDM, so the app surfaces a countdown.
+    func pushCert() async throws -> PushCertInfo {
+        let data = try await request("v1/pushcert")
+        do {
+            return try JSONDecoder().decode(PushCertInfo.self, from: data)
+        } catch {
+            throw MDMError.transport("Unexpected response shape: \(error)")
+        }
     }
 
     private func request(_ path: String, method: String = "GET") async throws -> Data {

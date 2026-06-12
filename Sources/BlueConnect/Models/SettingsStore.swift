@@ -546,6 +546,23 @@ final class SettingsStore: ObservableObject {
     /// list API). Same Basic-auth key as NanoMDM. e.g. `http://192.0.2.10:9095`.
     @AppStorage("mdmDevicesAPIBaseURL") var mdmDevicesAPIBaseURL: String = ""
 
+    /// Public, device-facing base URL — the reverse proxy in front of
+    /// NanoMDM/SCEP that enrolling Macs reach over the internet
+    /// (e.g. `https://mdm.example.com`). Used only to generate
+    /// enrollment profiles; `/mdm` and `/scep` are appended.
+    @AppStorage("mdmPublicURL") var mdmPublicURL: String = ""
+    /// SCEP shared-secret challenge (the `-challenge` the SCEP server
+    /// runs with). Goes into the generated enrollment profile. Keychain.
+    @Published var scepChallenge: String = ""
+    private static let scepChallengeAccount = "EdictMDM.scepChallenge"
+    func loadSCEPChallengeFromKeychain() {
+        scepChallenge = KeychainHelper.read(account: Self.scepChallengeAccount) ?? ""
+    }
+    func setSCEPChallenge(_ value: String) {
+        scepChallenge = value
+        KeychainHelper.save(value, account: Self.scepChallengeAccount)
+    }
+
     /// Devices Edict knows about. NanoMDM has no list-enrollments API,
     /// so the operator registers each enrollment ID once and we keep the
     /// list locally. JSON-encoded [MDMDevice] — same hand-rolled pattern

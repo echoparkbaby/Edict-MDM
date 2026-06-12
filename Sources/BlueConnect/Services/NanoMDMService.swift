@@ -80,14 +80,45 @@ struct NanoMDMService {
                           commandPlist: Self.removeProfileCommand(identifier: profileIdentifier))
     }
 
-    /// Minimal MDM command plist for `RemoveProfile`. Identifier is
-    /// XML-escaped; the UUID satisfies the protocol's per-command
-    /// uniqueness requirement.
+    /// Lock the Mac behind a 6-digit PIN (lost/stolen response). The
+    /// device reboots into a lock screen and won't proceed without the
+    /// PIN. Optional message is shown on that screen.
+    @discardableResult
+    func lock(enrollmentID: String, pin: String, message: String?) async throws -> Data {
+        var keys: [(String, String)] = [("RequestType", "DeviceLock"), ("PIN", pin)]
+        if let m = message, !m.isEmpty { keys.append(("Message", m)) }
+        return try await enqueue(enrollmentIDs: enrollmentID,
+                                 commandPlist: Self.command(keys))
+    }
+
+    /// Remote-erase the Mac. The PIN unlocks it after the wipe on
+    /// Intel/T2 machines; Apple Silicon ignores it but the protocol
+    /// requires it. There is no undo.
+    @discardableResult
+    func erase(enrollmentID: String, pin: String) async throws -> Data {
+        try await enqueue(enrollmentIDs: enrollmentID,
+                          commandPlist: Self.command([("RequestType", "EraseDevice"),
+                                                      ("PIN", pin)]))
+    }
+
+    /// Minimal MDM command plist for `RemoveProfile`. Removing the
+    /// enrollment profile unenrolls the device.
     static func removeProfileCommand(identifier: String) -> Data {
-        let escaped = identifier
-            .replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
+        command([("RequestType", "RemoveProfile"), ("Identifier", identifier)])
+    }
+
+    /// Build a one-level MDM command plist from string key/value pairs.
+    /// Values are XML-escaped; the UUID satisfies the protocol's
+    /// per-command uniqueness requirement.
+    static func command(_ pairs: [(String, String)]) -> Data {
+        func esc(_ s: String) -> String {
+            s.replacingOccurrences(of: "&", with: "&amp;")
+                .replacingOccurrences(of: "<", with: "&lt;")
+                .replacingOccurrences(of: ">", with: "&gt;")
+        }
+        let body = pairs
+            .map { "\t\t<key>\(esc($0.0))</key>\n\t\t<string>\(esc($0.1))</string>" }
+            .joined(separator: "\n")
         let plist = """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -95,10 +126,7 @@ struct NanoMDMService {
         <dict>
         \t<key>Command</key>
         \t<dict>
-        \t\t<key>RequestType</key>
-        \t\t<string>RemoveProfile</string>
-        \t\t<key>Identifier</key>
-        \t\t<string>\(escaped)</string>
+        \(body)
         \t</dict>
         \t<key>CommandUUID</key>
         \t<string>\(UUID().uuidString)</string>

@@ -98,4 +98,23 @@ extension KMFDDMService {
         try await addDeclaration(configID, toSet: set)
         try await addDeclaration(actID, toSet: set)
     }
+
+    /// The inverse of deploy(): pull the configuration and its paired
+    /// activation out of every set they're in (devices get notified and
+    /// drop them), then delete both declarations. Activation goes first
+    /// so no device ever sees an activation referencing a deleted config.
+    func retire(configID: String) async throws {
+        let actID = DDMDeclarations.activationID(for: configID)
+        for id in [actID, configID] {
+            let sets = (try? await setsForDeclaration(id: id)) ?? []
+            for set in sets {
+                try await removeDeclaration(id, fromSet: set)
+            }
+            do {
+                try await deleteDeclaration(id: id)
+            } catch MDMError.http(404, _) {
+                // already gone — retire is idempotent
+            }
+        }
+    }
 }

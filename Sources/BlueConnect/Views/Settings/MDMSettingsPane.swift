@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 
 /// Settings → Device Management. Points Edict at its NanoMDM + KMFDDM
 /// servers (the Apple MDM core + the declarative-management server).
@@ -13,8 +15,11 @@ struct MDMSettingsPane: View {
 
     @State private var nanoKeyBuffer: String = ""
     @State private var kmfddmKeyBuffer: String = ""
+    @State private var challengeBuffer: String = ""
     @State private var testing = false
     @State private var testResult: TestResult?
+    @State private var exporting = false
+    @State private var exportResult: String?
 
     private enum TestResult: Equatable {
         case success(nano: String, kmfddm: String, declarations: Int, devices: Int?)
@@ -36,6 +41,7 @@ struct MDMSettingsPane: View {
         .onAppear {
             nanoKeyBuffer = settings.nanoMDMAPIKey
             kmfddmKeyBuffer = settings.kmfddmAPIKey
+            challengeBuffer = settings.scepChallenge
         }
     }
 
@@ -89,9 +95,75 @@ struct MDMSettingsPane: View {
             TextField("Enrollment profile identifier", text: $settings.mdmEnrollmentProfileID)
                 .font(.body.monospaced())
                 .help("PayloadIdentifier of the enrollment profile installed on managed Macs. \"Remove from MDM\" sends a RemoveProfile for this identifier.")
-            Text("Must match the top-level PayloadIdentifier in your enrollment .mobileconfig. Removing that profile is how a device is unenrolled remotely.")
+            TextField("Public enrollment URL", text: $settings.mdmPublicURL,
+                      prompt: Text(verbatim: "https://mdm.example.com"))
+                .help("The device-facing reverse-proxy URL Macs reach over the internet. /mdm and /scep are appended in the generated profile.")
+            SecureField("SCEP challenge", text: $challengeBuffer)
+                .onChange(of: challengeBuffer) { _, v in settings.setSCEPChallenge(v) }
+                .help("The shared-secret challenge the SCEP server runs with. Embedded in generated enrollment profiles.")
+            Button {
+                Task { await exportProfile() }
+            } label: {
+                if exporting {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Label("Export Enrollment Profile…", systemImage: "square.and.arrow.up")
+                }
+            }
+            .disabled(exporting
+                      || settings.mdmPublicURL.trimmingCharacters(in: .whitespaces).isEmpty
+                      || challengeBuffer.isEmpty)
+            .help("Generate a .mobileconfig to install on new Macs. Signed with your Developer ID if one is available, so it installs as Verified.")
+            if let r = exportResult {
+                Text(r).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text("The profile's push topic is read from the server, so it's always current. Removing the profile is how a device unenrolls remotely.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @MainActor
+    private func exportProfile() async {
+        exporting = true
+        exportResult = nil
+        defer { exporting = false }
+        do {
+            // Topic comes from the live server so the profile is always correct.
+            let topic: String
+            if !settings.mdmDevicesAPIBaseURL.trimmingCharacters(in: .whitespaces).isEmpty {
+                topic = try await EnrollmentsAPI(settings: settings).pushCert().topic
+            } else {
+                throw EnrollmentProfileExporter.ExportError.missing("Devices API URL not set (needed to read the push topic)")
+            }
+            var data = try EnrollmentProfileExporter.makeProfile(.init(
+                publicURL: settings.mdmPublicURL,
+                challenge: settings.scepChallenge,
+                topic: topic,
+                profileIdentifier: settings.mdmEnrollmentProfileID
+            ))
+            var signedNote = "unsigned"
+            if let identity = EnrollmentProfileExporter.developerIDIdentity() {
+                do {
+                    data = try EnrollmentProfileExporter.sign(data, identity: identity)
+                    signedNote = "signed (\(identity))"
+                } catch {
+                    signedNote = "unsigned — signing failed: \(error.localizedDescription)"
+                }
+            }
+
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = "edict-enroll.mobileconfig"
+            panel.allowedContentTypes = [.init(filenameExtension: "mobileconfig") ?? .data]
+            guard panel.runModal() == .OK, let url = panel.url else {
+                exportResult = nil
+                return
+            }
+            try data.write(to: url)
+            exportResult = "Saved \(url.lastPathComponent) — \(signedNote). Install it on a Mac to enroll."
+        } catch {
+            exportResult = "Export failed: \(error.localizedDescription)"
         }
     }
 

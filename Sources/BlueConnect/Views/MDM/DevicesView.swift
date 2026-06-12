@@ -16,6 +16,9 @@ import SwiftUI
 /// profile → the device unenrolls itself; it must be online).
 struct DevicesView: View {
     @EnvironmentObject private var settings: SettingsStore
+    /// The BSC fleet — used to match MDM devices to BlueSky hosts by
+    /// serial number, so one machine shows both identities.
+    @Environment(BlueSkyHostListStore.self) private var hostStore
 
     @State private var enrollments: [MDMEnrollment] = []
     @State private var loading = false
@@ -33,6 +36,15 @@ struct DevicesView: View {
     // declarations) and each device's reported OS version.
     @State private var updateTarget: UpdateTarget?
     @State private var osVersions: [String: String] = [:]
+    /// Per-device FileVault state ("true"/"false") where reported.
+    @State private var fileVault: [String: String] = [:]
+    /// APNs push cert info — drives the expiry warning banner.
+    @State private var pushCert: PushCertInfo?
+    @State private var confirmingEndEnforcement = false
+
+    // Lock / Erase
+    @State private var lockTarget: MDMEnrollment?
+    @State private var eraseTarget: MDMEnrollment?
 
     struct UpdateTarget: Equatable {
         let version: String
@@ -91,6 +103,24 @@ struct DevicesView: View {
         }
         .sheet(item: $labelTarget) { enr in
             labelSheet(enr)
+        }
+        .sheet(item: $lockTarget) { enr in
+            LockDeviceSheet(deviceName: label(for: enr)) { pin, message in
+                await lock(enr, pin: pin, message: message)
+            }
+        }
+        .sheet(item: $eraseTarget) { enr in
+            EraseDeviceSheet(deviceName: label(for: enr)) { pin in
+                await erase(enr, pin: pin)
+            }
+        }
+        .alert("Stop enforcing this update?", isPresented: $confirmingEndEnforcement) {
+            Button("Cancel", role: .cancel) {}
+            Button("Stop Enforcing", role: .destructive) {
+                Task { await endEnforcement() }
+            }
+        } message: {
+            Text("Removes the “macOS \(updateTarget?.version ?? "")” enforcement from every set and deletes it. Devices already updating finish on their own; nothing new is forced.")
         }
     }
 
@@ -178,6 +208,21 @@ struct DevicesView: View {
                 .font(.caption).foregroundStyle(.secondary)
             if let target = updateTarget, !devices.isEmpty {
                 rolloutSummary(target)
+                Button {
+                    confirmingEndEnforcement = true
+                } label: {
+                    Image(systemName: "xmark.circle")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Stop enforcing this update — removes the enforcement from every set and deletes it")
+            }
+            if let cert = pushCert, let days = cert.daysLeft, days < 60 {
+                Label("Push cert expires in \(days) day\(days == 1 ? "" : "s")",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(days < 14 ? .red : .orange)
+                    .help("APNs push certificate expires \(cert.notAfter). An expired cert silently kills all MDM communication — renew via identity.apple.com using the vendor cert (sign-push-request.sh), then re-upload to NanoMDM.")
             }
             Spacer()
             if let notice = actionNotice {
@@ -215,12 +260,16 @@ struct DevicesView: View {
                     }
                 }
                 HStack(spacing: 8) {
+                    if bscHost(for: enr) != nil {
+                        Label("BlueSky", systemImage: "link")
+                            .font(.caption2)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                            .help("Matched to a BlueSky fleet host by serial number — same machine, both consoles")
+                    }
                     if let serial = enr.serialNumber {
                         Text(serial).font(.caption2.monospaced())
                     }
-                    Text(enr.id).font(.caption2.monospaced())
-                        .lineLimit(1).truncationMode(.middle)
-                        .frame(maxWidth: 280, alignment: .leading)
                     if let seen = enr.lastSeenDate {
                         Text("seen \(seen.formatted(.relative(presentation: .named)))")
                             .font(.caption2)
@@ -230,6 +279,12 @@ struct DevicesView: View {
                 .textSelection(.enabled)
             }
             Spacer()
+            if let fv = fileVault[enr.id] {
+                let on = fv == "true" || fv == "1"
+                chip(on ? "FV on" : "FV off", color: on ? .green : .red,
+                     help: on ? "FileVault disk encryption is on"
+                              : "FileVault is OFF — this disk is unencrypted")
+            }
             if updateTarget != nil {
                 complianceChip(enr)
             }
@@ -257,6 +312,19 @@ struct DevicesView: View {
                 } label: {
                     Label("Assign to Set…", systemImage: "rectangle.stack.badge.plus")
                 }
+                Divider()
+                Button {
+                    lockTarget = enr
+                } label: {
+                    Label("Lock Mac…", systemImage: "lock.laptopcomputer")
+                }
+                .disabled(!enr.isEnabled)
+                Button(role: .destructive) {
+                    eraseTarget = enr
+                } label: {
+                    Label("Erase Mac…", systemImage: "externaldrive.badge.xmark")
+                }
+                .disabled(!enr.isEnabled)
                 Divider()
                 Button(role: .destructive) {
                     unenrollTarget = enr
@@ -369,20 +437,29 @@ struct DevicesView: View {
         }
     }
 
-    /// One reported OS version per device — feeds the chips and summary.
+    /// Reported OS version + FileVault state per device — feeds the
+    /// chips and summary.
     @MainActor
     private func loadOSVersions() async {
         let svc = KMFDDMService(settings: settings)
-        var result: [String: String] = [:]
+        var versions: [String: String] = [:]
+        var fv: [String: String] = [:]
         for d in devices {
             if let values = try? await svc.statusValues(
                 enrollmentID: d.id,
                 pathPrefix: ".StatusItems.device.operating-system.version"
             ), let v = values.first?.value {
-                result[d.id] = v
+                versions[d.id] = v
+            }
+            if let values = try? await svc.statusValues(
+                enrollmentID: d.id,
+                pathPrefix: ".StatusItems.diskmanagement.filevault.enabled"
+            ), let v = values.first?.value {
+                fv[d.id] = v
             }
         }
-        osVersions = result
+        osVersions = versions
+        fileVault = fv
     }
 
     private static let localDateTime: DateFormatter = {
@@ -576,7 +653,16 @@ struct DevicesView: View {
            !stored.isEmpty {
             return stored
         }
+        if let host = bscHost(for: enr) { return host.displayName }
         return enr.serialNumber ?? String(enr.id.prefix(8))
+    }
+
+    /// The BSC fleet host with the same serial number, if any.
+    private func bscHost(for enr: MDMEnrollment) -> BlueSkyHost? {
+        guard let serial = enr.serialNumber, !serial.isEmpty else { return nil }
+        return hostStore.hosts.first {
+            ($0.serialnum ?? "").caseInsensitiveCompare(serial) == .orderedSame
+        }
     }
 
     private func setLabel(_ text: String, for enr: MDMEnrollment) {
@@ -670,9 +756,10 @@ struct DevicesView: View {
             }
             enrollments = rows
             // Rollout data rides along with every refresh: the enforced
-            // target + each device's reported OS version.
+            // target + each device's reported facts + push-cert health.
             await loadUpdateTarget()
             await loadOSVersions()
+            pushCert = try? await api.pushCert()
         } catch {
             loadError = error.localizedDescription
         }
@@ -736,6 +823,44 @@ struct DevicesView: View {
     }
 
     @MainActor
+    private func lock(_ enr: MDMEnrollment, pin: String, message: String?) async {
+        busyDeviceID = enr.id
+        defer { busyDeviceID = nil }
+        do {
+            _ = try await NanoMDMService(settings: settings)
+                .lock(enrollmentID: enr.id, pin: pin, message: message)
+            flash("Lock sent — \(label(for: enr)) locks with PIN \(pin) when it receives the push. Keep that PIN.")
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func erase(_ enr: MDMEnrollment, pin: String) async {
+        busyDeviceID = enr.id
+        defer { busyDeviceID = nil }
+        do {
+            _ = try await NanoMDMService(settings: settings)
+                .erase(enrollmentID: enr.id, pin: pin)
+            flash("Erase sent — \(label(for: enr)) wipes when it receives the push. PIN \(pin) unlocks Intel/T2 Macs afterward.")
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func endEnforcement() async {
+        guard let target = updateTarget else { return }
+        do {
+            try await KMFDDMService(settings: settings).retire(configID: target.declarationID)
+            flash("Stopped enforcing macOS \(target.version)")
+            await refresh()
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    @MainActor
     private func flash(_ message: String) {
         actionError = nil
         actionNotice = message
@@ -743,5 +868,119 @@ struct DevicesView: View {
             try? await Task.sleep(for: .seconds(5))
             if actionNotice == message { actionNotice = nil }
         }
+    }
+}
+
+// MARK: - Lock sheet
+
+/// PIN + optional message for DeviceLock. The PIN is what unlocks the
+/// Mac afterward — losing it means a trip to recovery, so it's front
+/// and center in the confirmation.
+private struct LockDeviceSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let deviceName: String
+    let onLock: (String, String?) async -> Void
+
+    @State private var pin = ""
+    @State private var message = ""
+    @State private var working = false
+
+    private var pinValid: Bool {
+        pin.count == 6 && pin.allSatisfy(\.isNumber)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Lock “\(deviceName)”").font(.headline)
+            Text("The Mac reboots into a lock screen and is unusable until this 6-digit PIN is entered. Write the PIN down — without it, unlocking requires Apple support or recovery.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            TextField("6-digit PIN", text: $pin)
+                .textFieldStyle(.roundedBorder)
+                .font(.body.monospaced())
+            TextField("Message shown on the lock screen (optional)", text: $message)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                if !pin.isEmpty && !pinValid {
+                    Label("PIN must be exactly 6 digits", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button {
+                    working = true
+                    Task {
+                        await onLock(pin, message.isEmpty ? nil : message)
+                        working = false
+                        dismiss()
+                    }
+                } label: {
+                    if working { ProgressView().controlSize(.small) } else { Text("Lock Mac") }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(!pinValid || working)
+            }
+        }
+        .padding(20)
+        .frame(width: 440)
+    }
+}
+
+// MARK: - Erase sheet
+
+/// Remote wipe with a typed-name confirmation — the one action in the
+/// app with no undo, so it gets the strongest guard.
+private struct EraseDeviceSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let deviceName: String
+    let onErase: (String) async -> Void
+
+    @State private var pin = ""
+    @State private var confirmText = ""
+    @State private var working = false
+
+    private var pinValid: Bool {
+        pin.count == 6 && pin.allSatisfy(\.isNumber)
+    }
+    private var confirmed: Bool {
+        confirmText == deviceName
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Erase “\(deviceName)”", systemImage: "exclamationmark.triangle.fill")
+                .font(.headline).foregroundStyle(.red)
+            Text("This wipes the Mac completely the moment it receives the push. Every file on it is destroyed. There is no undo and no cancel once sent. The PIN unlocks Intel/T2 Macs after the wipe.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            TextField("6-digit PIN", text: $pin)
+                .textFieldStyle(.roundedBorder)
+                .font(.body.monospaced())
+            TextField("Type the device name to confirm: \(deviceName)", text: $confirmText)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                if !pin.isEmpty && !pinValid {
+                    Label("PIN must be exactly 6 digits", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button(role: .destructive) {
+                    working = true
+                    Task {
+                        await onErase(pin)
+                        working = false
+                        dismiss()
+                    }
+                } label: {
+                    if working { ProgressView().controlSize(.small) } else { Text("Erase This Mac") }
+                }
+                .disabled(!pinValid || !confirmed || working)
+            }
+        }
+        .padding(20)
+        .frame(width: 460)
     }
 }
