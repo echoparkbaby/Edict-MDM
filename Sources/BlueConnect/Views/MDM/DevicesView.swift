@@ -64,9 +64,11 @@ struct DevicesView: View {
     @State private var pushCert: PushCertInfo?
     @State private var confirmingEndEnforcement = false
 
-    // Lock / Erase
+    // Lock / Erase / Rename
     @State private var lockTarget: MDMEnrollment?
     @State private var eraseTarget: MDMEnrollment?
+    @State private var renameTarget: MDMEnrollment?
+    @State private var renameText = ""
 
     // Inventory (per selected device)
     @State private var inventoryKind: InventoryKind?
@@ -208,6 +210,30 @@ struct DevicesView: View {
         }
         .sheet(item: $runCmdHost) { host in
             runCommandSheet(host)
+        }
+        .sheet(item: $renameTarget) { enr in
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Rename Mac").font(.headline)
+                Text("Sets the device's computer name via MDM. Applies on next checkin.")
+                    .font(.caption).foregroundStyle(.secondary)
+                TextField("New name", text: $renameText).textFieldStyle(.roundedBorder)
+                HStack {
+                    Spacer()
+                    Button("Cancel") { renameTarget = nil }.keyboardShortcut(.cancelAction)
+                    Button("Rename") {
+                        let name = renameText.trimmingCharacters(in: .whitespaces)
+                        renameTarget = nil
+                        if !name.isEmpty {
+                            Task { await simpleCommand(enr, "Rename to “\(name)” sent") {
+                                try await NanoMDMService(settings: settings).setDeviceName(enrollmentID: enr.id, name: name)
+                            } }
+                        }
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(renameText.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .padding(20).frame(width: 400)
         }
         .sheet(item: $editingGroup) { group in
             SmartGroupEditor(group: group) { saved in
@@ -525,6 +551,18 @@ struct DevicesView: View {
                     assignTarget = enr
                 } label: {
                     Label("Assign to Set…", systemImage: "rectangle.stack.badge.plus")
+                }
+                Divider()
+                Section("Power") {
+                    Button { Task { await simpleCommand(enr, "Restart sent") { try await NanoMDMService(settings: settings).restart(enrollmentID: enr.id) } } }
+                        label: { Label("Restart", systemImage: "restart") }
+                        .disabled(!enr.isEnabled || busyDeviceID != nil)
+                    Button { Task { await simpleCommand(enr, "Shut Down sent") { try await NanoMDMService(settings: settings).shutDown(enrollmentID: enr.id) } } }
+                        label: { Label("Shut Down", systemImage: "power") }
+                        .disabled(!enr.isEnabled || busyDeviceID != nil)
+                    Button { renameText = label(for: enr); renameTarget = enr }
+                        label: { Label("Rename Mac…", systemImage: "character.cursor.ibeam") }
+                        .disabled(!enr.isEnabled)
                 }
                 Divider()
                 Button {
@@ -1514,6 +1552,23 @@ struct DevicesView: View {
     }
 
     // MARK: - Actions
+
+    /// Run a one-shot command with push + flash + activity, sharing the
+    /// busy-spinner. Used by Restart / Shut Down / Rename.
+    @MainActor
+    private func simpleCommand(_ enr: MDMEnrollment, _ note: String,
+                              _ op: @escaping () async throws -> Data) async {
+        busyDeviceID = enr.id
+        defer { busyDeviceID = nil }
+        do {
+            _ = try await op()
+            _ = try? await NanoMDMService(settings: settings).push(enrollmentIDs: enr.id)
+            flash("\(note) — \(label(for: enr))")
+            activity.record(.category, title: note, detail: label(for: enr))
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
 
     @MainActor
     private func ping(_ enr: MDMEnrollment) async {

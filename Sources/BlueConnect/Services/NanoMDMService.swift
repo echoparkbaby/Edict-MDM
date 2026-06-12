@@ -135,6 +135,46 @@ struct NanoMDMService {
                           commandPlist: Self.command([("RequestType", "RestartDevice")]))
     }
 
+    /// Queue a `ShutDownDevice` command.
+    @discardableResult
+    func shutDown(enrollmentID: String) async throws -> Data {
+        try await enqueue(enrollmentIDs: enrollmentID,
+                          commandPlist: Self.command([("RequestType", "ShutDownDevice")]))
+    }
+
+    /// Rename the Mac via the `Settings` command (DeviceName item).
+    @discardableResult
+    func setDeviceName(enrollmentID: String, name: String) async throws -> Data {
+        let esc = name.replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+        let plist = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+        \t<key>Command</key>
+        \t<dict>
+        \t\t<key>RequestType</key>
+        \t\t<string>Settings</string>
+        \t\t<key>Settings</key>
+        \t\t<array>
+        \t\t\t<dict>
+        \t\t\t\t<key>Item</key>
+        \t\t\t\t<string>DeviceName</string>
+        \t\t\t\t<key>DeviceName</key>
+        \t\t\t\t<string>\(esc)</string>
+        \t\t\t</dict>
+        \t\t</array>
+        \t</dict>
+        \t<key>CommandUUID</key>
+        \t<string>\(UUID().uuidString)</string>
+        </dict>
+        </plist>
+        """
+        return try await enqueue(enrollmentIDs: enrollmentID, commandPlist: Data(plist.utf8))
+    }
+
     /// Lock the Mac behind a 6-digit PIN (lost/stolen response). The
     /// device reboots into a lock screen and won't proceed without the
     /// PIN. Optional message is shown on that screen.
