@@ -536,6 +536,30 @@ final class SettingsStore: ObservableObject {
             && !kmfddmBaseURL.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
+    /// PayloadIdentifier of the enrollment profile installed on managed
+    /// Macs. "Remove from MDM" sends a RemoveProfile for this identifier —
+    /// pulling the enrollment profile unenrolls the device.
+    @AppStorage("mdmEnrollmentProfileID") var mdmEnrollmentProfileID: String = "xyz.hellocomputer.blueconnectmdm"
+
+    /// Devices Edict knows about. NanoMDM has no list-enrollments API,
+    /// so the operator registers each enrollment ID once and we keep the
+    /// list locally. JSON-encoded [MDMDevice] — same hand-rolled pattern
+    /// as unifiProfiles (@AppStorage only persists primitives).
+    @AppStorage("mdmDevicesRaw") private var mdmDevicesRaw: String = "[]"
+
+    var mdmDevices: [MDMDevice] {
+        get {
+            guard let data = mdmDevicesRaw.data(using: .utf8),
+                  let arr = try? JSONDecoder().decode([MDMDevice].self, from: data)
+            else { return [] }
+            return arr
+        }
+        set {
+            let data = (try? JSONEncoder().encode(newValue)) ?? Data("[]".utf8)
+            mdmDevicesRaw = String(data: data, encoding: .utf8) ?? "[]"
+        }
+    }
+
     // MARK: - UniFi profiles (multi-controller)
 
     /// Per-profile Keychain account name. Suffixed by the profile's

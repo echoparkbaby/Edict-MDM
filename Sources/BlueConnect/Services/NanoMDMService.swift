@@ -68,6 +68,46 @@ struct NanoMDMService {
         return data
     }
 
+    /// Remotely unenroll a device: enqueue a `RemoveProfile` for the
+    /// enrollment profile's PayloadIdentifier. Removing the enrollment
+    /// profile takes the MDM payload (and the device's management) with
+    /// it — the device checks out and NanoMDM marks the enrollment
+    /// inactive. Works on manually-enrolled Macs; the device must be
+    /// online to receive the push.
+    @discardableResult
+    func unenroll(enrollmentID: String, profileIdentifier: String) async throws -> Data {
+        try await enqueue(enrollmentIDs: enrollmentID,
+                          commandPlist: Self.removeProfileCommand(identifier: profileIdentifier))
+    }
+
+    /// Minimal MDM command plist for `RemoveProfile`. Identifier is
+    /// XML-escaped; the UUID satisfies the protocol's per-command
+    /// uniqueness requirement.
+    static func removeProfileCommand(identifier: String) -> Data {
+        let escaped = identifier
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+        let plist = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+        \t<key>Command</key>
+        \t<dict>
+        \t\t<key>RequestType</key>
+        \t\t<string>RemoveProfile</string>
+        \t\t<key>Identifier</key>
+        \t\t<string>\(escaped)</string>
+        \t</dict>
+        \t<key>CommandUUID</key>
+        \t<string>\(UUID().uuidString)</string>
+        </dict>
+        </plist>
+        """
+        return Data(plist.utf8)
+    }
+
     // MARK: - HTTP
 
     private func request(_ path: String,

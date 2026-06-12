@@ -27,6 +27,7 @@ struct MDMSettingsPane: View {
             if settings.mdmEnabled {
                 nanoSection
                 kmfddmSection
+                enrollmentSection
                 testSection
             }
             aboutSection
@@ -76,6 +77,17 @@ struct MDMSettingsPane: View {
                     testResult = nil
                 }
                 .help("The -api key KMFDDM was started with (HTTP Basic password, user 'kmfddm').")
+        }
+    }
+
+    private var enrollmentSection: some View {
+        Section("Enrollment") {
+            TextField("Enrollment profile identifier", text: $settings.mdmEnrollmentProfileID)
+                .font(.body.monospaced())
+                .help("PayloadIdentifier of the enrollment profile installed on managed Macs. \"Remove from MDM\" sends a RemoveProfile for this identifier.")
+            Text("Must match the top-level PayloadIdentifier in your enrollment .mobileconfig. Removing that profile is how a device is unenrolled remotely.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

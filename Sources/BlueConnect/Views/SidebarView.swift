@@ -249,28 +249,33 @@ struct SidebarView: View {
     // MARK: - Device Management (Edict MDM)
 
     /// Shown only when Settings → Device Management is enabled. Selecting
-    /// the row swaps the center pane to the declarations browser — there's
-    /// no host count to show, so this doesn't reuse sidebarRow.
+    /// a row swaps the center pane to the matching MDM view — there's no
+    /// host count to show, so this doesn't reuse sidebarRow.
     private var mdmGroup: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Device Management").font(.caption).bold().foregroundStyle(.secondary)
                 .padding(.bottom, 2)
-            let isSelected = selection == .mdmDeclarations
-            Button { selection = .mdmDeclarations } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "doc.badge.gearshape")
-                        .foregroundStyle(isSelected ? .white : Color.accentColor)
-                        .frame(width: 16)
-                    Text("Declarations").lineLimit(1)
-                    Spacer(minLength: 4)
-                }
-                .padding(.horizontal, 8).padding(.vertical, 5)
-                .background(RoundedRectangle(cornerRadius: 6).fill(isSelected ? Color.accentColor : Color.clear))
-                .foregroundStyle(isSelected ? .white : .primary)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+            mdmRow(.mdmDevices, label: "Devices", icon: "laptopcomputer")
+            mdmRow(.mdmDeclarations, label: "Declarations", icon: "doc.badge.gearshape")
         }
+    }
+
+    private func mdmRow(_ filter: SidebarFilter, label: String, icon: String) -> some View {
+        let isSelected = selection == filter
+        return Button { selection = filter } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .foregroundStyle(isSelected ? .white : Color.accentColor)
+                    .frame(width: 16)
+                Text(label).lineLimit(1)
+                Spacer(minLength: 4)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 5)
+            .background(RoundedRectangle(cornerRadius: 6).fill(isSelected ? Color.accentColor : Color.clear))
+            .foregroundStyle(isSelected ? .white : .primary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Footer

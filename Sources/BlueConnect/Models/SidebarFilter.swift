@@ -11,6 +11,8 @@ enum SidebarFilter: Hashable {
     /// Edict MDM: swaps the center pane to the KMFDDM declarations
     /// browser instead of filtering the hosts table.
     case mdmDeclarations
+    /// Edict MDM: swaps the center pane to the managed-devices view.
+    case mdmDevices
 
     var key: String {
         switch self {
@@ -22,6 +24,7 @@ enum SidebarFilter: Hashable {
         case .uncategorized: "uncat"
         case .category(let c): "cat:\(c)"
         case .mdmDeclarations: "mdm:decl"
+        case .mdmDevices: "mdm:dev"
         }
     }
 }
