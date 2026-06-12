@@ -60,6 +60,24 @@ struct PushCertInfo: Decodable {
     }
 }
 
+/// A device's reply to a queued command, from nanomdm's command_results.
+struct CommandResult: Decodable {
+    let status: String
+    /// Raw plist string the device returned (e.g. a ProfileList /
+    /// InstalledApplicationList response). Empty for terminal NotNow.
+    let result: String
+
+    /// Parse a top-level array out of the result plist by key, e.g.
+    /// "ProfileList" or "InstalledApplicationList", as dictionaries.
+    func array(_ key: String) -> [[String: Any]] {
+        guard let data = result.data(using: .utf8),
+              let obj = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let arr = obj[key] as? [[String: Any]]
+        else { return [] }
+        return arr
+    }
+}
+
 /// Client for the enrollments sidecar. Auth matches NanoMDM's admin API
 /// (Basic, user `nanomdm`, same key) so the operator configures one key.
 struct EnrollmentsAPI {
@@ -89,6 +107,18 @@ struct EnrollmentsAPI {
     func purge(deviceID: String) async throws {
         let esc = deviceID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? deviceID
         _ = try await request("v1/enrollments/\(esc)", method: "DELETE")
+    }
+
+    /// `GET /v1/commandresult/<uuid>` → the result a device returned for a
+    /// queued command, or nil while it hasn't answered yet (404). `result`
+    /// is the raw plist string the device sent.
+    func commandResult(uuid: String) async throws -> CommandResult? {
+        do {
+            let data = try await request("v1/commandresult/\(uuid)")
+            return try JSONDecoder().decode(CommandResult.self, from: data)
+        } catch MDMError.http(404, _) {
+            return nil
+        }
     }
 
     /// `GET /v1/pushcert` → the APNs push certificate's topic and expiry,

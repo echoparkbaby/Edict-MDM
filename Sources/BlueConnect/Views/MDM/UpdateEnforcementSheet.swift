@@ -8,6 +8,7 @@ import SwiftUI
 struct UpdateEnforcementSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var settings: SettingsStore
+    @Environment(ActivityLog.self) private var activity
     /// Called after a successful deploy so the declarations list refreshes.
     let onDeployed: () -> Void
 
@@ -102,6 +103,8 @@ struct UpdateEnforcementSheet: View {
                 configID: identifier,
                 toSet: setName.trimmingCharacters(in: .whitespaces)
             )
+            activity.record(.category, title: "Enforced macOS \(trimmedVersion)",
+                            detail: "by \(deadline.formatted(date: .abbreviated, time: .shortened)), set “\(setName)”")
             onDeployed()
             dismiss()
         } catch {

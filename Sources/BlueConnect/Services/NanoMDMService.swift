@@ -80,6 +80,28 @@ struct NanoMDMService {
                           commandPlist: Self.removeProfileCommand(identifier: profileIdentifier))
     }
 
+    /// Queue an `InstalledApplicationList` query. Returns the command
+    /// UUID to poll for the result.
+    func requestInstalledApps(enrollmentID: String) async throws -> String {
+        let (uuid, plist) = Self.commandWithUUID([("RequestType", "InstalledApplicationList")])
+        _ = try await enqueue(enrollmentIDs: enrollmentID, commandPlist: plist)
+        return uuid
+    }
+
+    /// Queue a `ProfileList` query. Returns the command UUID.
+    func requestProfileList(enrollmentID: String) async throws -> String {
+        let (uuid, plist) = Self.commandWithUUID([("RequestType", "ProfileList")])
+        _ = try await enqueue(enrollmentIDs: enrollmentID, commandPlist: plist)
+        return uuid
+    }
+
+    /// Queue a `RestartDevice` command.
+    @discardableResult
+    func restart(enrollmentID: String) async throws -> Data {
+        try await enqueue(enrollmentIDs: enrollmentID,
+                          commandPlist: Self.command([("RequestType", "RestartDevice")]))
+    }
+
     /// Lock the Mac behind a 6-digit PIN (lost/stolen response). The
     /// device reboots into a lock screen and won't proceed without the
     /// PIN. Optional message is shown on that screen.
@@ -108,14 +130,20 @@ struct NanoMDMService {
     }
 
     /// Build a one-level MDM command plist from string key/value pairs.
-    /// Values are XML-escaped; the UUID satisfies the protocol's
-    /// per-command uniqueness requirement.
     static func command(_ pairs: [(String, String)]) -> Data {
+        commandWithUUID(pairs).plist
+    }
+
+    /// Same, but returns the generated CommandUUID too — needed when the
+    /// caller wants to poll for the device's result (inventory queries).
+    /// Values are XML-escaped.
+    static func commandWithUUID(_ pairs: [(String, String)]) -> (uuid: String, plist: Data) {
         func esc(_ s: String) -> String {
             s.replacingOccurrences(of: "&", with: "&amp;")
                 .replacingOccurrences(of: "<", with: "&lt;")
                 .replacingOccurrences(of: ">", with: "&gt;")
         }
+        let uuid = UUID().uuidString
         let body = pairs
             .map { "\t\t<key>\(esc($0.0))</key>\n\t\t<string>\(esc($0.1))</string>" }
             .joined(separator: "\n")
@@ -129,11 +157,11 @@ struct NanoMDMService {
         \(body)
         \t</dict>
         \t<key>CommandUUID</key>
-        \t<string>\(UUID().uuidString)</string>
+        \t<string>\(uuid)</string>
         </dict>
         </plist>
         """
-        return Data(plist.utf8)
+        return (uuid, Data(plist.utf8))
     }
 
     // MARK: - HTTP

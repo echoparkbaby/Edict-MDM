@@ -19,6 +19,7 @@ struct DevicesView: View {
     /// The BSC fleet — used to match MDM devices to BlueSky hosts by
     /// serial number, so one machine shows both identities.
     @Environment(BlueSkyHostListStore.self) private var hostStore
+    @Environment(ActivityLog.self) private var activity
 
     @State private var enrollments: [MDMEnrollment] = []
     @State private var loading = false
@@ -45,6 +46,19 @@ struct DevicesView: View {
     // Lock / Erase
     @State private var lockTarget: MDMEnrollment?
     @State private var eraseTarget: MDMEnrollment?
+
+    // Inventory (per selected device)
+    @State private var inventoryKind: InventoryKind?
+    @State private var inventoryItems: [String] = []
+    @State private var inventoryLoading = false
+    @State private var inventoryError: String?
+
+    enum InventoryKind: String { case profiles = "Profiles", apps = "Installed Apps" }
+
+    // Bulk selection
+    @State private var multiSelection = Set<String>()
+    @State private var bulkAssignSheet = false
+    @State private var bulkSetName = "default"
 
     struct UpdateTarget: Equatable {
         let version: String
@@ -181,16 +195,20 @@ struct DevicesView: View {
                 .padding()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
+                if !multiSelection.isEmpty { bulkBar }
                 HSplitView {
                     List(selection: $selectedDeviceID) {
                         ForEach(devices) { enr in
-                            deviceRow(enr).tag(enr.id)
+                            deviceRow(enr)
+                                .tag(enr.id)
+                                .contextMenu { selectionContextMenu(enr) }
                         }
                     }
                     .listStyle(.inset)
                     .frame(minWidth: 380, idealWidth: 460, maxWidth: .infinity)
                     .onChange(of: selectedDeviceID) { _, newID in
                         statusValues = []; statusError = nil
+                        inventoryKind = nil; inventoryItems = []; inventoryError = nil
                         if let id = newID { Task { await loadStatus(id: id) } }
                     }
                     deviceDetail
@@ -198,6 +216,76 @@ struct DevicesView: View {
                 }
             }
         }
+        .sheet(isPresented: $bulkAssignSheet) { bulkAssignSheetView }
+    }
+
+    // MARK: - Bulk actions
+
+    /// Multi-select is driven by ⌘/⇧-click selection captured per-row via
+    /// the context menu + a checkbox affordance isn't needed; the bulk bar
+    /// appears whenever more than one row's id is in multiSelection. Since
+    /// the List selection binding already tracks one id, bulk uses an
+    /// explicit Set toggled from the row context menu.
+    private var selectedForBulk: [MDMEnrollment] {
+        devices.filter { multiSelection.contains($0.id) }
+    }
+
+    private var bulkBar: some View {
+        HStack(spacing: 10) {
+            Text("\(selectedForBulk.count) selected").font(.caption).bold()
+            Button("Ping") { Task { await bulk { try await NanoMDMService(settings: settings).push(enrollmentIDs: $0.id) } } }
+            Button("Assign to Set…") { bulkSetName = "default"; bulkAssignSheet = true }
+            Button("Clear") { multiSelection.removeAll() }
+            Spacer()
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(Color.accentColor.opacity(0.08))
+    }
+
+    @ViewBuilder
+    private func selectionContextMenu(_ enr: MDMEnrollment) -> some View {
+        if multiSelection.contains(enr.id) {
+            Button("Deselect") { multiSelection.remove(enr.id) }
+        } else {
+            Button("Select for bulk action") { multiSelection.insert(enr.id) }
+        }
+        if !multiSelection.isEmpty {
+            Button("Select all") { multiSelection = Set(devices.map(\.id)) }
+        }
+    }
+
+    private var bulkAssignSheetView: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Assign \(selectedForBulk.count) devices to a Set").font(.headline)
+            TextField("Set name", text: $bulkSetName).textFieldStyle(.roundedBorder)
+            HStack {
+                Spacer()
+                Button("Cancel") { bulkAssignSheet = false }.keyboardShortcut(.cancelAction)
+                Button("Assign") {
+                    let set = bulkSetName.trimmingCharacters(in: .whitespaces)
+                    bulkAssignSheet = false
+                    if !set.isEmpty {
+                        Task { await bulk { try await KMFDDMService(settings: settings).assign(enrollmentID: $0.id, toSet: set) } }
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(bulkSetName.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(20).frame(width: 420)
+    }
+
+    @MainActor
+    private func bulk(_ op: @escaping (MDMEnrollment) async throws -> Void) async {
+        let targets = selectedForBulk
+        var ok = 0, failed = 0
+        for t in targets {
+            do { try await op(t); ok += 1 } catch { failed += 1 }
+        }
+        flash("Bulk action: \(ok) ok\(failed > 0 ? ", \(failed) failed" : "")")
+        activity.record(.connect, title: "MDM bulk action on \(targets.count) devices",
+                        detail: "\(ok) succeeded, \(failed) failed")
+        multiSelection.removeAll()
     }
 
     private var header: some View {
@@ -518,6 +606,8 @@ struct DevicesView: View {
                         } else if !statusLoading {
                             reportingSetup
                         }
+                        Divider()
+                        inventorySection(enr)
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -604,6 +694,80 @@ struct DevicesView: View {
             Text("This device must be in the set too (⋯ → Assign to Set…). Values appear after its next sync — usually seconds.")
                 .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private func inventorySection(_ enr: MDMEnrollment) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Inventory").font(.caption).bold().foregroundStyle(.secondary)
+                Spacer()
+                Button("Profiles") { Task { await fetchInventory(enr, .profiles) } }
+                    .buttonStyle(.link).font(.caption)
+                Button("Apps") { Task { await fetchInventory(enr, .apps) } }
+                    .buttonStyle(.link).font(.caption)
+            }
+            if inventoryLoading {
+                HStack(spacing: 6) { ProgressView().controlSize(.small)
+                    Text("Asking the device…").font(.caption).foregroundStyle(.secondary) }
+            } else if let err = inventoryError {
+                Label(err, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let kind = inventoryKind {
+                Text("\(kind.rawValue) (\(inventoryItems.count))")
+                    .font(.caption).foregroundStyle(.secondary)
+                ForEach(inventoryItems.prefix(200), id: \.self) { item in
+                    Text(item).font(.caption2.monospaced())
+                        .lineLimit(1).truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+            } else {
+                Text("Query what's installed on this Mac — live from the device.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @MainActor
+    private func fetchInventory(_ enr: MDMEnrollment, _ kind: InventoryKind) async {
+        inventoryLoading = true
+        inventoryError = nil
+        inventoryItems = []
+        inventoryKind = kind
+        defer { inventoryLoading = false }
+        let nano = NanoMDMService(settings: settings)
+        let api = EnrollmentsAPI(settings: settings)
+        do {
+            let uuid: String
+            switch kind {
+            case .profiles: uuid = try await nano.requestProfileList(enrollmentID: enr.id)
+            case .apps:     uuid = try await nano.requestInstalledApps(enrollmentID: enr.id)
+            }
+            // Push so an idle Mac wakes and answers, then poll the result.
+            _ = try? await nano.push(enrollmentIDs: enr.id)
+            for _ in 0..<12 {
+                try? await Task.sleep(for: .seconds(2))
+                if let res = try await api.commandResult(uuid: uuid) {
+                    switch kind {
+                    case .profiles:
+                        inventoryItems = res.array("ProfileList").compactMap {
+                            ($0["PayloadDisplayName"] as? String) ?? ($0["PayloadIdentifier"] as? String)
+                        }.sorted()
+                    case .apps:
+                        inventoryItems = res.array("InstalledApplicationList").compactMap { app in
+                            let name = (app["Name"] as? String) ?? (app["Identifier"] as? String) ?? "?"
+                            let ver = app["ShortVersion"] as? String ?? app["Version"] as? String
+                            return ver.map { "\(name) \($0)" } ?? name
+                        }.sorted()
+                    }
+                    return
+                }
+            }
+            inventoryError = "No answer yet — the Mac may be offline. Try again."
+        } catch {
+            inventoryError = error.localizedDescription
         }
     }
 
@@ -810,6 +974,7 @@ struct DevicesView: View {
         // auto-purges checked-out devices, so success == the row is gone.
         // ~30s covers an online Mac comfortably; an offline one keeps its
         // row and disappears on whichever refresh follows its checkout.
+        activity.record(.delete, title: "Unenrolled \(name)", detail: "RemoveProfile")
         flash("Unenroll sent — waiting for \(name) to check out…")
         for _ in 0..<10 {
             try? await Task.sleep(for: .seconds(3))
@@ -830,6 +995,7 @@ struct DevicesView: View {
             _ = try await NanoMDMService(settings: settings)
                 .lock(enrollmentID: enr.id, pin: pin, message: message)
             flash("Lock sent — \(label(for: enr)) locks with PIN \(pin) when it receives the push. Keep that PIN.")
+            activity.record(.delete, title: "Locked \(label(for: enr))", detail: "DeviceLock, PIN \(pin)")
         } catch {
             actionError = error.localizedDescription
         }
@@ -843,6 +1009,7 @@ struct DevicesView: View {
             _ = try await NanoMDMService(settings: settings)
                 .erase(enrollmentID: enr.id, pin: pin)
             flash("Erase sent — \(label(for: enr)) wipes when it receives the push. PIN \(pin) unlocks Intel/T2 Macs afterward.")
+            activity.record(.delete, title: "ERASED \(label(for: enr))", detail: "EraseDevice, PIN \(pin)")
         } catch {
             actionError = error.localizedDescription
         }
@@ -854,6 +1021,7 @@ struct DevicesView: View {
         do {
             try await KMFDDMService(settings: settings).retire(configID: target.declarationID)
             flash("Stopped enforcing macOS \(target.version)")
+            activity.record(.category, title: "Stopped enforcing macOS \(target.version)")
             await refresh()
         } catch {
             actionError = error.localizedDescription
