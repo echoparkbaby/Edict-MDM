@@ -55,6 +55,11 @@ struct DevicesView: View {
     @State private var osVersions: [String: String] = [:]
     /// Per-device FileVault state ("true"/"false") where reported.
     @State private var fileVault: [String: String] = [:]
+    /// Per-device model marketing name where reported.
+    @State private var models: [String: String] = [:]
+    /// Active smart-group filter (nil = all devices).
+    @State private var activeGroupID: UUID?
+    @State private var editingGroup: SmartGroup?
     /// APNs push cert info — drives the expiry warning banner.
     @State private var pushCert: PushCertInfo?
     @State private var confirmingEndEnforcement = false
@@ -113,7 +118,10 @@ struct DevicesView: View {
     /// Device-channel enrollments only — the Macs themselves. User-channel
     /// rows are sync plumbing, not separate machines.
     private var devices: [MDMEnrollment] {
-        let all = enrollments.filter(\.isDevice)
+        var all = enrollments.filter(\.isDevice)
+        if let gid = activeGroupID, let group = settings.smartGroups.first(where: { $0.id == gid }) {
+            all = all.filter { matches($0, group: group) }
+        }
         let q = search.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return all }
         return all.filter { enr in
@@ -122,6 +130,43 @@ struct DevicesView: View {
                 || enr.id.localizedCaseInsensitiveContains(q)
                 || (osVersions[enr.id] ?? "").localizedCaseInsensitiveContains(q)
         }
+    }
+
+    /// All device-channel enrollments (ignoring group + search) — needed
+    /// to count group members regardless of the active filter.
+    private var allDevices: [MDMEnrollment] { enrollments.filter(\.isDevice) }
+
+    // MARK: - Smart group evaluation
+
+    private func matches(_ enr: MDMEnrollment, group: SmartGroup) -> Bool {
+        group.rules.allSatisfy { matches(enr, rule: $0) }
+    }
+
+    private func matches(_ enr: MDMEnrollment, rule: SmartGroupRule) -> Bool {
+        switch rule.field {
+        case .osAtLeast:
+            return osVersions[enr.id].map { versionAtLeast($0, rule.value) } ?? false
+        case .osBelow:
+            return osVersions[enr.id].map { !versionAtLeast($0, rule.value) } ?? false
+        case .fileVaultOn:
+            return fileVault[enr.id].map { $0 == "true" || $0 == "1" } ?? false
+        case .fileVaultOff:
+            return fileVault[enr.id].map { $0 != "true" && $0 != "1" } ?? false
+        case .compliant:
+            return complianceResult(for: enr)?.passing ?? false
+        case .nonCompliant:
+            return complianceResult(for: enr).map { !$0.passing && !$0.failures.isEmpty } ?? false
+        case .modelContains:
+            return (models[enr.id] ?? "").localizedCaseInsensitiveContains(rule.value)
+        case .blueSky:
+            return bscHost(for: enr) != nil
+        case .enrolled:
+            return enr.isEnabled
+        }
+    }
+
+    private func memberCount(_ group: SmartGroup) -> Int {
+        allDevices.filter { matches($0, group: group) }.count
     }
 
     var body: some View {
@@ -163,6 +208,18 @@ struct DevicesView: View {
         }
         .sheet(item: $runCmdHost) { host in
             runCommandSheet(host)
+        }
+        .sheet(item: $editingGroup) { group in
+            SmartGroupEditor(group: group) { saved in
+                var groups = settings.smartGroups
+                if let idx = groups.firstIndex(where: { $0.id == saved.id }) {
+                    groups[idx] = saved
+                } else {
+                    groups.append(saved)
+                }
+                settings.smartGroups = groups
+                activeGroupID = saved.id
+            }
         }
         .alert("Stop enforcing this update?", isPresented: $confirmingEndEnforcement) {
             Button("Cancel", role: .cancel) {}
@@ -337,6 +394,7 @@ struct DevicesView: View {
             if loading { ProgressView().controlSize(.small) }
             Text("\(devices.count)")
                 .font(.caption).foregroundStyle(.secondary)
+            groupPicker
             if settings.mdmComplianceConfigured, !devices.isEmpty {
                 complianceSummary
             }
@@ -707,6 +765,54 @@ struct DevicesView: View {
         firstLoadDone = true
     }
 
+    // MARK: - Smart group picker
+
+    private var activeGroup: SmartGroup? {
+        guard let id = activeGroupID else { return nil }
+        return settings.smartGroups.first { $0.id == id }
+    }
+
+    private var groupPicker: some View {
+        Menu {
+            Button {
+                activeGroupID = nil
+            } label: {
+                Label("All Devices", systemImage: activeGroupID == nil ? "checkmark" : "")
+            }
+            if !settings.smartGroups.isEmpty {
+                Divider()
+                ForEach(settings.smartGroups) { g in
+                    Button {
+                        activeGroupID = g.id
+                    } label: {
+                        Label("\(g.name) (\(memberCount(g)))",
+                              systemImage: activeGroupID == g.id ? "checkmark" : "")
+                    }
+                }
+            }
+            Divider()
+            Button {
+                editingGroup = SmartGroup(name: "New Group",
+                                          rules: [SmartGroupRule(field: .nonCompliant)])
+            } label: { Label("New Group…", systemImage: "plus") }
+            if let g = activeGroup {
+                Button { editingGroup = g } label: { Label("Edit “\(g.name)”…", systemImage: "pencil") }
+                Button(role: .destructive) {
+                    settings.smartGroups.removeAll { $0.id == g.id }
+                    activeGroupID = nil
+                } label: { Label("Delete “\(g.name)”", systemImage: "trash") }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "line.3.horizontal.decrease.circle")
+                Text(activeGroup?.name ?? "All").font(.caption)
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Filter to a smart group — a live set of Macs matching rules you define")
+    }
+
     // MARK: - Compliance summary
 
     private var complianceSummary: some View {
@@ -865,7 +971,8 @@ struct DevicesView: View {
         let svc = KMFDDMService(settings: settings)
         var versions: [String: String] = [:]
         var fv: [String: String] = [:]
-        for d in devices {
+        var mdl: [String: String] = [:]
+        for d in allDevices {
             if let values = try? await svc.statusValues(
                 enrollmentID: d.id,
                 pathPrefix: ".StatusItems.device.operating-system.version"
@@ -878,9 +985,16 @@ struct DevicesView: View {
             ), let v = values.first?.value {
                 fv[d.id] = v
             }
+            if let values = try? await svc.statusValues(
+                enrollmentID: d.id,
+                pathPrefix: ".StatusItems.device.model.marketing-name"
+            ), let v = values.first?.value {
+                mdl[d.id] = v
+            }
         }
         osVersions = versions
         fileVault = fv
+        models = mdl
     }
 
     private static let localDateTime: DateFormatter = {
@@ -1506,6 +1620,58 @@ struct DevicesView: View {
             try? await Task.sleep(for: .seconds(5))
             if actionNotice == message { actionNotice = nil }
         }
+    }
+}
+
+// MARK: - Smart group editor
+
+/// Edit a smart group's name + rules. All rules must match (AND).
+private struct SmartGroupEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    @State var group: SmartGroup
+    let onSave: (SmartGroup) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Smart Group").font(.headline)
+            TextField("Group name", text: $group.name).textFieldStyle(.roundedBorder)
+            Text("A Mac is a member when it matches every rule below.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            VStack(spacing: 6) {
+                ForEach($group.rules) { $rule in
+                    HStack(spacing: 6) {
+                        Picker("", selection: $rule.field) {
+                            ForEach(SmartGroupRule.Field.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        .labelsHidden()
+                        if rule.field.needsValue {
+                            TextField(rule.field == .modelContains ? "MacBook" : "15.5",
+                                      text: $rule.value)
+                                .textFieldStyle(.roundedBorder).frame(width: 110)
+                        }
+                        Spacer()
+                        Button {
+                            group.rules.removeAll { $0.id == rule.id }
+                        } label: { Image(systemName: "minus.circle.fill").foregroundStyle(.secondary) }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            Button {
+                group.rules.append(SmartGroupRule(field: .fileVaultOff))
+            } label: { Label("Add Rule", systemImage: "plus") }
+            .buttonStyle(.link)
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Save") { onSave(group); dismiss() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(group.name.trimmingCharacters(in: .whitespaces).isEmpty || group.rules.isEmpty)
+            }
+        }
+        .padding(20).frame(width: 480)
     }
 }
 

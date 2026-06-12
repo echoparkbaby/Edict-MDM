@@ -545,6 +545,21 @@ final class SettingsStore: ObservableObject {
         mdmRequireFileVault || !mdmMinOSVersion.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
+    /// Smart groups (dynamic device groups). JSON in @AppStorage.
+    @AppStorage("mdmSmartGroupsRaw") private var smartGroupsRaw: String = "[]"
+    var smartGroups: [SmartGroup] {
+        get {
+            guard let data = smartGroupsRaw.data(using: .utf8),
+                  let arr = try? JSONDecoder().decode([SmartGroup].self, from: data)
+            else { return [] }
+            return arr
+        }
+        set {
+            let data = (try? JSONEncoder().encode(newValue)) ?? Data("[]".utf8)
+            smartGroupsRaw = String(data: data, encoding: .utf8) ?? "[]"
+        }
+    }
+
     /// PayloadIdentifier of the enrollment profile installed on managed
     /// Macs. "Remove from MDM" sends a RemoveProfile for this identifier —
     /// pulling the enrollment profile unenrolls the device.
