@@ -19,6 +19,8 @@ struct ProfilesView: View {
         case gatekeeper = "Gatekeeper"
         case loginWindow = "Login Window"
         case certificate = "Root Certificate"
+        case pppc = "Privacy (PPPC)"
+        case singleApp = "Single App Mode"
         case munki = "Munki (BlueConnect)"
         case timeMachine = "Time Machine"
         case dns = "Encrypted DNS"
@@ -29,6 +31,16 @@ struct ProfilesView: View {
         case passcode = "Password Policy"
         case custom = "Custom Profile"
         var id: String { rawValue }
+        /// Which Apple platforms this template applies to (shown as a badge).
+        var platforms: String {
+            switch self {
+            case .wifi, .certificate, .dns, .restrictions: return "macOS · iOS · tvOS"
+            case .passcode: return "macOS · iOS"
+            case .singleApp: return "iOS · tvOS"
+            case .custom: return "any"
+            default: return "macOS"
+            }
+        }
         var icon: String {
             switch self {
             case .fileVault: return "lock.shield"
@@ -39,6 +51,8 @@ struct ProfilesView: View {
             case .gatekeeper: return "checkmark.shield"
             case .loginWindow: return "person.crop.rectangle"
             case .certificate: return "seal"
+            case .pppc: return "hand.raised.circle"
+            case .singleApp: return "apps.iphone"
             case .munki: return "shippingbox"
             case .timeMachine: return "clock.arrow.circlepath"
             case .dns: return "network.badge.shield.half.filled"
@@ -60,6 +74,8 @@ struct ProfilesView: View {
             case .gatekeeper: return "Only allow signed apps to run; App Store + identified developers."
             case .loginWindow: return "Harden the login window — disable guest, hide admin users."
             case .certificate: return "Install and trust a root CA from a pasted PEM certificate."
+            case .pppc: return "Pre-grant an app Full Disk Access, Accessibility, Screen Recording, etc."
+            case .singleApp: return "Lock a device to one app — kiosk mode for Apple TV / iPad."
             case .munki: return "Point the Mac at your BlueConnect Munki repo for managed software."
             case .timeMachine: return "Managed Time Machine backup destination and schedule."
             case .dns: return "Encrypted DNS (DoH/DoT) — route lookups through a private resolver."
@@ -124,6 +140,19 @@ struct ProfilesView: View {
     // KEXT
     @State private var kextTeamIDs = ""
     @State private var kextUserOverrides = false
+    // PPPC
+    @State private var pppcID = ""
+    @State private var pppcIsPath = false
+    @State private var pppcCodeReq = ""
+    @State private var pppcFDA = true
+    @State private var pppcAccessibility = false
+    @State private var pppcScreen = false
+    @State private var pppcInput = false
+    @State private var pppcAuth = "Allow"
+    // Single App Mode
+    @State private var singleAppID = ""
+    @State private var singleDisableAutoLock = true
+    @State private var singleDisableTouch = false
     // Drag-drop feedback
     @State private var dropHighlight = false
 
@@ -234,7 +263,13 @@ struct ProfilesView: View {
                     ForEach(sortedTemplates) { t in
                         Label {
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(t.rawValue)
+                                HStack(spacing: 4) {
+                                    Text(t.rawValue)
+                                    Text(t.platforms).font(.caption2)
+                                        .padding(.horizontal, 4).padding(.vertical, 1)
+                                        .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                                        .foregroundStyle(.secondary)
+                                }
                                 Text(t.blurb).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                             }
                         } icon: { Image(systemName: t.icon) }
@@ -504,6 +539,41 @@ struct ProfilesView: View {
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             .formStyle(.columns)
+        case .pppc:
+            Form {
+                TextField(pppcIsPath ? "App path" : "App bundle ID", text: $pppcID,
+                          prompt: Text(pppcIsPath ? "/Applications/App.app" : "com.example.app"))
+                Picker("Identifier type", selection: $pppcIsPath) {
+                    Text("Bundle ID").tag(false); Text("Path").tag(true)
+                }
+                Picker("Authorization", selection: $pppcAuth) {
+                    Text("Allow").tag("Allow")
+                    Text("Allow (user can change)").tag("AllowStandardUserToSetSystemService")
+                    Text("Deny").tag("Deny")
+                }
+                Toggle("Full Disk Access", isOn: $pppcFDA)
+                Toggle("Accessibility", isOn: $pppcAccessibility)
+                Toggle("Screen Recording", isOn: $pppcScreen)
+                Toggle("Input Monitoring", isOn: $pppcInput)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Code requirement").font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: $pppcCodeReq)
+                        .font(.caption2.monospaced()).frame(minHeight: 60)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1))
+                    Text("Required. Get it with:  codesign -dr - /Applications/App.app  (copy the line after “designated => ”).")
+                        .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .formStyle(.columns)
+        case .singleApp:
+            Form {
+                TextField("App bundle ID", text: $singleAppID, prompt: Text("com.apple.TVRemote"))
+                Toggle("Disable auto-lock", isOn: $singleDisableAutoLock)
+                Toggle("Disable touch", isOn: $singleDisableTouch)
+                Text("Locks the device to this one app (autonomous single-app / kiosk mode). For Apple TV or a dedicated iPad.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .formStyle(.columns)
         case .munki:
             Form {
                 HStack {
@@ -644,6 +714,11 @@ struct ProfilesView: View {
         case .certificate: return certPEM.contains("BEGIN CERTIFICATE")
         case .munki: return !munkiRepoURL.trimmingCharacters(in: .whitespaces).isEmpty
         case .dns: return !dnsServer.trimmingCharacters(in: .whitespaces).isEmpty
+        case .singleApp: return !singleAppID.trimmingCharacters(in: .whitespaces).isEmpty
+        case .pppc:
+            return !pppcID.trimmingCharacters(in: .whitespaces).isEmpty
+                && !pppcCodeReq.trimmingCharacters(in: .whitespaces).isEmpty
+                && (pppcFDA || pppcAccessibility || pppcScreen || pppcInput)
         default: return true
         }
     }
@@ -696,6 +771,20 @@ struct ProfilesView: View {
             let teams = kextTeamIDs.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
             return (ProfilePayloads.kernelExtensions(teamIdentifiers: teams,
                                                      allowUserOverrides: kextUserOverrides), "Kernel Extensions")
+        case .pppc:
+            var services: [String] = []
+            if pppcFDA { services.append("SystemPolicyAllFiles") }
+            if pppcAccessibility { services.append("Accessibility") }
+            if pppcScreen { services.append("ScreenCapture") }
+            if pppcInput { services.append("ListenEvent") }
+            return (ProfilePayloads.pppc(identifier: pppcID.trimmingCharacters(in: .whitespaces),
+                                         identifierType: pppcIsPath ? "path" : "bundleID",
+                                         codeRequirement: pppcCodeReq.trimmingCharacters(in: .whitespaces),
+                                         services: services, authorization: pppcAuth), "Privacy (PPPC)")
+        case .singleApp:
+            return (ProfilePayloads.singleAppMode(bundleID: singleAppID.trimmingCharacters(in: .whitespaces),
+                                                  disableAutoLock: singleDisableAutoLock,
+                                                  disableTouch: singleDisableTouch), "Single App Mode")
         case .wifi:
             return (ProfilePayloads.wifi(ssid: ssid, password: wifiPassword,
                                          hidden: wifiHidden, security: wifiSecurity),

@@ -192,6 +192,43 @@ enum ProfilePayloads {
                        payloads: [mcx])
     }
 
+    /// `com.apple.TCC.configuration-profile-policy` — Privacy Preferences
+    /// Policy Control (PPPC). Pre-grant an app access to protected
+    /// services (Full Disk Access, Accessibility, Screen Recording, …)
+    /// without the user prompt. CodeRequirement comes from
+    /// `codesign -dr - /Applications/App.app`.
+    static func pppc(identifier: String, identifierType: String, codeRequirement: String,
+                     services: [String], authorization: String) -> Data {
+        var entries: [String: Any] = [:]
+        for svc in services {
+            entries[svc] = [[
+                "Identifier": identifier,
+                "IdentifierType": identifierType,
+                "CodeRequirement": codeRequirement,
+                "Authorization": authorization,
+            ]]
+        }
+        var tcc: [String: Any] = base("com.apple.TCC.configuration-profile-policy",
+                                      displayName: "Privacy Preferences")
+        tcc["Services"] = entries
+        return profile(displayName: "Privacy: \(identifier)",
+                       identifier: "xyz.hellocomputer.edict.pppc.\(identifier)", payloads: [tcc])
+    }
+
+    /// `com.apple.app.lock` — Single App Mode (autonomous kiosk). Locks
+    /// the device to one app; great for Apple TV / iPad kiosks.
+    static func singleAppMode(bundleID: String, disableAutoLock: Bool, disableTouch: Bool) -> Data {
+        var options: [String: Any] = [:]
+        if disableAutoLock { options["DisableAutoLock"] = true }
+        if disableTouch { options["DisableTouch"] = true }
+        var app: [String: Any] = ["Identifier": bundleID]
+        if !options.isEmpty { app["Options"] = options }
+        var lock: [String: Any] = base("com.apple.app.lock", displayName: "Single App Mode")
+        lock["App"] = app
+        return profile(displayName: "Single App Mode",
+                       identifier: "xyz.hellocomputer.edict.singleapp", payloads: [lock])
+    }
+
     // MARK: - iMazing-catalog–derived templates
 
     /// `com.apple.MCX.TimeMachine` — managed Time Machine backup.
