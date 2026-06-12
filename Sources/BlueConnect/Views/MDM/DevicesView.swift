@@ -29,6 +29,24 @@ struct DevicesView: View {
     @State private var reportingSetName = "default"
     @State private var enablingReporting = false
 
+    // Update rollout: the enforced target (from Edict's enforcement
+    // declarations) and each device's reported OS version.
+    @State private var updateTarget: UpdateTarget?
+    @State private var osVersions: [String: String] = [:]
+
+    struct UpdateTarget: Equatable {
+        let version: String
+        let deadline: Date?
+        let declarationID: String
+    }
+
+    private enum Compliance {
+        case compliant          // reported version >= target
+        case behind             // below target, deadline still ahead
+        case overdue            // below target, deadline passed
+        case unreported         // no OS version reported (reporting off)
+    }
+
     // Per-action feedback
     @State private var busyDeviceID: String?
     @State private var actionNotice: String?
@@ -158,6 +176,9 @@ struct DevicesView: View {
             if loading { ProgressView().controlSize(.small) }
             Text("\(devices.count)")
                 .font(.caption).foregroundStyle(.secondary)
+            if let target = updateTarget, !devices.isEmpty {
+                rolloutSummary(target)
+            }
             Spacer()
             if let notice = actionNotice {
                 Text(notice).font(.caption).foregroundStyle(.green)
@@ -209,6 +230,9 @@ struct DevicesView: View {
                 .textSelection(.enabled)
             }
             Spacer()
+            if updateTarget != nil {
+                complianceChip(enr)
+            }
             if busyDeviceID == enr.id {
                 ProgressView().controlSize(.small)
             }
@@ -249,6 +273,124 @@ struct DevicesView: View {
         }
         .padding(.vertical, 3)
     }
+
+    // MARK: - Update rollout
+
+    private func rolloutSummary(_ target: UpdateTarget) -> some View {
+        let states = devices.map { compliance(for: $0) }
+        let done = states.filter { if case .compliant = $0 { return true } else { return false } }.count
+        let unreported = states.filter { if case .unreported = $0 { return true } else { return false } }.count
+        var text = "Target macOS \(target.version)"
+        if let d = target.deadline {
+            text += " by \(d.formatted(date: .abbreviated, time: .shortened))"
+        }
+        text += " — \(done)/\(devices.count) updated"
+        if unreported > 0 { text += ", \(unreported) not reporting" }
+        return Text(text)
+            .font(.caption)
+            .foregroundStyle(done == devices.count ? Color.green : Color.secondary)
+            .help("From the highest version enforced via Enforce Update…. Devices report their own OS version when Device Reporting is on.")
+    }
+
+    @ViewBuilder
+    private func complianceChip(_ enr: MDMEnrollment) -> some View {
+        let version = osVersions[enr.id]
+        switch compliance(for: enr) {
+        case .compliant:
+            chip(version ?? "✓", color: .green,
+                 help: "On or past the enforced version")
+        case .behind:
+            chip("\(version ?? "?") → \(updateTarget?.version ?? "")", color: .orange,
+                 help: "Below the enforced version — deadline hasn't passed yet")
+        case .overdue:
+            chip("\(version ?? "?") → \(updateTarget?.version ?? "")", color: .red,
+                 help: "Below the enforced version and past the deadline")
+        case .unreported:
+            chip("no report", color: .secondary,
+                 help: "This device isn't reporting its OS version — enable Device Reporting")
+        }
+    }
+
+    private func chip(_ text: String, color: Color, help: String) -> some View {
+        Text(text)
+            .font(.caption2.monospaced())
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Capsule().fill(color.opacity(0.16)))
+            .foregroundStyle(color)
+            .help(help)
+    }
+
+    private func compliance(for enr: MDMEnrollment) -> Compliance {
+        guard let target = updateTarget else { return .unreported }
+        guard let version = osVersions[enr.id] else { return .unreported }
+        if versionAtLeast(version, target.version) { return .compliant }
+        if let deadline = target.deadline, deadline < Date() { return .overdue }
+        return .behind
+    }
+
+    /// Numeric segment-wise version compare: 15.10 > 15.5.
+    private func versionAtLeast(_ v: String, _ target: String) -> Bool {
+        let a = v.split(separator: ".").map { Int($0) ?? 0 }
+        let b = target.split(separator: ".").map { Int($0) ?? 0 }
+        for i in 0..<max(a.count, b.count) {
+            let x = i < a.count ? a[i] : 0
+            let y = i < b.count ? b[i] : 0
+            if x != y { return x > y }
+        }
+        return true
+    }
+
+    /// Read the enforced target from Edict's own enforcement declarations
+    /// (ids `com.hellocomputer.edict.update-*`). Multiple enforcements →
+    /// the highest version wins; set membership is intentionally ignored
+    /// for this fleet-level summary.
+    @MainActor
+    private func loadUpdateTarget() async {
+        do {
+            let svc = KMFDDMService(settings: settings)
+            let ids = try await svc.listDeclarations()
+                .filter { $0.hasPrefix("com.hellocomputer.edict.update-") && !$0.hasSuffix(".activation") }
+            var best: UpdateTarget?
+            for id in ids {
+                let raw = try await svc.declaration(id: id)
+                guard let obj = try? JSONSerialization.jsonObject(with: raw) as? [String: Any],
+                      let payload = obj["Payload"] as? [String: Any],
+                      let version = payload["TargetOSVersion"] as? String
+                else { continue }
+                let deadline = (payload["TargetLocalDateTime"] as? String)
+                    .flatMap { Self.localDateTime.date(from: $0) }
+                if best == nil || !versionAtLeast(best!.version, version) {
+                    best = UpdateTarget(version: version, deadline: deadline, declarationID: id)
+                }
+            }
+            updateTarget = best
+        } catch {
+            updateTarget = nil
+        }
+    }
+
+    /// One reported OS version per device — feeds the chips and summary.
+    @MainActor
+    private func loadOSVersions() async {
+        let svc = KMFDDMService(settings: settings)
+        var result: [String: String] = [:]
+        for d in devices {
+            if let values = try? await svc.statusValues(
+                enrollmentID: d.id,
+                pathPrefix: ".StatusItems.device.operating-system.version"
+            ), let v = values.first?.value {
+                result[d.id] = v
+            }
+        }
+        osVersions = result
+    }
+
+    private static let localDateTime: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
 
     // MARK: - Device detail (live status reported by the device)
 
@@ -527,6 +669,10 @@ struct DevicesView: View {
                 rows = try await api.list()
             }
             enrollments = rows
+            // Rollout data rides along with every refresh: the enforced
+            // target + each device's reported OS version.
+            await loadUpdateTarget()
+            await loadOSVersions()
         } catch {
             loadError = error.localizedDescription
         }
