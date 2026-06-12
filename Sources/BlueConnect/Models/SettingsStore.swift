@@ -575,6 +575,12 @@ final class SettingsStore: ObservableObject {
     /// (e.g. `https://mdm.example.com`). Used only to generate
     /// enrollment profiles; `/mdm` and `/scep` are appended.
     @AppStorage("mdmPublicURL") var mdmPublicURL: String = ""
+    /// Enrollment-profile personalization (shown to the user installing it).
+    @AppStorage("mdmProfileDisplayName") var mdmProfileDisplayName: String = "Edict MDM Enrollment"
+    @AppStorage("mdmProfileOrganization") var mdmProfileOrganization: String = ""
+    @AppStorage("mdmProfileDescription") var mdmProfileDescription: String = ""
+    @AppStorage("mdmProfileConsentText") var mdmProfileConsentText: String = ""
+
     /// SCEP shared-secret challenge (the `-challenge` the SCEP server
     /// runs with). Goes into the generated enrollment profile. Keychain.
     @Published var scepChallenge: String = ""

@@ -192,6 +192,65 @@ enum ProfilePayloads {
                        payloads: [mcx])
     }
 
+    // MARK: - iMazing-catalog–derived templates
+
+    /// `com.apple.MCX.TimeMachine` — managed Time Machine backup.
+    static func timeMachine(destinationURL: String, autoBackup: Bool,
+                            allVolumes: Bool, skipSystemFiles: Bool) -> Data {
+        var tm: [String: Any] = base("com.apple.MCX.TimeMachine", displayName: "Time Machine")
+        if !destinationURL.isEmpty { tm["BackupDestURL"] = destinationURL }
+        tm["AutoBackup"] = autoBackup
+        tm["BackupAllVolumes"] = allVolumes
+        tm["BackupSkipSys"] = skipSystemFiles
+        return profile(displayName: "Time Machine",
+                       identifier: "xyz.hellocomputer.edict.timemachine", payloads: [tm])
+    }
+
+    /// `com.apple.dnsSettings.managed` — encrypted DNS (DoH/DoT).
+    static func encryptedDNS(useHTTPS: Bool, server: String) -> Data {
+        var dns: [String: Any] = base("com.apple.dnsSettings.managed", displayName: "Encrypted DNS")
+        var s: [String: Any] = ["DNSProtocol": useHTTPS ? "HTTPS" : "TLS"]
+        if useHTTPS { s["ServerURL"] = server } else { s["ServerName"] = server }
+        dns["DNSSettings"] = s
+        return profile(displayName: "Encrypted DNS",
+                       identifier: "xyz.hellocomputer.edict.dns", payloads: [dns])
+    }
+
+    /// `com.apple.dock` — Dock appearance/behavior.
+    static func dock(orientation: String, autohide: Bool, tileSize: Int, showRecents: Bool) -> Data {
+        var d: [String: Any] = base("com.apple.dock", displayName: "Dock")
+        d["orientation"] = orientation     // "left" / "bottom" / "right"
+        d["autohide"] = autohide
+        d["tilesize"] = tileSize
+        d["show-recents"] = showRecents
+        return profile(displayName: "Dock",
+                       identifier: "xyz.hellocomputer.edict.dock", payloads: [d])
+    }
+
+    /// `com.apple.finder` — Finder desktop + visibility prefs.
+    static func finder(showDrivesOnDesktop: Bool, showAllFiles: Bool, warnOnEmptyTrash: Bool) -> Data {
+        var f: [String: Any] = base("com.apple.finder", displayName: "Finder")
+        f["ShowHardDrivesOnDesktop"] = showDrivesOnDesktop
+        f["ShowExternalHardDrivesOnDesktop"] = showDrivesOnDesktop
+        f["ShowRemovableMediaOnDesktop"] = showDrivesOnDesktop
+        f["ShowMountedServersOnDesktop"] = showDrivesOnDesktop
+        f["AppleShowAllFiles"] = showAllFiles
+        f["WarnOnEmptyTrash"] = warnOnEmptyTrash
+        return profile(displayName: "Finder",
+                       identifier: "xyz.hellocomputer.edict.finder", payloads: [f])
+    }
+
+    /// `com.apple.syspolicy.kernel-extension-policy` — allow third-party
+    /// kernel extensions by developer Team ID (security tools, drivers).
+    static func kernelExtensions(teamIdentifiers: [String], allowUserOverrides: Bool) -> Data {
+        var k: [String: Any] = base("com.apple.syspolicy.kernel-extension-policy",
+                                    displayName: "Kernel Extensions")
+        k["AllowUserOverrides"] = allowUserOverrides
+        if !teamIdentifiers.isEmpty { k["AllowedTeamIdentifiers"] = teamIdentifiers }
+        return profile(displayName: "Kernel Extensions",
+                       identifier: "xyz.hellocomputer.edict.kext", payloads: [k])
+    }
+
     /// Validate + normalize a pasted profile. Accepts a full mobileconfig
     /// (returns it as-is) — used for the "Custom" template. Throws if it
     /// isn't a configuration-profile plist.

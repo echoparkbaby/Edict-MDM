@@ -22,6 +22,11 @@ enum EnrollmentProfileExporter {
         let challenge: String
         let topic: String           // com.apple.mgmt.External.<uuid>
         let profileIdentifier: String
+        var displayName: String = "Edict MDM Enrollment"
+        var organization: String = ""
+        var profileDescription: String = ""
+        /// Consent text shown to the user at install time (optional).
+        var consentText: String = ""
     }
 
     /// Build the unsigned profile XML. UUIDs are derived deterministically
@@ -44,6 +49,19 @@ enum EnrollmentProfileExporter {
                 .replacingOccurrences(of: "<", with: "&lt;")
                 .replacingOccurrences(of: ">", with: "&gt;")
         }
+
+        // Optional top-level personalization keys.
+        var extras = ""
+        if !i.organization.isEmpty {
+            extras += "\n\t<key>PayloadOrganization</key>\n\t<string>\(esc(i.organization))</string>"
+        }
+        if !i.profileDescription.isEmpty {
+            extras += "\n\t<key>PayloadDescription</key>\n\t<string>\(esc(i.profileDescription))</string>"
+        }
+        if !i.consentText.isEmpty {
+            extras += "\n\t<key>ConsentText</key>\n\t<dict>\n\t\t<key>default</key>\n\t\t<string>\(esc(i.consentText))</string>\n\t</dict>"
+        }
+        let displayName = i.displayName.isEmpty ? "Edict MDM Enrollment" : i.displayName
 
         let xml = """
         <?xml version="1.0" encoding="UTF-8"?>
@@ -109,7 +127,7 @@ enum EnrollmentProfileExporter {
         \t\t</dict>
         \t</array>
         \t<key>PayloadDisplayName</key>
-        \t<string>Edict MDM Enrollment</string>
+        \t<string>\(esc(displayName))</string>
         \t<key>PayloadIdentifier</key>
         \t<string>\(esc(i.profileIdentifier))</string>
         \t<key>PayloadType</key>
@@ -117,7 +135,7 @@ enum EnrollmentProfileExporter {
         \t<key>PayloadUUID</key>
         \t<string>\(topUUID)</string>
         \t<key>PayloadVersion</key>
-        \t<integer>1</integer>
+        \t<integer>1</integer>\(extras)
         </dict>
         </plist>
         """

@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Edict MDM configuration-profile library — the center pane for the
 /// sidebar's Device Management → Profiles row. Pick a template, fill a
@@ -18,6 +19,11 @@ struct ProfilesView: View {
         case loginWindow = "Login Window"
         case certificate = "Root Certificate"
         case munki = "Munki (BlueConnect)"
+        case timeMachine = "Time Machine"
+        case dns = "Encrypted DNS"
+        case dock = "Dock"
+        case finder = "Finder"
+        case kext = "Kernel Extensions"
         case wifi = "Wi-Fi Network"
         case passcode = "Password Policy"
         case custom = "Custom Profile"
@@ -33,6 +39,11 @@ struct ProfilesView: View {
             case .loginWindow: return "person.crop.rectangle"
             case .certificate: return "seal"
             case .munki: return "shippingbox"
+            case .timeMachine: return "clock.arrow.circlepath"
+            case .dns: return "network.badge.shield.half.filled"
+            case .dock: return "dock.rectangle"
+            case .finder: return "macwindow"
+            case .kext: return "puzzlepiece.extension"
             case .wifi: return "wifi"
             case .passcode: return "lock.rectangle"
             case .custom: return "doc.text"
@@ -49,9 +60,14 @@ struct ProfilesView: View {
             case .loginWindow: return "Harden the login window — disable guest, hide admin users."
             case .certificate: return "Install and trust a root CA from a pasted PEM certificate."
             case .munki: return "Point the Mac at your BlueConnect Munki repo for managed software."
+            case .timeMachine: return "Managed Time Machine backup destination and schedule."
+            case .dns: return "Encrypted DNS (DoH/DoT) — route lookups through a private resolver."
+            case .dock: return "Dock position, size, auto-hide, recents."
+            case .finder: return "Show drives on the desktop, reveal hidden files, trash warnings."
+            case .kext: return "Allow third-party kernel extensions by developer Team ID."
             case .wifi: return "Auto-join Wi-Fi network pushed to the Mac's system store."
             case .passcode: return "Login password requirements (length, complexity, lock timeout)."
-            case .custom: return "Paste any .mobileconfig you already have and deploy it."
+            case .custom: return "Paste or drag in any .mobileconfig — covers every payload type."
             }
         }
     }
@@ -87,6 +103,28 @@ struct ProfilesView: View {
     // Munki
     @State private var munkiRepoURL = ""
     @State private var munkiClientID = ""
+    // Time Machine
+    @State private var tmDest = ""
+    @State private var tmAuto = true
+    @State private var tmAllVolumes = false
+    @State private var tmSkipSys = true
+    // DNS
+    @State private var dnsHTTPS = true
+    @State private var dnsServer = ""
+    // Dock
+    @State private var dockOrientation = "bottom"
+    @State private var dockAutohide = false
+    @State private var dockTileSize = 48
+    @State private var dockRecents = true
+    // Finder
+    @State private var finderShowDrives = true
+    @State private var finderShowAll = false
+    @State private var finderWarnTrash = true
+    // KEXT
+    @State private var kextTeamIDs = ""
+    @State private var kextUserOverrides = false
+    // Drag-drop feedback
+    @State private var dropHighlight = false
 
     // Wi-Fi
     @State private var ssid = ""
@@ -131,6 +169,17 @@ struct ProfilesView: View {
                 HSplitView {
                     catalog.frame(minWidth: 200, idealWidth: 220, maxWidth: 280)
                     editor.frame(minWidth: 380, maxWidth: .infinity)
+                }
+                .overlay(alignment: .top) {
+                    if dropHighlight {
+                        Text("Drop a .mobileconfig to load it")
+                            .font(.caption).padding(8)
+                            .background(Capsule().fill(Color.accentColor.opacity(0.85)))
+                            .foregroundStyle(.white).padding(.top, 8)
+                    }
+                }
+                .onDrop(of: [.fileURL, .data], isTargeted: $dropHighlight) { providers in
+                    handleDrop(providers)
                 }
             }
         }
@@ -269,6 +318,51 @@ struct ProfilesView: View {
                     .overlay(RoundedRectangle(cornerRadius: 4)
                         .stroke(Color.secondary.opacity(0.25), lineWidth: 1))
             }
+        case .timeMachine:
+            Form {
+                TextField("Backup destination URL", text: $tmDest,
+                          prompt: Text(verbatim: "smb://nas.local/backups"))
+                Toggle("Back up automatically", isOn: $tmAuto)
+                Toggle("Back up all volumes", isOn: $tmAllVolumes)
+                Toggle("Skip system files", isOn: $tmSkipSys)
+            }
+            .formStyle(.columns)
+        case .dns:
+            Form {
+                Picker("Protocol", selection: $dnsHTTPS) {
+                    Text("DNS over HTTPS").tag(true)
+                    Text("DNS over TLS").tag(false)
+                }
+                TextField(dnsHTTPS ? "Server URL" : "Server name", text: $dnsServer,
+                          prompt: Text(dnsHTTPS ? "https://dns.example.com/dns-query" : "dns.example.com"))
+            }
+            .formStyle(.columns)
+        case .dock:
+            Form {
+                Picker("Position", selection: $dockOrientation) {
+                    Text("Bottom").tag("bottom"); Text("Left").tag("left"); Text("Right").tag("right")
+                }
+                Toggle("Auto-hide", isOn: $dockAutohide)
+                Stepper("Icon size: \(dockTileSize)", value: $dockTileSize, in: 16...128, step: 4)
+                Toggle("Show recent apps", isOn: $dockRecents)
+            }
+            .formStyle(.columns)
+        case .finder:
+            Form {
+                Toggle("Show drives on the desktop", isOn: $finderShowDrives)
+                Toggle("Show hidden files", isOn: $finderShowAll)
+                Toggle("Warn before emptying Trash", isOn: $finderWarnTrash)
+            }
+            .formStyle(.columns)
+        case .kext:
+            Form {
+                TextField("Allowed Team IDs (comma-separated)", text: $kextTeamIDs,
+                          prompt: Text("ABCDE12345, FGHIJ67890"))
+                Toggle("Allow users to approve more", isOn: $kextUserOverrides)
+                Text("Pre-approves kernel extensions from these developer Team IDs so security tools and drivers load without a user prompt.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .formStyle(.columns)
         case .munki:
             Form {
                 HStack {
@@ -408,6 +502,7 @@ struct ProfilesView: View {
         case .custom: return !customXML.trimmingCharacters(in: .whitespaces).isEmpty
         case .certificate: return certPEM.contains("BEGIN CERTIFICATE")
         case .munki: return !munkiRepoURL.trimmingCharacters(in: .whitespaces).isEmpty
+        case .dns: return !dnsServer.trimmingCharacters(in: .whitespaces).isEmpty
         default: return true
         }
     }
@@ -442,6 +537,24 @@ struct ProfilesView: View {
             return (ProfilePayloads.munki(repoURL: munkiRepoURL.trimmingCharacters(in: .whitespaces),
                                           clientIdentifier: munkiClientID.trimmingCharacters(in: .whitespaces)),
                     "Munki")
+        case .timeMachine:
+            return (ProfilePayloads.timeMachine(destinationURL: tmDest.trimmingCharacters(in: .whitespaces),
+                                                autoBackup: tmAuto, allVolumes: tmAllVolumes,
+                                                skipSystemFiles: tmSkipSys), "Time Machine")
+        case .dns:
+            return (ProfilePayloads.encryptedDNS(useHTTPS: dnsHTTPS,
+                                                 server: dnsServer.trimmingCharacters(in: .whitespaces)), "Encrypted DNS")
+        case .dock:
+            return (ProfilePayloads.dock(orientation: dockOrientation, autohide: dockAutohide,
+                                         tileSize: dockTileSize, showRecents: dockRecents), "Dock")
+        case .finder:
+            return (ProfilePayloads.finder(showDrivesOnDesktop: finderShowDrives,
+                                           showAllFiles: finderShowAll,
+                                           warnOnEmptyTrash: finderWarnTrash), "Finder")
+        case .kext:
+            let teams = kextTeamIDs.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            return (ProfilePayloads.kernelExtensions(teamIdentifiers: teams,
+                                                     allowUserOverrides: kextUserOverrides), "Kernel Extensions")
         case .wifi:
             return (ProfilePayloads.wifi(ssid: ssid, password: wifiPassword,
                                          hidden: wifiHidden, security: wifiSecurity),
@@ -454,6 +567,21 @@ struct ProfilesView: View {
         case .custom:
             return (try ProfilePayloads.custom(xml: customXML), "Custom profile")
         }
+    }
+
+    /// Accept a dropped .mobileconfig: load its XML into the Custom
+    /// template so it can be reviewed and deployed.
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first else { return false }
+        _ = provider.loadObject(ofClass: URL.self) { url, _ in
+            guard let url, let text = try? String(contentsOf: url, encoding: .utf8) else { return }
+            DispatchQueue.main.async {
+                customXML = text
+                template = .custom
+                result = "Loaded \(url.lastPathComponent) — review and deploy."
+            }
+        }
+        return true
     }
 
     @MainActor
