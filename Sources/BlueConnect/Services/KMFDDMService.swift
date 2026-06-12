@@ -56,6 +56,27 @@ struct KMFDDMService {
         _ = try await request("v1/declarations/\(pathEsc(id))/touch", method: "POST")
     }
 
+    /// `DELETE /v1/declarations/<id>` — remove a declaration.
+    func deleteDeclaration(id: String) async throws {
+        _ = try await request("v1/declarations/\(pathEsc(id))", method: "DELETE")
+    }
+
+    /// `GET /v1/declaration-sets/<id>` → names of the sets containing this
+    /// declaration. Empty/`null` body → no sets.
+    func setsForDeclaration(id: String) async throws -> [String] {
+        let (data, _) = try await request("v1/declaration-sets/\(pathEsc(id))")
+        if let sets = try? JSONDecoder().decode([String].self, from: data) { return sets }
+        return []
+    }
+
+    /// `DELETE /v1/set-declarations/<set>?declaration=<id>` — pull a
+    /// declaration out of a set (notifies affected enrollments).
+    func removeDeclaration(_ declaration: String, fromSet set: String) async throws {
+        _ = try await request("v1/set-declarations/\(pathEsc(set))",
+                              method: "DELETE",
+                              query: [URLQueryItem(name: "declaration", value: declaration)])
+    }
+
     /// `PUT /v1/set-declarations/<set>?declaration=<id>` — add a declaration
     /// to a set.
     func addDeclaration(_ declaration: String, toSet set: String) async throws {

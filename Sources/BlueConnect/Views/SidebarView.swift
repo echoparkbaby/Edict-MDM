@@ -38,6 +38,10 @@ struct SidebarView: View {
                         Divider().padding(.vertical, 6)
                         TailscaleSection()
                     }
+                    if settings.mdmEnabled {
+                        Divider().padding(.vertical, 6)
+                        mdmGroup
+                    }
                     Divider().padding(.vertical, 6)
                     ScannedSection()
                     if settings.isMunkiRepoConfigured && !settings.sidebarMunkiHidden {
@@ -239,6 +243,33 @@ struct SidebarView: View {
                         }
                 }
             }
+        }
+    }
+
+    // MARK: - Device Management (Edict MDM)
+
+    /// Shown only when Settings → Device Management is enabled. Selecting
+    /// the row swaps the center pane to the declarations browser — there's
+    /// no host count to show, so this doesn't reuse sidebarRow.
+    private var mdmGroup: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Device Management").font(.caption).bold().foregroundStyle(.secondary)
+                .padding(.bottom, 2)
+            let isSelected = selection == .mdmDeclarations
+            Button { selection = .mdmDeclarations } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "doc.badge.gearshape")
+                        .foregroundStyle(isSelected ? .white : Color.accentColor)
+                        .frame(width: 16)
+                    Text("Declarations").lineLimit(1)
+                    Spacer(minLength: 4)
+                }
+                .padding(.horizontal, 8).padding(.vertical, 5)
+                .background(RoundedRectangle(cornerRadius: 6).fill(isSelected ? Color.accentColor : Color.clear))
+                .foregroundStyle(isSelected ? .white : .primary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
     }
 

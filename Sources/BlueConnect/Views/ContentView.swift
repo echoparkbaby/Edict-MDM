@@ -132,6 +132,7 @@ struct ContentView: View {
         case .inactive:      result = result.filter { !$0.active }
         case .uncategorized: result = result.filter { ($0.category ?? "").isEmpty }
         case .category(let c): result = result.filter { ($0.category ?? "") == c }
+        case .mdmDeclarations: break  // center pane shows DeclarationsView, not the table
         }
         if !searchText.isEmpty {
             let q = searchText
@@ -721,10 +722,14 @@ struct ContentView: View {
             )
 
             VStack(spacing: 0) {
-                topBar
-                Divider()
-                hostsTable
-                statusBar
+                if sidebarFilter == .mdmDeclarations {
+                    DeclarationsView()
+                } else {
+                    topBar
+                    Divider()
+                    hostsTable
+                    statusBar
+                }
             }
             .frame(minWidth: 540, maxWidth: .infinity, maxHeight: .infinity)
 
@@ -1971,6 +1976,7 @@ struct ContentView: View {
         case "active": return .active
         case "inactive": return .inactive
         case "uncat": return .uncategorized
+        case "mdm:decl": return .mdmDeclarations
         default:
             if raw.hasPrefix("cat:") { return .category(String(raw.dropFirst(4))) }
             return .all
@@ -1986,6 +1992,7 @@ struct ContentView: View {
         case .inactive: return "inactive"
         case .uncategorized: return "uncat"
         case .category(let c): return "cat:\(c)"
+        case .mdmDeclarations: return "mdm:decl"
         }
     }
 }
