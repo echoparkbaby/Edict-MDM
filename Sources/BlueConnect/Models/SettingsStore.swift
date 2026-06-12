@@ -541,6 +541,11 @@ final class SettingsStore: ObservableObject {
     /// pulling the enrollment profile unenrolls the device.
     @AppStorage("mdmEnrollmentProfileID") var mdmEnrollmentProfileID: String = "xyz.hellocomputer.blueconnectmdm"
 
+    /// Base URL of the enrollments sidecar (read-only list of enrolled
+    /// devices straight from NanoMDM's database — NanoMDM itself has no
+    /// list API). Same Basic-auth key as NanoMDM. e.g. `http://192.0.2.10:9095`.
+    @AppStorage("mdmDevicesAPIBaseURL") var mdmDevicesAPIBaseURL: String = ""
+
     /// Devices Edict knows about. NanoMDM has no list-enrollments API,
     /// so the operator registers each enrollment ID once and we keep the
     /// list locally. JSON-encoded [MDMDevice] — same hand-rolled pattern

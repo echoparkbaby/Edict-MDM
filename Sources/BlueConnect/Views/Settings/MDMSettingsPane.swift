@@ -17,7 +17,7 @@ struct MDMSettingsPane: View {
     @State private var testResult: TestResult?
 
     private enum TestResult: Equatable {
-        case success(nano: String, kmfddm: String, declarations: Int)
+        case success(nano: String, kmfddm: String, declarations: Int, devices: Int?)
         case failure(String)
     }
 
@@ -62,6 +62,10 @@ struct MDMSettingsPane: View {
                     testResult = nil
                 }
                 .help("The -api key NanoMDM was started with (HTTP Basic password, user 'nanomdm').")
+            TextField("Devices API URL", text: $settings.mdmDevicesAPIBaseURL,
+                      prompt: Text(verbatim: "http://192.0.2.10:9095"))
+                .help("The enrollments endpoint next to NanoMDM — fills the Devices list automatically. Uses the NanoMDM API key.")
+                .onChange(of: settings.mdmDevicesAPIBaseURL) { _, _ in testResult = nil }
         }
     }
 
@@ -108,9 +112,12 @@ struct MDMSettingsPane: View {
             }
             if let result = testResult {
                 switch result {
-                case .success(let nano, let kmfddm, let decls):
-                    Label("Connected — NanoMDM \(nano), KMFDDM \(kmfddm), \(decls) declaration\(decls == 1 ? "" : "s")",
-                          systemImage: "checkmark.seal.fill")
+                case .success(let nano, let kmfddm, let decls, let devices):
+                    Label(
+                        "Connected — NanoMDM \(nano), KMFDDM \(kmfddm), \(decls) declaration\(decls == 1 ? "" : "s")"
+                            + (devices.map { ", \($0) device\($0 == 1 ? "" : "s")" } ?? ""),
+                        systemImage: "checkmark.seal.fill"
+                    )
                         .foregroundStyle(.green)
                         .font(.caption)
                         .fixedSize(horizontal: false, vertical: true)
@@ -149,7 +156,13 @@ struct MDMSettingsPane: View {
             let nanoVer = try await nano.version()
             let kmfddmVer = try await kmfddm.version()
             let decls = try await kmfddm.listDeclarations()
-            testResult = .success(nano: nanoVer, kmfddm: kmfddmVer, declarations: decls.count)
+            var deviceCount: Int?
+            if !settings.mdmDevicesAPIBaseURL.trimmingCharacters(in: .whitespaces).isEmpty {
+                deviceCount = try await EnrollmentsAPI(settings: settings)
+                    .list().filter(\.isDevice).count
+            }
+            testResult = .success(nano: nanoVer, kmfddm: kmfddmVer,
+                                  declarations: decls.count, devices: deviceCount)
         } catch {
             testResult = .failure(error.localizedDescription)
         }
