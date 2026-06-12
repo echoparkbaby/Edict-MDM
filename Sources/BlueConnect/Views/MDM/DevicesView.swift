@@ -220,7 +220,7 @@ struct DevicesView: View {
                         if let id = newID { Task { await loadStatus(id: id) } }
                     }
                     deviceDetail
-                        .frame(minWidth: 260, idealWidth: 320, maxWidth: 480)
+                        .frame(minWidth: 300, idealWidth: 380, maxWidth: 540)
                 }
             }
         }
@@ -676,75 +676,156 @@ struct DevicesView: View {
     @ViewBuilder
     private var deviceDetail: some View {
         if let enr = selectedEnrollment {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Text(label(for: enr)).font(.headline)
-                    Spacer()
-                    if statusLoading { ProgressView().controlSize(.small) }
-                    Button {
-                        Task { await loadStatus(id: enr.id) }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    detailHeader(enr)
+                    if let err = statusError {
+                        Label(err, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .buttonStyle(.plain)
-                    .help("Re-read this device's reported status")
-                }
-                .padding(.horizontal, 12).padding(.vertical, 8)
-                Divider()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if let err = statusError {
-                            Label(err, systemImage: "exclamationmark.triangle.fill")
-                                .font(.caption).foregroundStyle(.orange)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        if hasDeviceFacts {
-                            factsGrid
-                            rawValuesDisclosure
-                        } else if !statusLoading {
-                            reportingSetup
-                        }
-                        Divider()
-                        inventorySection(enr)
+                    if hasDeviceFacts {
+                        osCard
+                        securityCard(enr)
+                        identityCard(enr)
+                    } else if !statusLoading {
+                        cardBackground { reportingSetup }
                     }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    cardBackground { inventorySection(enr) }
+                    if hasDeviceFacts {
+                        cardBackground { rawValuesDisclosure }
+                    }
                 }
+                .padding(14)
             }
+            .background(Color(NSColor.windowBackgroundColor).opacity(0.5))
         } else {
-            Text("Select a device")
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            VStack(spacing: 8) {
+                Image(systemName: "laptopcomputer").font(.system(size: 34)).foregroundStyle(.tertiary)
+                Text("Select a device").foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
-    private var factsGrid: some View {
-        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+    /// Big device header: name, model subtitle, online + BlueSky badges,
+    /// refresh.
+    private func detailHeader(_ enr: MDMEnrollment) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "laptopcomputer")
+                .font(.system(size: 30))
+                .foregroundStyle(enr.isEnabled ? Color.accentColor : .secondary)
+                .frame(width: 40)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(label(for: enr)).font(.title3).bold()
+                if let model = statusValue("model.marketing-name") {
+                    Text(model).font(.subheadline).foregroundStyle(.secondary)
+                }
+                HStack(spacing: 6) {
+                    chip(enr.isEnabled ? "Enrolled" : "Unenrolled",
+                         color: enr.isEnabled ? .green : .secondary,
+                         help: "")
+                    if bscHost(for: enr) != nil {
+                        chip("BlueSky", color: .accentColor, help: "Matched to a BlueSky fleet host")
+                    }
+                    if let seen = enr.lastSeenDate {
+                        Text("seen \(seen.formatted(.relative(presentation: .named)))")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Spacer()
+            if statusLoading { ProgressView().controlSize(.small) }
+            Button { Task { await loadStatus(id: enr.id) } } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(.plain)
+            .help("Re-read this device's reported status")
+        }
+    }
+
+    private var osCard: some View {
+        detailCard("Operating System", "desktopcomputer") {
             if let os = statusValue("operating-system.marketing-name"),
                let ver = statusValue("operating-system.version") {
-                fact("macOS", "\(os) \(ver)"
-                     + (statusValue("operating-system.build-version").map { " (\($0))" } ?? ""))
+                infoRow("Version", "\(os) \(ver)")
             } else if let ver = statusValue("operating-system.version") {
-                fact("macOS", ver)
+                infoRow("Version", ver)
             }
-            if let model = statusValue("model.marketing-name") {
-                fact("Model", model
-                     + (statusValue("model.identifier").map { " — \($0)" } ?? ""))
+            if let build = statusValue("operating-system.build-version") {
+                infoRow("Build", build, mono: true)
             }
-            if let serial = statusValue("identifier.serial-number") {
-                fact("Serial", serial)
-            }
-            if let fv = statusValue("filevault.enabled") {
-                fact("FileVault", fv == "true" || fv == "1" ? "On" : "Off")
+            if let fam = statusValue("operating-system.family") {
+                infoRow("Family", fam)
             }
         }
     }
 
-    private func fact(_ name: String, _ value: String) -> some View {
-        GridRow {
-            Text(name).font(.caption).foregroundStyle(.secondary)
-                .gridColumnAlignment(.trailing)
-            Text(value).font(.callout).textSelection(.enabled)
+    private func securityCard(_ enr: MDMEnrollment) -> some View {
+        detailCard("Security", "lock.shield") {
+            HStack {
+                Text("FileVault").font(.caption).foregroundStyle(.secondary)
+                    .frame(width: 90, alignment: .leading)
+                if let fv = statusValue("filevault.enabled") {
+                    let on = fv == "true" || fv == "1"
+                    chip(on ? "On" : "Off", color: on ? .green : .red, help: "")
+                } else {
+                    Text("unknown").font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            if updateTarget != nil {
+                HStack {
+                    Text("Updates").font(.caption).foregroundStyle(.secondary)
+                        .frame(width: 90, alignment: .leading)
+                    complianceChip(enr)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
+    private func identityCard(_ enr: MDMEnrollment) -> some View {
+        detailCard("Identity", "number") {
+            if let serial = statusValue("identifier.serial-number") ?? enr.serialNumber {
+                infoRow("Serial", serial, mono: true)
+            }
+            if let model = statusValue("model.identifier") {
+                infoRow("Model ID", model, mono: true)
+            }
+            infoRow("Hardware UUID", enr.id, mono: true)
+            if let host = bscHost(for: enr) {
+                infoRow("BlueSky", "\(host.displayName) (#\(host.blueskyid))")
+            }
+        }
+    }
+
+    // MARK: - Detail card helpers
+
+    private func cardBackground<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+        content()
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color(NSColor.controlBackgroundColor)))
+    }
+
+    private func detailCard<C: View>(_ title: String, _ icon: String,
+                                     @ViewBuilder _ content: () -> C) -> some View {
+        cardBackground {
+            VStack(alignment: .leading, spacing: 6) {
+                Label(title, systemImage: icon).font(.caption).bold().foregroundStyle(.secondary)
+                content()
+            }
+        }
+    }
+
+    private func infoRow(_ label: String, _ value: String, mono: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+                .frame(width: 90, alignment: .leading)
+            Text(value).font(mono ? .callout.monospaced() : .callout)
+                .textSelection(.enabled)
+            Spacer(minLength: 0)
         }
     }
 
