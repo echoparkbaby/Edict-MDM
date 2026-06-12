@@ -174,6 +174,24 @@ enum ProfilePayloads {
                        payloads: [cert])
     }
 
+    /// Munki client configuration via an MCX preferences payload — points
+    /// the Mac at a Munki software repo. Ties Edict MDM to BlueConnect's
+    /// existing Munki: enroll a Mac and it starts pulling managed software.
+    static func munki(repoURL: String, clientIdentifier: String) -> Data {
+        var prefs: [String: Any] = ["SoftwareRepoURL": repoURL]
+        if !clientIdentifier.isEmpty { prefs["ClientIdentifier"] = clientIdentifier }
+        var mcx: [String: Any] = base("com.apple.ManagedClient.preferences",
+                                      displayName: "Munki")
+        mcx["PayloadContent"] = [
+            "com.googlecode.munki.ManagedInstalls": [
+                "Forced": [["mcx_preference_settings": prefs]],
+            ],
+        ]
+        return profile(displayName: "Munki",
+                       identifier: "xyz.hellocomputer.edict.munki",
+                       payloads: [mcx])
+    }
+
     /// Validate + normalize a pasted profile. Accepts a full mobileconfig
     /// (returns it as-is) — used for the "Custom" template. Throws if it
     /// isn't a configuration-profile plist.

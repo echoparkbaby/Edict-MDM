@@ -17,6 +17,7 @@ struct ProfilesView: View {
         case gatekeeper = "Gatekeeper"
         case loginWindow = "Login Window"
         case certificate = "Root Certificate"
+        case munki = "Munki (BlueConnect)"
         case wifi = "Wi-Fi Network"
         case passcode = "Password Policy"
         case custom = "Custom Profile"
@@ -31,6 +32,7 @@ struct ProfilesView: View {
             case .gatekeeper: return "checkmark.shield"
             case .loginWindow: return "person.crop.rectangle"
             case .certificate: return "seal"
+            case .munki: return "shippingbox"
             case .wifi: return "wifi"
             case .passcode: return "lock.rectangle"
             case .custom: return "doc.text"
@@ -46,6 +48,7 @@ struct ProfilesView: View {
             case .gatekeeper: return "Only allow signed apps to run; App Store + identified developers."
             case .loginWindow: return "Harden the login window — disable guest, hide admin users."
             case .certificate: return "Install and trust a root CA from a pasted PEM certificate."
+            case .munki: return "Point the Mac at your BlueConnect Munki repo for managed software."
             case .wifi: return "Auto-join Wi-Fi network pushed to the Mac's system store."
             case .passcode: return "Login password requirements (length, complexity, lock timeout)."
             case .custom: return "Paste any .mobileconfig you already have and deploy it."
@@ -81,6 +84,9 @@ struct ProfilesView: View {
     // Certificate
     @State private var certPEM = ""
     @State private var certName = ""
+    // Munki
+    @State private var munkiRepoURL = ""
+    @State private var munkiClientID = ""
 
     // Wi-Fi
     @State private var ssid = ""
@@ -263,6 +269,22 @@ struct ProfilesView: View {
                     .overlay(RoundedRectangle(cornerRadius: 4)
                         .stroke(Color.secondary.opacity(0.25), lineWidth: 1))
             }
+        case .munki:
+            Form {
+                HStack {
+                    TextField("Munki repo URL", text: $munkiRepoURL,
+                              prompt: Text(verbatim: "https://munki.example.com/repo"))
+                    if !settings.munkiRepoEndpoint.isEmpty {
+                        Button("Use BlueConnect") { munkiRepoURL = settings.munkiRepoEndpoint }
+                            .buttonStyle(.link).font(.caption)
+                    }
+                }
+                TextField("Client identifier (optional)", text: $munkiClientID,
+                          prompt: Text("manifest name"))
+                Text("Sets ManagedInstalls SoftwareRepoURL so enrolled Macs pull managed software from your BlueConnect Munki repo. The Munki tools must be installed on the Mac (deploy them via Munki bootstrap or a package).")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .formStyle(.columns)
         case .wifi:
             Form {
                 TextField("Network name (SSID)", text: $ssid)
@@ -385,6 +407,7 @@ struct ProfilesView: View {
         case .wifi: return !ssid.trimmingCharacters(in: .whitespaces).isEmpty
         case .custom: return !customXML.trimmingCharacters(in: .whitespaces).isEmpty
         case .certificate: return certPEM.contains("BEGIN CERTIFICATE")
+        case .munki: return !munkiRepoURL.trimmingCharacters(in: .whitespaces).isEmpty
         default: return true
         }
     }
@@ -415,6 +438,10 @@ struct ProfilesView: View {
                                                 showNamePasswordFields: lwNamePasswordFields), "Login Window")
         case .certificate:
             return (try ProfilePayloads.rootCertificate(pem: certPEM, name: certName), "Certificate")
+        case .munki:
+            return (ProfilePayloads.munki(repoURL: munkiRepoURL.trimmingCharacters(in: .whitespaces),
+                                          clientIdentifier: munkiClientID.trimmingCharacters(in: .whitespaces)),
+                    "Munki")
         case .wifi:
             return (ProfilePayloads.wifi(ssid: ssid, password: wifiPassword,
                                          hidden: wifiHidden, security: wifiSecurity),
