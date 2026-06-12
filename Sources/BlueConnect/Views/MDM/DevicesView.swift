@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Edict MDM managed-devices view — the center pane for the sidebar's
 /// Device Management → Devices row.
@@ -22,6 +23,11 @@ struct DevicesView: View {
     @Environment(ActivityLog.self) private var activity
     @Environment(TerminalSessionsManager.self) private var terminals
     @Environment(HostStateNotifier.self) private var notifier
+    @Environment(RecentConnectStore.self) private var recents
+
+    // BlueConnect "run command" sheet
+    @State private var runCmdHost: BlueSkyHost?
+    @State private var runCmdText = ""
 
     // Notification de-dup: enrollment IDs seen on the prior refresh, the
     // device IDs already flagged non-compliant, and whether the cert
@@ -154,6 +160,9 @@ struct DevicesView: View {
             EraseDeviceSheet(deviceName: label(for: enr)) { pin in
                 await erase(enr, pin: pin)
             }
+        }
+        .sheet(item: $runCmdHost) { host in
+            runCommandSheet(host)
         }
         .alert("Stop enforcing this update?", isPresented: $confirmingEndEnforcement) {
             Button("Cancel", role: .cancel) {}
@@ -438,6 +447,15 @@ struct DevicesView: View {
             .help("Send an APNs push — the Mac checks in with the MDM within seconds if it's online")
 
             Menu {
+                if let host = bscHost(for: enr) {
+                    Section("BlueSky") {
+                        Button { bscScreenShare(host) } label: { Label("Screen Share", systemImage: "macwindow.on.rectangle") }
+                        Button { bscSSH(host) } label: { Label("Open SSH", systemImage: "terminal") }
+                        Button { runCmdText = ""; runCmdHost = host } label: { Label("Run Command…", systemImage: "chevron.left.forwardslash.chevron.right") }
+                        Button { bscSendFile(host) } label: { Label("Send File…", systemImage: "arrow.up.doc") }
+                    }
+                    Divider()
+                }
                 Button {
                     labelText = label(for: enr)
                     labelTarget = enr
@@ -478,6 +496,82 @@ struct DevicesView: View {
             .disabled(busyDeviceID != nil)
         }
         .padding(.vertical, 3)
+    }
+
+    // MARK: - BlueConnect actions (unified console)
+
+    /// MDM manages policy; BlueConnect reaches the same Mac for hands-on
+    /// support. These run over the existing BSC SSH tunnel — the thing no
+    /// other MDM can do.
+    private func bscService() -> ConnectionService {
+        var svc = ConnectionService(
+            server: settings.serverFqdn,
+            adminKeyPath: settings.expandedKeyPath,
+            serverSshPort: settings.sshTunnelPort,
+            terminals: terminals
+        )
+        svc.onConnect = { h in recents.recordConnect(blueskyid: h.blueskyid) }
+        return svc
+    }
+
+    private func bscScreenShare(_ host: BlueSkyHost) {
+        let user = host.effectiveUser(default: settings.defaultRemoteUser)
+        bscService().openVNC(host: host, remoteUser: user)
+        activity.record(.connect, title: "Screen Share \(host.displayName)", detail: "via BlueSky")
+    }
+
+    private func bscSSH(_ host: BlueSkyHost) {
+        let user = host.effectiveUser(default: settings.defaultRemoteUser)
+        bscService().openSSH(host: host, remoteUser: user)
+        activity.record(.connect, title: "SSH \(host.displayName)", detail: "via BlueSky")
+    }
+
+    private func bscRunCommand(_ host: BlueSkyHost, _ command: String) {
+        let user = host.effectiveUser(default: settings.defaultRemoteUser)
+        bscService().openRemoteCommand(host: host, remoteUser: user,
+                                       command: command, label: "Run")
+        activity.record(.connect, title: "Ran command on \(host.displayName)",
+                        detail: String(command.prefix(80)))
+    }
+
+    private func bscSendFile(_ host: BlueSkyHost) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let user = host.effectiveUser(default: settings.defaultRemoteUser)
+        bscService().openSCP(host: host, remoteUser: user, sourceURL: url)
+        activity.record(.connect, title: "Sent \(url.lastPathComponent) to \(host.displayName)",
+                        detail: "via BlueSky")
+    }
+
+    private func runCommandSheet(_ host: BlueSkyHost) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Run on \(host.displayName)", systemImage: "chevron.left.forwardslash.chevron.right")
+                .font(.headline)
+            Text("Runs over the BlueSky SSH tunnel as \(host.effectiveUser(default: settings.defaultRemoteUser)). Output opens in a terminal tab. sudo will prompt for a password if the command needs it.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            TextField("Command", text: $runCmdText, prompt: Text(verbatim: "sw_vers; uptime"))
+                .textFieldStyle(.roundedBorder)
+                .font(.body.monospaced())
+                .onSubmit { submitRunCommand(host) }
+            HStack {
+                Spacer()
+                Button("Cancel") { runCmdHost = nil }.keyboardShortcut(.cancelAction)
+                Button("Run") { submitRunCommand(host) }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(runCmdText.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(20).frame(width: 460)
+    }
+
+    private func submitRunCommand(_ host: BlueSkyHost) {
+        let cmd = runCmdText.trimmingCharacters(in: .whitespaces)
+        runCmdHost = nil
+        if !cmd.isEmpty { bscRunCommand(host, cmd) }
     }
 
     // MARK: - Onboard from BlueSky
@@ -879,6 +973,12 @@ struct DevicesView: View {
                 }
             }
             Spacer()
+            if let host = bscHost(for: enr) {
+                Button { bscScreenShare(host) } label: { Image(systemName: "macwindow.on.rectangle") }
+                    .buttonStyle(.plain).help("Screen Share over BlueSky")
+                Button { bscSSH(host) } label: { Image(systemName: "terminal") }
+                    .buttonStyle(.plain).help("Open SSH over BlueSky")
+            }
             if statusLoading { ProgressView().controlSize(.small) }
             Button { Task { await loadStatus(id: enr.id) } } label: {
                 Image(systemName: "arrow.clockwise")
