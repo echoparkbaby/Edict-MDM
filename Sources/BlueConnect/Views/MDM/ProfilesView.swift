@@ -9,12 +9,22 @@ struct ProfilesView: View {
     @Environment(ActivityLog.self) private var activity
 
     enum Template: String, CaseIterable, Identifiable {
+        case fileVault = "FileVault Encryption"
+        case firewall = "Firewall"
+        case softwareUpdate = "Software Update"
+        case screenLock = "Screen Lock"
+        case restrictions = "Restrictions"
         case wifi = "Wi-Fi Network"
         case passcode = "Password Policy"
         case custom = "Custom Profile"
         var id: String { rawValue }
         var icon: String {
             switch self {
+            case .fileVault: return "lock.shield"
+            case .firewall: return "firewall"
+            case .softwareUpdate: return "arrow.triangle.2.circlepath"
+            case .screenLock: return "lock.display"
+            case .restrictions: return "hand.raised"
             case .wifi: return "wifi"
             case .passcode: return "lock.rectangle"
             case .custom: return "doc.text"
@@ -22,6 +32,11 @@ struct ProfilesView: View {
         }
         var blurb: String {
             switch self {
+            case .fileVault: return "Force-enable disk encryption and escrow the recovery key."
+            case .firewall: return "Turn on the application firewall, with stealth mode."
+            case .softwareUpdate: return "Automatic update checks, downloads, and installs."
+            case .screenLock: return "Require the password after the screen saver or sleep."
+            case .restrictions: return "Disable AirDrop, Erase All Content, Game Center, App installs."
             case .wifi: return "Auto-join Wi-Fi network pushed to the Mac's system store."
             case .passcode: return "Login password requirements (length, complexity, lock timeout)."
             case .custom: return "Paste any .mobileconfig you already have and deploy it."
@@ -29,7 +44,25 @@ struct ProfilesView: View {
         }
     }
 
-    @State private var template: Template = .wifi
+    @State private var template: Template = .fileVault
+
+    // FileVault
+    @State private var fvDefer = true
+    // Firewall
+    @State private var fwBlockAll = false
+    @State private var fwStealth = true
+    // Software Update
+    @State private var suAutoDownload = true
+    @State private var suAutoInstallOS = false
+    @State private var suAutoSecurity = true
+    // Screen lock
+    @State private var slIdleMinutes = 5
+    @State private var slDelaySeconds = 0
+    // Restrictions
+    @State private var rAllowErase = true
+    @State private var rAllowAirDrop = true
+    @State private var rAllowGameCenter = true
+    @State private var rAllowAppStore = true
 
     // Wi-Fi
     @State private var ssid = ""
@@ -126,6 +159,44 @@ struct ProfilesView: View {
     @ViewBuilder
     private var formForTemplate: some View {
         switch template {
+        case .fileVault:
+            Form {
+                Toggle("Defer until next logout", isOn: $fvDefer)
+                Text("Forces FileVault on and escrows the recovery key with the MDM. With defer on, the user is prompted to enable it the next time they log out (the standard, least-disruptive flow).")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .formStyle(.columns)
+        case .firewall:
+            Form {
+                Toggle("Stealth mode (don't respond to probes)", isOn: $fwStealth)
+                Toggle("Block all incoming connections", isOn: $fwBlockAll)
+            }
+            .formStyle(.columns)
+        case .softwareUpdate:
+            Form {
+                Toggle("Download updates automatically", isOn: $suAutoDownload)
+                Toggle("Install macOS updates automatically", isOn: $suAutoInstallOS)
+                Toggle("Install security responses & system files", isOn: $suAutoSecurity)
+            }
+            .formStyle(.columns)
+        case .screenLock:
+            Form {
+                Stepper("Start screen saver after \(slIdleMinutes) min", value: $slIdleMinutes, in: 1...60)
+                Stepper(slDelaySeconds == 0 ? "Require password immediately"
+                        : "Require password after \(slDelaySeconds)s",
+                        value: $slDelaySeconds, in: 0...300, step: 15)
+            }
+            .formStyle(.columns)
+        case .restrictions:
+            Form {
+                Toggle("Allow Erase All Content & Settings", isOn: $rAllowErase)
+                Toggle("Allow AirDrop", isOn: $rAllowAirDrop)
+                Toggle("Allow Game Center", isOn: $rAllowGameCenter)
+                Toggle("Allow installing apps", isOn: $rAllowAppStore)
+                Text("Turn a switch OFF to restrict it. Anything left on isn't written to the profile.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .formStyle(.columns)
         case .wifi:
             Form {
                 TextField("Network name (SSID)", text: $ssid)
@@ -197,13 +268,29 @@ struct ProfilesView: View {
     private var formValid: Bool {
         switch template {
         case .wifi: return !ssid.trimmingCharacters(in: .whitespaces).isEmpty
-        case .passcode: return true
         case .custom: return !customXML.trimmingCharacters(in: .whitespaces).isEmpty
+        default: return true
         }
     }
 
     private func buildProfile() throws -> (data: Data, name: String) {
         switch template {
+        case .fileVault:
+            return (ProfilePayloads.fileVault(deferEnable: fvDefer), "FileVault")
+        case .firewall:
+            return (ProfilePayloads.firewall(blockAllIncoming: fwBlockAll, stealthMode: fwStealth), "Firewall")
+        case .softwareUpdate:
+            return (ProfilePayloads.softwareUpdate(autoCheck: true, autoDownload: suAutoDownload,
+                                                   autoInstallOS: suAutoInstallOS,
+                                                   autoInstallSecurity: suAutoSecurity), "Software Update")
+        case .screenLock:
+            return (ProfilePayloads.screenLock(idleSeconds: slIdleMinutes * 60,
+                                               delaySeconds: slDelaySeconds), "Screen Lock")
+        case .restrictions:
+            return (ProfilePayloads.restrictions(allowEraseAllContent: rAllowErase,
+                                                 allowAirDrop: rAllowAirDrop,
+                                                 allowGameCenter: rAllowGameCenter,
+                                                 allowAppStore: rAllowAppStore), "Restrictions")
         case .wifi:
             return (ProfilePayloads.wifi(ssid: ssid, password: wifiPassword,
                                          hidden: wifiHidden, security: wifiSecurity),

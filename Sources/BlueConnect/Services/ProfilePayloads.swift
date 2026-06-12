@@ -46,6 +46,83 @@ enum ProfilePayloads {
                        payloads: [payload])
     }
 
+    /// `com.apple.MCX.FileVault2` — force-enable FileVault disk
+    /// encryption, deferring until the user next logs out, and escrow the
+    /// recovery key. Staple of every commercial MDM.
+    static func fileVault(deferEnable: Bool) -> Data {
+        var fv: [String: Any] = base("com.apple.MCX.FileVault2",
+                                      displayName: "FileVault Encryption")
+        fv["Enable"] = "On"
+        fv["Defer"] = deferEnable
+        fv["UseRecoveryKey"] = true
+        fv["ShowRecoveryKey"] = false
+        if deferEnable { fv["DeferForceAtUserLoginMaxBypassAttempts"] = 0 }
+        // Personal-recovery-key escrow so the org can unlock the disk.
+        var escrow: [String: Any] = base("com.apple.security.FDERecoveryKeyEscrow",
+                                          displayName: "FileVault Key Escrow")
+        escrow["Location"] = "Edict MDM"
+        return profile(displayName: "FileVault Encryption",
+                       identifier: "xyz.hellocomputer.edict.filevault",
+                       payloads: [fv, escrow])
+    }
+
+    /// `com.apple.security.firewall` — application firewall on, with
+    /// optional stealth mode and block-all-incoming.
+    static func firewall(blockAllIncoming: Bool, stealthMode: Bool) -> Data {
+        var fw: [String: Any] = base("com.apple.security.firewall",
+                                     displayName: "Firewall")
+        fw["EnableFirewall"] = true
+        fw["BlockAllIncoming"] = blockAllIncoming
+        fw["EnableStealthMode"] = stealthMode
+        return profile(displayName: "Firewall",
+                       identifier: "xyz.hellocomputer.edict.firewall",
+                       payloads: [fw])
+    }
+
+    /// `com.apple.SoftwareUpdate` — automatic update behavior.
+    static func softwareUpdate(autoCheck: Bool, autoDownload: Bool,
+                               autoInstallOS: Bool, autoInstallSecurity: Bool) -> Data {
+        var su: [String: Any] = base("com.apple.SoftwareUpdate",
+                                     displayName: "Software Update")
+        su["AutomaticCheckEnabled"] = autoCheck
+        su["AutomaticDownload"] = autoDownload
+        su["AutomaticallyInstallMacOSUpdates"] = autoInstallOS
+        su["ConfigDataInstall"] = autoInstallSecurity
+        su["CriticalUpdateInstall"] = autoInstallSecurity
+        return profile(displayName: "Software Update",
+                       identifier: "xyz.hellocomputer.edict.softwareupdate",
+                       payloads: [su])
+    }
+
+    /// `com.apple.screensaver` — require the login password after the
+    /// screen saver / display sleep, after `delaySeconds`.
+    static func screenLock(idleSeconds: Int, delaySeconds: Int) -> Data {
+        var ss: [String: Any] = base("com.apple.screensaver",
+                                     displayName: "Screen Lock")
+        ss["idleTime"] = idleSeconds
+        ss["askForPassword"] = 1
+        ss["askForPasswordDelay"] = delaySeconds
+        return profile(displayName: "Screen Lock",
+                       identifier: "xyz.hellocomputer.edict.screenlock",
+                       payloads: [ss])
+    }
+
+    /// `com.apple.applicationaccess` — common device restrictions. Only
+    /// the toggles the operator turns OFF are emitted (everything is
+    /// allowed by default), keeping the profile minimal.
+    static func restrictions(allowEraseAllContent: Bool, allowAirDrop: Bool,
+                             allowGameCenter: Bool, allowAppStore: Bool) -> Data {
+        var r: [String: Any] = base("com.apple.applicationaccess",
+                                     displayName: "Restrictions")
+        if !allowEraseAllContent { r["allowEraseContentAndSettings"] = false }
+        if !allowAirDrop { r["allowAirDrop"] = false }
+        if !allowGameCenter { r["allowGameCenter"] = false }
+        if !allowAppStore { r["allowAppInstallation"] = false }
+        return profile(displayName: "Restrictions",
+                       identifier: "xyz.hellocomputer.edict.restrictions",
+                       payloads: [r])
+    }
+
     /// Validate + normalize a pasted profile. Accepts a full mobileconfig
     /// (returns it as-is) — used for the "Custom" template. Throws if it
     /// isn't a configuration-profile plist.
