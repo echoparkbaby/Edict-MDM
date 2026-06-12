@@ -103,6 +103,20 @@ struct ProfilesView: View {
     @State private var deploying = false
     @State private var result: String?
 
+    // Smart-group targeting
+    @Environment(BlueSkyHostListStore.self) private var hostStore
+    @State private var targetMode: TargetMode = .selected
+    @State private var groupID: UUID?
+    @State private var osVersions: [String: String] = [:]
+    @State private var fileVault: [String: String] = [:]
+    @State private var models: [String: String] = [:]
+
+    enum TargetMode: String, CaseIterable, Identifiable {
+        case selected = "Pick devices"
+        case group = "Smart group"
+        var id: String { rawValue }
+    }
+
     var body: some View {
         Group {
             if !settings.mdmEnabled || !settings.mdmConfigured {
@@ -164,13 +178,21 @@ struct ProfilesView: View {
                     Task { await deploy() }
                 } label: {
                     if deploying { ProgressView().controlSize(.small) }
-                    else { Label("Deploy to \(targetIDs.count) device\(targetIDs.count == 1 ? "" : "s")",
+                    else { Label("Deploy to \(resolvedTargets.count) device\(resolvedTargets.count == 1 ? "" : "s")",
                                  systemImage: "paperplane.fill") }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(deploying || targetIDs.isEmpty || !formValid)
+                .disabled(deploying || resolvedTargets.isEmpty || !formValid)
             }
             .padding(12)
+        }
+    }
+
+    /// The devices a deploy will hit, by the active target mode.
+    private var resolvedTargets: [MDMEnrollment] {
+        switch targetMode {
+        case .selected: return devices.filter { targetIDs.contains($0.id) }
+        case .group:    return selectedGroup.map { groupMembers($0) } ?? []
         }
     }
 
@@ -279,27 +301,76 @@ struct ProfilesView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("Deploy to").font(.caption).bold().foregroundStyle(.secondary)
+                Picker("", selection: $targetMode) {
+                    ForEach(TargetMode.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .labelsHidden().pickerStyle(.segmented).fixedSize()
                 Spacer()
                 if loadingDevices { ProgressView().controlSize(.small) }
-                Button(targetIDs.count == devices.count ? "None" : "All") {
-                    targetIDs = targetIDs.count == devices.count ? [] : Set(devices.map(\.id))
-                }
-                .font(.caption).buttonStyle(.link)
             }
-            if devices.isEmpty && !loadingDevices {
-                Text("No enrolled devices. Enroll a Mac first (Devices tab).")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            ForEach(devices) { d in
-                Toggle(isOn: Binding(
-                    get: { targetIDs.contains(d.id) },
-                    set: { if $0 { targetIDs.insert(d.id) } else { targetIDs.remove(d.id) } }
-                )) {
-                    Text(deviceLabel(d))
+            if targetMode == .selected {
+                HStack {
+                    Spacer()
+                    Button(targetIDs.count == devices.count ? "None" : "All") {
+                        targetIDs = targetIDs.count == devices.count ? [] : Set(devices.map(\.id))
+                    }
+                    .font(.caption).buttonStyle(.link)
                 }
-                .toggleStyle(.checkbox)
+                if devices.isEmpty && !loadingDevices {
+                    Text("No enrolled devices. Enroll a Mac first (Devices tab).")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(devices) { d in
+                    Toggle(isOn: Binding(
+                        get: { targetIDs.contains(d.id) },
+                        set: { if $0 { targetIDs.insert(d.id) } else { targetIDs.remove(d.id) } }
+                    )) { Text(deviceLabel(d)) }
+                    .toggleStyle(.checkbox)
+                }
+            } else {
+                if settings.smartGroups.isEmpty {
+                    Text("No smart groups yet. Create one in the Devices view (group filter → New Group).")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Picker("Group", selection: $groupID) {
+                        Text("Choose a group").tag(Optional<UUID>.none)
+                        ForEach(settings.smartGroups) { g in
+                            Text("\(g.name) (\(groupMembers(g).count))").tag(Optional(g.id))
+                        }
+                    }
+                    if let g = selectedGroup {
+                        Text("\(groupMembers(g).count) member\(groupMembers(g).count == 1 ? "" : "s") match right now. Membership re-evaluates each deploy.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
         }
+    }
+
+    private var selectedGroup: SmartGroup? {
+        guard let id = groupID else { return nil }
+        return settings.smartGroups.first { $0.id == id }
+    }
+
+    private func deviceFacts(_ d: MDMEnrollment) -> SmartGroup.DeviceFacts {
+        SmartGroup.DeviceFacts(
+            osVersion: osVersions[d.id],
+            fileVaultOn: fileVault[d.id].map { $0 == "true" || $0 == "1" },
+            model: models[d.id],
+            matchedBlueSky: bscMatched(d),
+            enrolled: d.isEnabled
+        )
+    }
+
+    private func bscMatched(_ d: MDMEnrollment) -> Bool {
+        guard let serial = d.serialNumber, !serial.isEmpty else { return false }
+        return hostStore.hosts.contains { ($0.serialnum ?? "").caseInsensitiveCompare(serial) == .orderedSame }
+    }
+
+    private func groupMembers(_ g: SmartGroup) -> [MDMEnrollment] {
+        devices.filter { g.contains(deviceFacts($0),
+                                    requireFileVault: settings.mdmRequireFileVault,
+                                    minOS: settings.mdmMinOSVersion) }
     }
 
     private func deviceLabel(_ d: MDMEnrollment) -> String {
@@ -366,6 +437,15 @@ struct ProfilesView: View {
         loadingDevices = true
         defer { loadingDevices = false }
         devices = (try? await EnrollmentsAPI(settings: settings).list().filter(\.isDevice)) ?? []
+        // Facts for smart-group membership.
+        let svc = KMFDDMService(settings: settings)
+        var os: [String: String] = [:], fv: [String: String] = [:], mdl: [String: String] = [:]
+        for d in devices {
+            if let v = try? await svc.statusValues(enrollmentID: d.id, pathPrefix: ".StatusItems.device.operating-system.version").first?.value { os[d.id] = v }
+            if let v = try? await svc.statusValues(enrollmentID: d.id, pathPrefix: ".StatusItems.diskmanagement.filevault.enabled").first?.value { fv[d.id] = v }
+            if let v = try? await svc.statusValues(enrollmentID: d.id, pathPrefix: ".StatusItems.device.model.marketing-name").first?.value { mdl[d.id] = v }
+        }
+        osVersions = os; fileVault = fv; models = mdl
     }
 
     @MainActor
@@ -378,7 +458,7 @@ struct ProfilesView: View {
         catch { result = "Couldn't build profile: \(error.localizedDescription)"; return }
 
         let nano = NanoMDMService(settings: settings)
-        let targets = devices.filter { targetIDs.contains($0.id) }
+        let targets = resolvedTargets
         var ok = 0, failed = 0
         for t in targets {
             do {

@@ -140,31 +140,20 @@ struct DevicesView: View {
 
     // MARK: - Smart group evaluation
 
-    private func matches(_ enr: MDMEnrollment, group: SmartGroup) -> Bool {
-        group.rules.allSatisfy { matches(enr, rule: $0) }
+    private func facts(for enr: MDMEnrollment) -> SmartGroup.DeviceFacts {
+        SmartGroup.DeviceFacts(
+            osVersion: osVersions[enr.id],
+            fileVaultOn: fileVault[enr.id].map { $0 == "true" || $0 == "1" },
+            model: models[enr.id],
+            matchedBlueSky: bscHost(for: enr) != nil,
+            enrolled: enr.isEnabled
+        )
     }
 
-    private func matches(_ enr: MDMEnrollment, rule: SmartGroupRule) -> Bool {
-        switch rule.field {
-        case .osAtLeast:
-            return osVersions[enr.id].map { versionAtLeast($0, rule.value) } ?? false
-        case .osBelow:
-            return osVersions[enr.id].map { !versionAtLeast($0, rule.value) } ?? false
-        case .fileVaultOn:
-            return fileVault[enr.id].map { $0 == "true" || $0 == "1" } ?? false
-        case .fileVaultOff:
-            return fileVault[enr.id].map { $0 != "true" && $0 != "1" } ?? false
-        case .compliant:
-            return complianceResult(for: enr)?.passing ?? false
-        case .nonCompliant:
-            return complianceResult(for: enr).map { !$0.passing && !$0.failures.isEmpty } ?? false
-        case .modelContains:
-            return (models[enr.id] ?? "").localizedCaseInsensitiveContains(rule.value)
-        case .blueSky:
-            return bscHost(for: enr) != nil
-        case .enrolled:
-            return enr.isEnabled
-        }
+    private func matches(_ enr: MDMEnrollment, group: SmartGroup) -> Bool {
+        group.contains(facts(for: enr),
+                       requireFileVault: settings.mdmRequireFileVault,
+                       minOS: settings.mdmMinOSVersion)
     }
 
     private func memberCount(_ group: SmartGroup) -> Int {
