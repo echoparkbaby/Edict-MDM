@@ -6,6 +6,31 @@ import Foundation
 /// scripts. KMFDDM stores declarations, groups them into "sets", and
 /// associates enrollments with sets; on any association/content change it
 /// tells NanoMDM to send a `DeclarativeManagement` command.
+/// One reported status value from a device, via KMFDDM's status store.
+/// `value` is lenient — devices report strings, booleans, and numbers.
+struct DDMStatusValue: Decodable, Hashable {
+    let path: String
+    let value: String
+    let timestamp: String?
+
+    enum CodingKeys: String, CodingKey { case path, value, timestamp }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        path = try c.decode(String.self, forKey: .path)
+        timestamp = try? c.decode(String.self, forKey: .timestamp)
+        if let s = try? c.decode(String.self, forKey: .value) {
+            value = s
+        } else if let b = try? c.decode(Bool.self, forKey: .value) {
+            value = b ? "true" : "false"
+        } else if let n = try? c.decode(Double.self, forKey: .value) {
+            value = n == n.rounded() ? String(Int(n)) : String(n)
+        } else {
+            value = ""
+        }
+    }
+}
+
 struct KMFDDMService {
     let baseURL: String
     let apiKey: String
@@ -91,6 +116,21 @@ struct KMFDDMService {
         _ = try await request("v1/enrollment-sets/\(pathEsc(enrollmentID))",
                               method: "PUT",
                               query: [URLQueryItem(name: "set", value: set)])
+    }
+
+    /// `GET /v1/status-values/<enrollmentID>[?path=prefix]` — the status
+    /// values the device has reported (OS version, FileVault state, …).
+    /// Devices only report what a status-subscriptions declaration asks
+    /// for; without one, this is empty or just client capabilities.
+    func statusValues(enrollmentID: String, pathPrefix: String? = nil) async throws -> [DDMStatusValue] {
+        var query: [URLQueryItem] = []
+        if let p = pathPrefix { query.append(URLQueryItem(name: "path", value: p)) }
+        let (data, _) = try await request("v1/status-values/\(pathEsc(enrollmentID))",
+                                          query: query)
+        // Shape: {"<enrollment-id>": [{path, value, timestamp, status_id}]}
+        guard let decoded = try? JSONDecoder().decode([String: [DDMStatusValue]].self, from: data)
+        else { return [] }
+        return decoded.values.first ?? []
     }
 
     // MARK: - HTTP

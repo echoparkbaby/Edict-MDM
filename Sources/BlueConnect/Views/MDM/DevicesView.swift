@@ -21,6 +21,14 @@ struct DevicesView: View {
     @State private var loading = false
     @State private var loadError: String?
 
+    // Detail pane (status values reported by the selected device)
+    @State private var selectedDeviceID: String?
+    @State private var statusValues: [DDMStatusValue] = []
+    @State private var statusLoading = false
+    @State private var statusError: String?
+    @State private var reportingSetName = "default"
+    @State private var enablingReporting = false
+
     // Per-action feedback
     @State private var busyDeviceID: String?
     @State private var actionNotice: String?
@@ -125,12 +133,21 @@ struct DevicesView: View {
                 .padding()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List {
-                    ForEach(devices) { enr in
-                        deviceRow(enr)
+                HSplitView {
+                    List(selection: $selectedDeviceID) {
+                        ForEach(devices) { enr in
+                            deviceRow(enr).tag(enr.id)
+                        }
                     }
+                    .listStyle(.inset)
+                    .frame(minWidth: 380, idealWidth: 460, maxWidth: .infinity)
+                    .onChange(of: selectedDeviceID) { _, newID in
+                        statusValues = []; statusError = nil
+                        if let id = newID { Task { await loadStatus(id: id) } }
+                    }
+                    deviceDetail
+                        .frame(minWidth: 260, idealWidth: 320, maxWidth: 480)
                 }
-                .listStyle(.inset)
             }
         }
     }
@@ -231,6 +248,183 @@ struct DevicesView: View {
             .disabled(busyDeviceID != nil)
         }
         .padding(.vertical, 3)
+    }
+
+    // MARK: - Device detail (live status reported by the device)
+
+    private var selectedEnrollment: MDMEnrollment? {
+        guard let id = selectedDeviceID else { return nil }
+        return devices.first { $0.id == id }
+    }
+
+    /// First reported value whose path ends in `suffix`.
+    private func statusValue(_ suffix: String) -> String? {
+        statusValues.first { $0.path.hasSuffix(suffix) }?.value
+    }
+
+    /// True once the device is reporting real device facts (vs. only the
+    /// client-capabilities noise every device sends).
+    private var hasDeviceFacts: Bool {
+        statusValue("device.operating-system.version") != nil
+    }
+
+    @ViewBuilder
+    private var deviceDetail: some View {
+        if let enr = selectedEnrollment {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text(label(for: enr)).font(.headline)
+                    Spacer()
+                    if statusLoading { ProgressView().controlSize(.small) }
+                    Button {
+                        Task { await loadStatus(id: enr.id) }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Re-read this device's reported status")
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                Divider()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if let err = statusError {
+                            Label(err, systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption).foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if hasDeviceFacts {
+                            factsGrid
+                            rawValuesDisclosure
+                        } else if !statusLoading {
+                            reportingSetup
+                        }
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        } else {
+            Text("Select a device")
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var factsGrid: some View {
+        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+            if let os = statusValue("operating-system.marketing-name"),
+               let ver = statusValue("operating-system.version") {
+                fact("macOS", "\(os) \(ver)"
+                     + (statusValue("operating-system.build-version").map { " (\($0))" } ?? ""))
+            } else if let ver = statusValue("operating-system.version") {
+                fact("macOS", ver)
+            }
+            if let model = statusValue("model.marketing-name") {
+                fact("Model", model
+                     + (statusValue("model.identifier").map { " — \($0)" } ?? ""))
+            }
+            if let serial = statusValue("identifier.serial-number") {
+                fact("Serial", serial)
+            }
+            if let fv = statusValue("filevault.enabled") {
+                fact("FileVault", fv == "true" || fv == "1" ? "On" : "Off")
+            }
+        }
+    }
+
+    private func fact(_ name: String, _ value: String) -> some View {
+        GridRow {
+            Text(name).font(.caption).foregroundStyle(.secondary)
+                .gridColumnAlignment(.trailing)
+            Text(value).font(.callout).textSelection(.enabled)
+        }
+    }
+
+    private var rawValuesDisclosure: some View {
+        DisclosureGroup("All reported values (\(statusValues.count))") {
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(statusValues, id: \.self) { v in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(v.path.replacingOccurrences(of: ".StatusItems.", with: ""))
+                            .font(.caption2.monospaced()).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle)
+                        Text(v.value).font(.caption2.monospaced())
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+            .padding(.top, 4)
+        }
+        .font(.caption)
+    }
+
+    private var reportingSetup: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("No device reporting yet")
+                .font(.callout).foregroundStyle(.secondary)
+            Text("Macs only report what a status-subscription declaration asks for. Enable reporting once and every device in the set keeps its OS version, model, serial, and FileVault state current here — the device pushes changes itself.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                TextField("Set", text: $reportingSetName)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 110)
+                Button {
+                    Task { await enableReporting() }
+                } label: {
+                    if enablingReporting {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Enable Device Reporting", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                }
+                .disabled(enablingReporting
+                          || reportingSetName.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            Text("This device must be in the set too (⋯ → Assign to Set…). Values appear after its next sync — usually seconds.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @MainActor
+    private func loadStatus(id: String) async {
+        statusLoading = true
+        statusError = nil
+        defer { statusLoading = false }
+        do {
+            statusValues = try await KMFDDMService(settings: settings)
+                .statusValues(enrollmentID: id, pathPrefix: ".StatusItems.device")
+            // Pull the FileVault + remaining items too when the narrow
+            // prefix came back empty — older reports may differ in shape.
+            let extra = try await KMFDDMService(settings: settings)
+                .statusValues(enrollmentID: id, pathPrefix: ".StatusItems.diskmanagement")
+            statusValues.append(contentsOf: extra)
+        } catch {
+            statusError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func enableReporting() async {
+        enablingReporting = true
+        defer { enablingReporting = false }
+        let configID = "com.hellocomputer.edict.status-subscriptions"
+        do {
+            try await KMFDDMService(settings: settings).deploy(
+                configJSON: DDMDeclarations.statusSubscriptions(identifier: configID),
+                configID: configID,
+                toSet: reportingSetName.trimmingCharacters(in: .whitespaces)
+            )
+            flash("Reporting enabled — values arrive as devices sync")
+            if let id = selectedDeviceID {
+                try? await Task.sleep(for: .seconds(6))
+                await loadStatus(id: id)
+            }
+        } catch {
+            actionError = error.localizedDescription
+        }
     }
 
     // MARK: - Labels (local-only friendly names)

@@ -27,6 +27,7 @@ struct DeclarationsView: View {
     @State private var actionError: String?
     @State private var actionNotice: String?
     @State private var showingNewSheet = false
+    @State private var showingEnforceSheet = false
     @State private var confirmingDelete = false
     @State private var addSetName = "default"
 
@@ -42,6 +43,12 @@ struct DeclarationsView: View {
         .sheet(isPresented: $showingNewSheet) {
             NewDeclarationSheet { json in
                 await put(json: json)
+            }
+        }
+        .sheet(isPresented: $showingEnforceSheet) {
+            UpdateEnforcementSheet {
+                flash("Update enforcement deployed")
+                Task { await refresh() }
             }
         }
         .alert("Delete Declaration?", isPresented: $confirmingDelete) {
@@ -107,6 +114,12 @@ struct DeclarationsView: View {
                 Label("Refresh", systemImage: "arrow.clockwise")
             }
             .help("Re-fetch the declaration list from KMFDDM")
+            Button {
+                showingEnforceSheet = true
+            } label: {
+                Label("Enforce Update…", systemImage: "arrow.down.circle.dotted")
+            }
+            .help("Require a macOS version by a deadline — devices in the set handle the install themselves")
             Button {
                 showingNewSheet = true
             } label: {
