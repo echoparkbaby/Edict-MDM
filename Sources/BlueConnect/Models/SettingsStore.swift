@@ -545,6 +545,21 @@ final class SettingsStore: ObservableObject {
         mdmRequireFileVault || !mdmMinOSVersion.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
+    /// Scheduled automation tasks. JSON in @AppStorage.
+    @AppStorage("mdmScheduledTasksRaw") private var scheduledTasksRaw: String = "[]"
+    var scheduledTasks: [ScheduledTask] {
+        get {
+            guard let data = scheduledTasksRaw.data(using: .utf8),
+                  let arr = try? JSONDecoder().decode([ScheduledTask].self, from: data)
+            else { return [] }
+            return arr
+        }
+        set {
+            let data = (try? JSONEncoder().encode(newValue)) ?? Data("[]".utf8)
+            scheduledTasksRaw = String(data: data, encoding: .utf8) ?? "[]"
+        }
+    }
+
     /// Smart groups (dynamic device groups). JSON in @AppStorage.
     @AppStorage("mdmSmartGroupsRaw") private var smartGroupsRaw: String = "[]"
     var smartGroups: [SmartGroup] {

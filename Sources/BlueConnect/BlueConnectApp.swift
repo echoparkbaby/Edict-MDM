@@ -14,6 +14,7 @@ struct BlueConnectAdminApp: App {
     @State private var activity = ActivityLog()
     @State private var terminals = TerminalSessionsManager()
     @State private var notifier = HostStateNotifier()
+    @State private var mdmScheduler = MDMScheduler()
     @State private var idleLock = IdleLockMonitor()
     @State private var rendezvous = LocalRendezvousBrowser()
     @State private var tailscale = TailscaleBrowser()
@@ -52,6 +53,7 @@ struct BlueConnectAdminApp: App {
             .environment(mrInventory)
             .environmentObject(quickActionStore)
             .environment(quickActionLauncher)
+            .environment(mdmScheduler)
             .task {
                 Log.info("App", "BlueConnect Admin starting")
                 auth.bootstrap(settings: settings)
@@ -62,6 +64,7 @@ struct BlueConnectAdminApp: App {
                 settings.loadUnifiAPIKeyFromKeychain()
                 settings.loadMDMKeysFromKeychain()
                 settings.loadSCEPChallengeFromKeychain()
+                mdmScheduler.start(settings: settings, notifier: notifier, activity: activity)
                 if settings.localNetworkEnabled { rendezvous.start() }
                 tailscale.settings = settings
                 if settings.tailscaleEnabled { tailscale.start() }
