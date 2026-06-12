@@ -21,6 +21,15 @@ struct DevicesView: View {
     @Environment(BlueSkyHostListStore.self) private var hostStore
     @Environment(ActivityLog.self) private var activity
     @Environment(TerminalSessionsManager.self) private var terminals
+    @Environment(HostStateNotifier.self) private var notifier
+
+    // Notification de-dup: enrollment IDs seen on the prior refresh, the
+    // device IDs already flagged non-compliant, and whether the cert
+    // warning has fired this session.
+    @State private var knownIDs = Set<String>()
+    @State private var notifiedNonCompliant = Set<String>()
+    @State private var notifiedCertExpiry = false
+    @State private var firstLoadDone = false
 
     @State private var enrollments: [MDMEnrollment] = []
     @State private var loading = false
@@ -559,6 +568,49 @@ struct DevicesView: View {
         } catch {
             actionError = error.localizedDescription
         }
+    }
+
+    // MARK: - Notifications
+
+    /// Compare this refresh to the prior snapshot and post notifications
+    /// for: a newly-enrolled Mac, a device that fell out of compliance,
+    /// and a push cert nearing expiry. Silent on the very first load so
+    /// the app doesn't announce the whole existing fleet at launch.
+    private func fireMDMNotifications() {
+        let current = devices
+        let currentIDs = Set(current.map(\.id))
+
+        if firstLoadDone {
+            for d in current where !knownIDs.contains(d.id) {
+                notifier.notify(title: "New Mac enrolled",
+                                body: "\(label(for: d)) just enrolled in Edict MDM.",
+                                identifier: "edict-enroll")
+                activity.record(.connect, title: "New enrollment: \(label(for: d))")
+            }
+        }
+        for d in current {
+            if let r = complianceResult(for: d), !r.passing, !r.failures.isEmpty {
+                if !notifiedNonCompliant.contains(d.id) {
+                    notifiedNonCompliant.insert(d.id)
+                    if firstLoadDone {
+                        notifier.notify(title: "Device out of compliance",
+                                        body: "\(label(for: d)): \(r.failures.joined(separator: ", ")).",
+                                        identifier: "edict-compliance")
+                    }
+                }
+            } else {
+                notifiedNonCompliant.remove(d.id)   // back in compliance → can re-warn later
+            }
+        }
+        if !notifiedCertExpiry, let days = pushCert?.daysLeft, days < 30 {
+            notifiedCertExpiry = true
+            notifier.notify(title: "MDM push certificate expiring",
+                            body: "Your APNs push certificate expires in \(days) days. Renew it before then or MDM goes dark.",
+                            identifier: "edict-cert")
+        }
+
+        knownIDs = currentIDs
+        firstLoadDone = true
     }
 
     // MARK: - Compliance summary
@@ -1241,6 +1293,7 @@ struct DevicesView: View {
             await loadUpdateTarget()
             await loadOSVersions()
             pushCert = try? await api.pushCert()
+            fireMDMNotifications()
         } catch {
             loadError = error.localizedDescription
         }

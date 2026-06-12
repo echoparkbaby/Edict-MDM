@@ -48,6 +48,13 @@ final class HostStateNotifier {
         }
     }
 
+    /// Post a user notification from anywhere (e.g. Edict MDM events).
+    /// Requests authorization on first use.
+    func notify(title: String, body: String, identifier: String = "edict") {
+        requestAuthorizationIfNeeded()
+        fireNotification(title: title, body: body, identifier: identifier)
+    }
+
     private func fireNotification(title: String, body: String, identifier: String) {
         let content = UNMutableNotificationContent()
         content.title = title
