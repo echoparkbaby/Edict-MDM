@@ -8,6 +8,10 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$PROJECT_ROOT/.env-sign" ]]; then
     set -a; source "$PROJECT_ROOT/.env-sign"; set +a
 fi
+# Per-branch identity wins over .env-sign defaults (see build-app.sh).
+if [[ -f "$PROJECT_ROOT/build-identity.sh" ]]; then
+    source "$PROJECT_ROOT/build-identity.sh"
+fi
 APP_NAME="${APP_NAME:-BlueConnect Admin}"
 DMG_NAME="${DMG_NAME:-BlueConnect-Admin.dmg}"
 SIGN_ID="${SIGN_ID:-}"

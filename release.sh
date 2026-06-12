@@ -24,9 +24,24 @@ if [[ ! -f "$PROJECT_ROOT/.env-sign" ]]; then
 fi
 set -a; source "$PROJECT_ROOT/.env-sign"; set +a
 
+# Per-branch app identity (APP_NAME / BUNDLE_ID / DMG_NAME / PUBLISH_GITHUB),
+# sourced AFTER .env-sign so it wins. On main this is the "Edict MDM"
+# identity with PUBLISH_GITHUB=0 (Forgejo-only); on release/1.5 it's the
+# public "BlueConnect Admin" identity. Absent → fall back to .env-sign with
+# GitHub publishing on.
+if [[ -f "$PROJECT_ROOT/build-identity.sh" ]]; then
+    source "$PROJECT_ROOT/build-identity.sh"
+fi
+PUBLISH_GITHUB="${PUBLISH_GITHUB:-1}"
+
 : "${SIGN_ID:?SIGN_ID required for a release build}"
 : "${NOTARY_PROFILE:?NOTARY_PROFILE required for notarization}"
-: "${GITHUB_REPO:?GITHUB_REPO required for upload (format: owner/repo)}"
+# GitHub repo is only required when we're actually publishing there (v1.x).
+# v2 (PUBLISH_GITHUB=0) releases privately to Forgejo only.
+if [[ "$PUBLISH_GITHUB" == "1" ]]; then
+    : "${GITHUB_REPO:?GITHUB_REPO required for upload (format: owner/repo)}"
+fi
+echo "▶ identity: $APP_NAME ($BUNDLE_ID)  publish-github=$PUBLISH_GITHUB"
 
 DMG_NAME="${DMG_NAME:-BlueConnect-Admin.dmg}"
 DMG="$PROJECT_ROOT/$DMG_NAME"
@@ -78,6 +93,10 @@ PKG_VERSION="$VERSION" bash "$PROJECT_ROOT/scripts/build-helper-pkg.sh" --notari
 
 NOTES="${RELEASE_NOTES_FILE:-$PROJECT_ROOT/RELEASE_NOTES.md}"
 
+# GitHub release — public track only. v2 / "Edict MDM" sets
+# PUBLISH_GITHUB=0 (via build-identity.sh) so it never lands on the public
+# repo; it ships to Forgejo (below) only.
+if [[ "$PUBLISH_GITHUB" == "1" ]]; then
 echo "▶ gh release create (GitHub)"
 # `--latest` is explicit so the release lands as Latest even if a higher
 # semver tag exists transiently (e.g. a draft 1.6.0 created out of order
@@ -114,6 +133,9 @@ if [[ "$LATEST_TAG" != "$TAG" ]]; then
     exit 1
 fi
 echo "  ✓ /releases/latest = $LATEST_TAG"
+else
+    echo "▶ skipping GitHub release (PUBLISH_GITHUB=0 — private v2 track, Forgejo only)"
+fi
 
 # Forgejo release — POST a release record + upload the DMG as an
 # asset. Config is optional: skip if FORGEJO_BASE / FORGEJO_TOKEN

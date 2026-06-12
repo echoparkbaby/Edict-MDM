@@ -15,6 +15,12 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$PROJECT_ROOT/.env-sign" ]]; then
     set -a; source "$PROJECT_ROOT/.env-sign"; set +a
 fi
+# Load per-branch app identity AFTER .env-sign so it wins over the secrets
+# file's identity defaults. Tracked, differs per branch (MDM on main,
+# Admin on release/1.5). Optional: absence falls back to .env-sign/defaults.
+if [[ -f "$PROJECT_ROOT/build-identity.sh" ]]; then
+    source "$PROJECT_ROOT/build-identity.sh"
+fi
 
 # Defaults — override in `.env-sign` or via env to publish under your own
 # identity / different version.
