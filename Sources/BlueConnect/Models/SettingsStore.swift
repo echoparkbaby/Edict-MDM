@@ -536,6 +536,15 @@ final class SettingsStore: ObservableObject {
             && !kmfddmBaseURL.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
+    // MARK: - Compliance baseline
+    /// The fleet baseline Edict grades each Mac against in the Devices view.
+    @AppStorage("mdmRequireFileVault") var mdmRequireFileVault: Bool = false
+    @AppStorage("mdmMinOSVersion") var mdmMinOSVersion: String = ""
+    /// Whether any rule is set — gates the compliance UI.
+    var mdmComplianceConfigured: Bool {
+        mdmRequireFileVault || !mdmMinOSVersion.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
     /// PayloadIdentifier of the enrollment profile installed on managed
     /// Macs. "Remove from MDM" sends a RemoveProfile for this identifier —
     /// pulling the enrollment profile unenrolls the device.

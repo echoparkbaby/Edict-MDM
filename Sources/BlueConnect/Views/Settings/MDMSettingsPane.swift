@@ -33,6 +33,7 @@ struct MDMSettingsPane: View {
                 nanoSection
                 kmfddmSection
                 enrollmentSection
+                complianceSection
                 testSection
             }
             aboutSection
@@ -164,6 +165,18 @@ struct MDMSettingsPane: View {
             exportResult = "Saved \(url.lastPathComponent) — \(signedNote). Install it on a Mac to enroll."
         } catch {
             exportResult = "Export failed: \(error.localizedDescription)"
+        }
+    }
+
+    private var complianceSection: some View {
+        Section("Compliance baseline") {
+            Toggle("Require FileVault", isOn: $settings.mdmRequireFileVault)
+            TextField("Minimum macOS version", text: $settings.mdmMinOSVersion,
+                      prompt: Text(verbatim: "15.5"))
+                .help("Leave blank for no OS requirement. e.g. 15.5")
+            Text("Devices are graded against these rules in the Devices view — a green or red seal per Mac and a fleet count. Requires Device Reporting on so FileVault and OS version are known.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

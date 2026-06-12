@@ -74,6 +74,13 @@ struct DevicesView: View {
         case unreported         // no OS version reported (reporting off)
     }
 
+    /// Pass/fail against the configured baseline, with reasons.
+    struct ComplianceResult {
+        let passing: Bool
+        let failures: [String]
+        let unknowns: [String]
+    }
+
     // Per-action feedback
     @State private var busyDeviceID: String?
     @State private var actionNotice: String?
@@ -302,6 +309,9 @@ struct DevicesView: View {
             if loading { ProgressView().controlSize(.small) }
             Text("\(devices.count)")
                 .font(.caption).foregroundStyle(.secondary)
+            if settings.mdmComplianceConfigured, !devices.isEmpty {
+                complianceSummary
+            }
             if let target = updateTarget, !devices.isEmpty {
                 rolloutSummary(target)
                 Button {
@@ -341,6 +351,7 @@ struct DevicesView: View {
 
     private func deviceRow(_ enr: MDMEnrollment) -> some View {
         HStack(spacing: 10) {
+            baselineDot(enr)
             Image(systemName: "laptopcomputer")
                 .foregroundStyle(enr.isEnabled ? Color.accentColor : Color.secondary)
             VStack(alignment: .leading, spacing: 1) {
@@ -528,6 +539,22 @@ struct DevicesView: View {
         }
     }
 
+    // MARK: - Compliance summary
+
+    private var complianceSummary: some View {
+        let results = devices.compactMap { complianceResult(for: $0) }
+        let pass = results.filter(\.passing).count
+        let total = results.count
+        return HStack(spacing: 4) {
+            Image(systemName: pass == total ? "checkmark.seal.fill" : "xmark.seal.fill")
+                .foregroundStyle(pass == total ? .green : .red)
+            Text("\(pass)/\(total) compliant").font(.caption)
+        }
+        .help("Against your baseline" +
+              (settings.mdmRequireFileVault ? " · FileVault required" : "") +
+              (settings.mdmMinOSVersion.isEmpty ? "" : " · macOS ≥ \(settings.mdmMinOSVersion)"))
+    }
+
     // MARK: - Update rollout
 
     private func rolloutSummary(_ target: UpdateTarget) -> some View {
@@ -572,6 +599,46 @@ struct DevicesView: View {
             .background(Capsule().fill(color.opacity(0.16)))
             .foregroundStyle(color)
             .help(help)
+    }
+
+    /// Grade a device against the configured baseline (FileVault, min OS).
+    private func complianceResult(for enr: MDMEnrollment) -> ComplianceResult? {
+        guard settings.mdmComplianceConfigured else { return nil }
+        var failures: [String] = []
+        var unknowns: [String] = []
+        if settings.mdmRequireFileVault {
+            switch fileVault[enr.id] {
+            case .some(let v) where v == "true" || v == "1": break
+            case .some: failures.append("FileVault off")
+            case nil: unknowns.append("FileVault")
+            }
+        }
+        let minOS = settings.mdmMinOSVersion.trimmingCharacters(in: .whitespaces)
+        if !minOS.isEmpty {
+            if let v = osVersions[enr.id] {
+                if !versionAtLeast(v, minOS) { failures.append("macOS \(v) < \(minOS)") }
+            } else {
+                unknowns.append("macOS version")
+            }
+        }
+        return ComplianceResult(passing: failures.isEmpty && unknowns.isEmpty,
+                                failures: failures, unknowns: unknowns)
+    }
+
+    @ViewBuilder
+    private func baselineDot(_ enr: MDMEnrollment) -> some View {
+        if let r = complianceResult(for: enr) {
+            if r.passing {
+                Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                    .help("Meets the compliance baseline")
+            } else if !r.failures.isEmpty {
+                Image(systemName: "xmark.seal.fill").foregroundStyle(.red)
+                    .help("Out of compliance: \(r.failures.joined(separator: ", "))")
+            } else {
+                Image(systemName: "questionmark.circle.fill").foregroundStyle(.secondary)
+                    .help("Can't verify: \(r.unknowns.joined(separator: ", ")) not reported")
+            }
+        }
     }
 
     private func compliance(for enr: MDMEnrollment) -> Compliance {
@@ -683,6 +750,9 @@ struct DevicesView: View {
                         Label(err, systemImage: "exclamationmark.triangle.fill")
                             .font(.caption).foregroundStyle(.orange)
                             .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let r = complianceResult(for: enr) {
+                        complianceCard(r)
                     }
                     if hasDeviceFacts {
                         osCard
@@ -796,6 +866,29 @@ struct DevicesView: View {
             infoRow("Hardware UUID", enr.id, mono: true)
             if let host = bscHost(for: enr) {
                 infoRow("BlueSky", "\(host.displayName) (#\(host.blueskyid))")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func complianceCard(_ r: ComplianceResult) -> some View {
+        cardBackground {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: r.passing ? "checkmark.seal.fill"
+                          : (r.failures.isEmpty ? "questionmark.circle.fill" : "xmark.seal.fill"))
+                        .foregroundStyle(r.passing ? .green : (r.failures.isEmpty ? .secondary : .red))
+                    Text(r.passing ? "Compliant" : (r.failures.isEmpty ? "Can't verify" : "Out of compliance"))
+                        .font(.caption).bold()
+                        .foregroundStyle(r.passing ? .green : (r.failures.isEmpty ? .secondary : .red))
+                }
+                ForEach(r.failures, id: \.self) { f in
+                    Label(f, systemImage: "xmark.circle").font(.caption).foregroundStyle(.red)
+                }
+                ForEach(r.unknowns, id: \.self) { u in
+                    Label("\(u) not reported", systemImage: "questionmark.circle")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
         }
     }
