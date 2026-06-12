@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import UniformTypeIdentifiers
 
 /// Edict MDM configuration-profile library — the center pane for the
@@ -161,6 +162,31 @@ struct ProfilesView: View {
         var id: String { rawValue }
     }
 
+    // Saved / favorited profiles
+    enum CatalogItem: Hashable { case template(Template); case saved(UUID) }
+    @State private var selected: CatalogItem = .template(.fileVault)
+    @State private var saved: [SavedProfile] = []
+    @State private var showingSaveSheet = false
+    @State private var saveName = ""
+    @State private var saveFavorite = false
+
+    /// Templates alphabetized; Custom pinned last.
+    private var sortedTemplates: [Template] {
+        Template.allCases.filter { $0 != .custom }
+            .sorted { $0.rawValue.localizedCaseInsensitiveCompare($1.rawValue) == .orderedAscending } + [.custom]
+    }
+    /// Saved profiles: favorites first, then alphabetical.
+    private var sortedSaved: [SavedProfile] {
+        saved.sorted {
+            if $0.favorite != $1.favorite { return $0.favorite }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+    private var currentSaved: SavedProfile? {
+        if case .saved(let id) = selected { return saved.first { $0.id == id } }
+        return nil
+    }
+
     var body: some View {
         Group {
             if !settings.mdmEnabled || !settings.mdmConfigured {
@@ -183,7 +209,12 @@ struct ProfilesView: View {
                 }
             }
         }
-        .task { await loadDevices() }
+        .task {
+            saved = SavedProfilesStore.load()
+            await loadDevices()
+        }
+        .onChange(of: selected) { _, v in if case .template(let t) = v { template = t } }
+        .sheet(isPresented: $showingSaveSheet) { saveSheet }
     }
 
     private var unconfigured: some View {
@@ -197,20 +228,60 @@ struct ProfilesView: View {
     }
 
     private var catalog: some View {
-        List(Template.allCases, selection: $template) { t in
-            Label {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(t.rawValue)
-                    Text(t.blurb).font(.caption2).foregroundStyle(.secondary)
-                        .lineLimit(2)
+        VStack(spacing: 0) {
+            List(selection: $selected) {
+                Section("Templates") {
+                    ForEach(sortedTemplates) { t in
+                        Label {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(t.rawValue)
+                                Text(t.blurb).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                            }
+                        } icon: { Image(systemName: t.icon) }
+                        .tag(CatalogItem.template(t))
+                    }
                 }
-            } icon: { Image(systemName: t.icon) }
-            .tag(t)
+                if !saved.isEmpty {
+                    Section("Saved") {
+                        ForEach(sortedSaved) { sp in
+                            Label {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(sp.name).lineLimit(1)
+                                    if !sp.summary.isEmpty {
+                                        Text(sp.summary).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                }
+                            } icon: {
+                                Image(systemName: sp.favorite ? "star.fill" : "doc")
+                                    .foregroundStyle(sp.favorite ? .yellow : .secondary)
+                            }
+                            .tag(CatalogItem.saved(sp.id))
+                        }
+                    }
+                }
+            }
+            .listStyle(.sidebar)
+            Divider()
+            HStack {
+                Button { importProfiles() } label: { Label("Import…", systemImage: "square.and.arrow.down") }
+                    .buttonStyle(.borderless).font(.caption)
+                    .help("Import .mobileconfig files (signed or plain) as saved profiles")
+                Spacer()
+            }
+            .padding(8)
         }
-        .listStyle(.sidebar)
     }
 
+    @ViewBuilder
     private var editor: some View {
+        if let sp = currentSaved {
+            savedEditor(sp)
+        } else {
+            templateEditor
+        }
+    }
+
+    private var templateEditor: some View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -218,19 +289,20 @@ struct ProfilesView: View {
                     formForTemplate
                     Divider()
                     targetPicker
-                    if let result {
-                        Text(result).font(.caption)
-                            .foregroundStyle(result.hasPrefix("Deployed") ? .green : .orange)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    resultLine
                 }
                 .padding(16)
             }
             Divider()
             HStack {
+                Button {
+                    saveName = template.rawValue; saveFavorite = false; showingSaveSheet = true
+                } label: { Label("Save…", systemImage: "tray.and.arrow.down") }
+                    .disabled(!formValid)
+                    .help("Save this configured profile to reuse or favorite")
                 Spacer()
                 Button {
-                    Task { await deploy() }
+                    Task { await deployBuilt() }
                 } label: {
                     if deploying { ProgressView().controlSize(.small) }
                     else { Label("Deploy to \(resolvedTargets.count) device\(resolvedTargets.count == 1 ? "" : "s")",
@@ -241,6 +313,75 @@ struct ProfilesView: View {
             }
             .padding(12)
         }
+    }
+
+    private func savedEditor(_ sp: SavedProfile) -> some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack {
+                        Text(sp.name).font(.headline)
+                        if sp.isSigned {
+                            Label("Signed", systemImage: "checkmark.seal.fill").font(.caption).foregroundStyle(.green)
+                        }
+                        Spacer()
+                        Button { toggleFavorite(sp) } label: {
+                            Image(systemName: sp.favorite ? "star.fill" : "star").foregroundStyle(.yellow)
+                        }.buttonStyle(.plain).help("Favorite")
+                        Button(role: .destructive) { deleteSaved(sp) } label: { Image(systemName: "trash") }
+                            .buttonStyle(.plain).help("Delete this saved profile")
+                    }
+                    if !sp.summary.isEmpty {
+                        Text("Payloads: \(sp.summary)").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text("Stored .mobileconfig, \(sp.data.count) bytes — deploys as-is\(sp.isSigned ? " with its signature intact" : "").")
+                        .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Divider()
+                    targetPicker
+                    resultLine
+                }
+                .padding(16)
+            }
+            Divider()
+            HStack {
+                Spacer()
+                Button {
+                    Task { await deploy(data: sp.data, name: sp.name) }
+                } label: {
+                    if deploying { ProgressView().controlSize(.small) }
+                    else { Label("Deploy to \(resolvedTargets.count) device\(resolvedTargets.count == 1 ? "" : "s")",
+                                 systemImage: "paperplane.fill") }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(deploying || resolvedTargets.isEmpty)
+            }
+            .padding(12)
+        }
+    }
+
+    @ViewBuilder
+    private var resultLine: some View {
+        if let result {
+            Text(result).font(.caption)
+                .foregroundStyle(result.hasPrefix("Deployed") || result.hasPrefix("Saved") || result.hasPrefix("Imported") ? .green : .orange)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var saveSheet: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Save Profile").font(.headline)
+            TextField("Name", text: $saveName).textFieldStyle(.roundedBorder)
+            Toggle("Favorite", isOn: $saveFavorite)
+            HStack {
+                Spacer()
+                Button("Cancel") { showingSaveSheet = false }.keyboardShortcut(.cancelAction)
+                Button("Save") { saveCurrent() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(saveName.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(20).frame(width: 380)
     }
 
     /// The devices a deploy will hit, by the active target mode.
@@ -603,29 +744,92 @@ struct ProfilesView: View {
         osVersions = os; fileVault = fv; models = mdl
     }
 
+    /// Build the current template and deploy it.
     @MainActor
-    private func deploy() async {
-        deploying = true
-        result = nil
-        defer { deploying = false }
+    private func deployBuilt() async {
         let built: (data: Data, name: String)
         do { built = try buildProfile() }
         catch { result = "Couldn't build profile: \(error.localizedDescription)"; return }
+        await deploy(data: built.data, name: built.name)
+    }
 
+    /// Deploy raw profile bytes (template-built or saved/imported) to the
+    /// resolved targets.
+    @MainActor
+    private func deploy(data: Data, name: String) async {
+        deploying = true
+        result = nil
+        defer { deploying = false }
         let nano = NanoMDMService(settings: settings)
         let targets = resolvedTargets
         var ok = 0, failed = 0
         for t in targets {
             do {
-                try await nano.installProfile(enrollmentID: t.id, profile: built.data)
+                try await nano.installProfile(enrollmentID: t.id, profile: data)
                 _ = try? await nano.push(enrollmentIDs: t.id)
                 ok += 1
             } catch { failed += 1 }
         }
         result = failed == 0
-            ? "Deployed \(built.name) to \(ok) device\(ok == 1 ? "" : "s")"
+            ? "Deployed \(name) to \(ok) device\(ok == 1 ? "" : "s")"
             : "Deployed to \(ok), failed \(failed)"
-        activity.record(.category, title: "Deployed profile: \(built.name)",
+        activity.record(.category, title: "Deployed profile: \(name)",
                         detail: "\(ok) device\(ok == 1 ? "" : "s")" + (failed > 0 ? ", \(failed) failed" : ""))
+    }
+
+    // MARK: - Saved profiles
+
+    private func saveCurrent() {
+        showingSaveSheet = false
+        let built: (data: Data, name: String)
+        do { built = try buildProfile() } catch { result = "Couldn't build: \(error.localizedDescription)"; return }
+        let desc = SavedProfilesStore.describe(built.data, fallbackName: saveName)
+        let sp = SavedProfile(name: saveName.trimmingCharacters(in: .whitespaces),
+                              data: built.data, favorite: saveFavorite, summary: desc.summary)
+        saved.append(sp)
+        SavedProfilesStore.save(saved)
+        selected = .saved(sp.id)
+        result = "Saved \(sp.name)"
+    }
+
+    private func toggleFavorite(_ sp: SavedProfile) {
+        guard let idx = saved.firstIndex(where: { $0.id == sp.id }) else { return }
+        saved[idx].favorite.toggle()
+        SavedProfilesStore.save(saved)
+    }
+
+    private func deleteSaved(_ sp: SavedProfile) {
+        saved.removeAll { $0.id == sp.id }
+        SavedProfilesStore.save(saved)
+        selected = .template(.fileVault)
+    }
+
+    private func importProfiles() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [UTType(filenameExtension: "mobileconfig") ?? .data]
+        guard panel.runModal() == .OK else { return }
+        var urls: [URL] = []
+        for u in panel.urls {
+            if (try? u.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+                let inner = (try? FileManager.default.contentsOfDirectory(at: u, includingPropertiesForKeys: nil)) ?? []
+                urls += inner.filter { $0.pathExtension.lowercased() == "mobileconfig" }
+            } else {
+                urls.append(u)
+            }
+        }
+        var added = 0
+        for url in urls {
+            guard let data = try? Data(contentsOf: url) else { continue }
+            let desc = SavedProfilesStore.describe(data, fallbackName: url.deletingPathExtension().lastPathComponent)
+            saved.append(SavedProfile(name: desc.name, data: data, favorite: true, summary: desc.summary))
+            added += 1
+        }
+        if added > 0 {
+            SavedProfilesStore.save(saved)
+            result = "Imported \(added) profile\(added == 1 ? "" : "s")"
+        }
     }
 }
