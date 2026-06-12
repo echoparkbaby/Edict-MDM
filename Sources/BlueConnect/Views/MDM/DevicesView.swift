@@ -312,7 +312,7 @@ struct DevicesView: View {
                                 .contextMenu { selectionContextMenu(enr) }
                         }
                         if !onboardableHosts.isEmpty {
-                            Section("Not yet enrolled — from BlueSky") {
+                            Section("Deliver enrollment profile (BlueSky)") {
                                 ForEach(onboardableHosts, id: \.blueskyid) { host in
                                     onboardRow(host)
                                 }
@@ -465,8 +465,9 @@ struct DevicesView: View {
     private func deviceRow(_ enr: MDMEnrollment) -> some View {
         HStack(spacing: 10) {
             baselineDot(enr)
-            Image(systemName: "laptopcomputer")
+            Image(systemName: deviceKind(enr).icon)
                 .foregroundStyle(enr.isEnabled ? Color.accentColor : Color.secondary)
+                .help(deviceKind(enr).label)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text(label(for: enr))
@@ -499,7 +500,7 @@ struct DevicesView: View {
                 .textSelection(.enabled)
             }
             Spacer()
-            if let fv = fileVault[enr.id] {
+            if deviceKind(enr).isMac, let fv = fileVault[enr.id] {
                 let on = fv == "true" || fv == "1"
                 chip(on ? "FV on" : "FV off", color: on ? .green : .red,
                      help: on ? "FileVault disk encryption is on"
@@ -689,7 +690,7 @@ struct DevicesView: View {
             } label: {
                 Label("Send Profile", systemImage: "paperplane")
             }
-            .help("Push the enrollment profile to this Mac's Desktop over the BlueSky tunnel — the user double-clicks it to enroll")
+            .help("Copies the enrollment profile to this Mac's Desktop over the BlueSky tunnel. Apple does NOT allow remote auto-install — someone at the Mac must double-click it and approve in System Settings → Device Management. This just saves the AirDrop/email step.")
             .disabled(busyDeviceID != nil)
         }
         .padding(.vertical, 2)
@@ -907,7 +908,8 @@ struct DevicesView: View {
         guard settings.mdmComplianceConfigured else { return nil }
         var failures: [String] = []
         var unknowns: [String] = []
-        if settings.mdmRequireFileVault {
+        // FileVault is a Mac-only concept — don't grade iOS/tvOS on it.
+        if settings.mdmRequireFileVault, deviceKind(enr).isMac {
             switch fileVault[enr.id] {
             case .some(let v) where v == "true" || v == "1": break
             case .some: failures.append("FileVault off")
@@ -1091,15 +1093,14 @@ struct DevicesView: View {
     /// refresh.
     private func detailHeader(_ enr: MDMEnrollment) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "laptopcomputer")
+            Image(systemName: deviceKind(enr).icon)
                 .font(.system(size: 30))
                 .foregroundStyle(enr.isEnabled ? Color.accentColor : .secondary)
                 .frame(width: 40)
             VStack(alignment: .leading, spacing: 3) {
                 Text(label(for: enr)).font(.title3).bold()
-                if let model = statusValue("model.marketing-name") {
-                    Text(model).font(.subheadline).foregroundStyle(.secondary)
-                }
+                Text(statusValue("model.marketing-name") ?? deviceKind(enr).label)
+                    .font(.subheadline).foregroundStyle(.secondary)
                 HStack(spacing: 6) {
                     chip(enr.isEnabled ? "Enrolled" : "Unenrolled",
                          color: enr.isEnabled ? .green : .secondary,
@@ -1432,6 +1433,17 @@ struct DevicesView: View {
     }
 
     /// The BSC fleet host with the same serial number, if any.
+    /// Device platform inferred from the reported model marketing name.
+    /// NanoMDM manages Macs, iPhones, iPads, and Apple TVs alike.
+    private func deviceKind(_ enr: MDMEnrollment) -> (icon: String, label: String, isMac: Bool) {
+        let m = (models[enr.id] ?? "").lowercased()
+        if m.contains("iphone") { return ("iphone", "iPhone", false) }
+        if m.contains("ipad") { return ("ipad", "iPad", false) }
+        if m.contains("apple tv") || m.contains("appletv") { return ("appletv", "Apple TV", false) }
+        if m.contains("watch") { return ("applewatch", "Apple Watch", false) }
+        return ("laptopcomputer", "Mac", true)
+    }
+
     private func bscHost(for enr: MDMEnrollment) -> BlueSkyHost? {
         guard let serial = enr.serialNumber, !serial.isEmpty else { return nil }
         return hostStore.hosts.first {

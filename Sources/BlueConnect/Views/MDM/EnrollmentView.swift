@@ -52,7 +52,7 @@ struct EnrollmentView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Enrollment Profile").font(.title2).bold()
-            Text("Build the .mobileconfig new Macs install to enroll. Hand it out any way you like — AirDrop, a download link, or push it to a fleet Mac from the Devices tab.")
+            Text("Build the .mobileconfig new devices install to enroll. The same profile enrolls Macs, iPhones, iPads, and Apple TVs (user enrollment via download). Hand it out by AirDrop, a download link, or push it to a fleet Mac from the Devices tab. Zero-touch / supervised iOS & tvOS needs Apple Configurator or Automated Device Enrollment.")
                 .font(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
