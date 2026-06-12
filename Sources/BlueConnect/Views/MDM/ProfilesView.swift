@@ -14,6 +14,9 @@ struct ProfilesView: View {
         case softwareUpdate = "Software Update"
         case screenLock = "Screen Lock"
         case restrictions = "Restrictions"
+        case gatekeeper = "Gatekeeper"
+        case loginWindow = "Login Window"
+        case certificate = "Root Certificate"
         case wifi = "Wi-Fi Network"
         case passcode = "Password Policy"
         case custom = "Custom Profile"
@@ -25,6 +28,9 @@ struct ProfilesView: View {
             case .softwareUpdate: return "arrow.triangle.2.circlepath"
             case .screenLock: return "lock.display"
             case .restrictions: return "hand.raised"
+            case .gatekeeper: return "checkmark.shield"
+            case .loginWindow: return "person.crop.rectangle"
+            case .certificate: return "seal"
             case .wifi: return "wifi"
             case .passcode: return "lock.rectangle"
             case .custom: return "doc.text"
@@ -37,6 +43,9 @@ struct ProfilesView: View {
             case .softwareUpdate: return "Automatic update checks, downloads, and installs."
             case .screenLock: return "Require the password after the screen saver or sleep."
             case .restrictions: return "Disable AirDrop, Erase All Content, Game Center, App installs."
+            case .gatekeeper: return "Only allow signed apps to run; App Store + identified developers."
+            case .loginWindow: return "Harden the login window — disable guest, hide admin users."
+            case .certificate: return "Install and trust a root CA from a pasted PEM certificate."
             case .wifi: return "Auto-join Wi-Fi network pushed to the Mac's system store."
             case .passcode: return "Login password requirements (length, complexity, lock timeout)."
             case .custom: return "Paste any .mobileconfig you already have and deploy it."
@@ -63,6 +72,15 @@ struct ProfilesView: View {
     @State private var rAllowAirDrop = true
     @State private var rAllowGameCenter = true
     @State private var rAllowAppStore = true
+    // Gatekeeper
+    @State private var gkAllowDevelopers = true
+    // Login Window
+    @State private var lwDisableGuest = true
+    @State private var lwHideAdmins = false
+    @State private var lwNamePasswordFields = true
+    // Certificate
+    @State private var certPEM = ""
+    @State private var certName = ""
 
     // Wi-Fi
     @State private var ssid = ""
@@ -197,6 +215,32 @@ struct ProfilesView: View {
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             .formStyle(.columns)
+        case .gatekeeper:
+            Form {
+                Toggle("Allow identified developers (not just App Store)", isOn: $gkAllowDevelopers)
+                Text("Gatekeeper assessment is always on — only signed, notarized apps run. Turn the switch off to allow App Store apps only.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .formStyle(.columns)
+        case .loginWindow:
+            Form {
+                Toggle("Disable guest account", isOn: $lwDisableGuest)
+                Toggle("Hide admin users from the list", isOn: $lwHideAdmins)
+                Toggle("Show name + password fields (not a user list)", isOn: $lwNamePasswordFields)
+            }
+            .formStyle(.columns)
+        case .certificate:
+            VStack(alignment: .leading, spacing: 6) {
+                TextField("Certificate name", text: $certName, prompt: Text("Corp Root CA"))
+                    .textFieldStyle(.roundedBorder)
+                Text("Paste the root CA in PEM form (-----BEGIN CERTIFICATE-----).")
+                    .font(.caption).foregroundStyle(.secondary)
+                TextEditor(text: $certPEM)
+                    .font(.caption.monospaced())
+                    .frame(minHeight: 160)
+                    .overlay(RoundedRectangle(cornerRadius: 4)
+                        .stroke(Color.secondary.opacity(0.25), lineWidth: 1))
+            }
         case .wifi:
             Form {
                 TextField("Network name (SSID)", text: $ssid)
@@ -269,6 +313,7 @@ struct ProfilesView: View {
         switch template {
         case .wifi: return !ssid.trimmingCharacters(in: .whitespaces).isEmpty
         case .custom: return !customXML.trimmingCharacters(in: .whitespaces).isEmpty
+        case .certificate: return certPEM.contains("BEGIN CERTIFICATE")
         default: return true
         }
     }
@@ -291,6 +336,14 @@ struct ProfilesView: View {
                                                  allowAirDrop: rAllowAirDrop,
                                                  allowGameCenter: rAllowGameCenter,
                                                  allowAppStore: rAllowAppStore), "Restrictions")
+        case .gatekeeper:
+            return (ProfilePayloads.gatekeeper(allowIdentifiedDevelopers: gkAllowDevelopers), "Gatekeeper")
+        case .loginWindow:
+            return (ProfilePayloads.loginWindow(disableGuest: lwDisableGuest,
+                                                hideAdminUsers: lwHideAdmins,
+                                                showNamePasswordFields: lwNamePasswordFields), "Login Window")
+        case .certificate:
+            return (try ProfilePayloads.rootCertificate(pem: certPEM, name: certName), "Certificate")
         case .wifi:
             return (ProfilePayloads.wifi(ssid: ssid, password: wifiPassword,
                                          hidden: wifiHidden, security: wifiSecurity),

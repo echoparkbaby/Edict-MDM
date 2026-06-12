@@ -61,6 +61,8 @@ struct DevicesView: View {
     @State private var bulkAssignSheet = false
     @State private var bulkSetName = "default"
 
+    @State private var search = ""
+
     struct UpdateTarget: Equatable {
         let version: String
         let deadline: Date?
@@ -96,7 +98,15 @@ struct DevicesView: View {
     /// Device-channel enrollments only — the Macs themselves. User-channel
     /// rows are sync plumbing, not separate machines.
     private var devices: [MDMEnrollment] {
-        enrollments.filter(\.isDevice)
+        let all = enrollments.filter(\.isDevice)
+        let q = search.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return all }
+        return all.filter { enr in
+            label(for: enr).localizedCaseInsensitiveContains(q)
+                || (enr.serialNumber ?? "").localizedCaseInsensitiveContains(q)
+                || enr.id.localizedCaseInsensitiveContains(q)
+                || (osVersions[enr.id] ?? "").localizedCaseInsensitiveContains(q)
+        }
     }
 
     var body: some View {
@@ -339,6 +349,18 @@ struct DevicesView: View {
                     .lineLimit(1).truncationMode(.tail)
                     .help(err)
             }
+            HStack(spacing: 4) {
+                Image(systemName: "magnifyingglass").font(.caption).foregroundStyle(.secondary)
+                TextField("Filter", text: $search)
+                    .textFieldStyle(.plain)
+                    .frame(width: 130)
+                if !search.isEmpty {
+                    Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
+                        .buttonStyle(.plain).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 6).padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.controlBackgroundColor)))
             Button {
                 Task { await refresh() }
             } label: {

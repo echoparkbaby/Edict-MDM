@@ -123,6 +123,57 @@ enum ProfilePayloads {
                        payloads: [r])
     }
 
+    /// `com.apple.systempolicy.control` — Gatekeeper. Require assessment
+    /// (only signed apps run); optionally restrict to App Store only.
+    static func gatekeeper(allowIdentifiedDevelopers: Bool) -> Data {
+        var gk: [String: Any] = base("com.apple.systempolicy.control",
+                                     displayName: "Gatekeeper")
+        gk["EnableAssessment"] = true
+        gk["AllowIdentifiedDevelopers"] = allowIdentifiedDevelopers
+        return profile(displayName: "Gatekeeper",
+                       identifier: "xyz.hellocomputer.edict.gatekeeper",
+                       payloads: [gk])
+    }
+
+    /// `com.apple.loginwindow` — login window hardening.
+    static func loginWindow(disableGuest: Bool, hideAdminUsers: Bool,
+                            showNamePasswordFields: Bool) -> Data {
+        var lw: [String: Any] = base("com.apple.loginwindow",
+                                     displayName: "Login Window")
+        lw["DisableConsoleAccess"] = true
+        lw["HideAdminUsers"] = hideAdminUsers
+        // SHOWFULLNAME true => name+password text fields; false => user list.
+        lw["SHOWFULLNAME"] = showNamePasswordFields
+        if disableGuest {
+            lw["DisableGuestAccount"] = true
+            lw["EnableExternalAccounts"] = false
+        }
+        return profile(displayName: "Login Window",
+                       identifier: "xyz.hellocomputer.edict.loginwindow",
+                       payloads: [lw])
+    }
+
+    /// `com.apple.security.root` — install + trust a root CA from a pasted
+    /// PEM certificate. The payload carries the DER bytes.
+    static func rootCertificate(pem: String, name: String) throws -> Data {
+        // Extract the base64 between the PEM markers and decode to DER.
+        let b64 = pem
+            .replacingOccurrences(of: "-----BEGIN CERTIFICATE-----", with: "")
+            .replacingOccurrences(of: "-----END CERTIFICATE-----", with: "")
+            .components(separatedBy: .whitespacesAndNewlines)
+            .joined()
+        guard let der = Data(base64Encoded: b64), !der.isEmpty else {
+            throw Invalid.notCertificate
+        }
+        var cert: [String: Any] = base("com.apple.security.root",
+                                       displayName: name.isEmpty ? "Root Certificate" : name)
+        cert["PayloadCertificateFileName"] = "\(name.isEmpty ? "root" : name).cer"
+        cert["PayloadContent"] = der
+        return profile(displayName: name.isEmpty ? "Root Certificate" : name,
+                       identifier: "xyz.hellocomputer.edict.rootcert",
+                       payloads: [cert])
+    }
+
     /// Validate + normalize a pasted profile. Accepts a full mobileconfig
     /// (returns it as-is) — used for the "Custom" template. Throws if it
     /// isn't a configuration-profile plist.
@@ -137,11 +188,12 @@ enum ProfilePayloads {
     }
 
     enum Invalid: LocalizedError {
-        case notPlist, notProfile
+        case notPlist, notProfile, notCertificate
         var errorDescription: String? {
             switch self {
             case .notPlist:   return "That isn't valid plist XML."
             case .notProfile: return "Not a configuration profile (needs PayloadType=Configuration and PayloadContent)."
+            case .notCertificate: return "That doesn't look like a PEM certificate (expected -----BEGIN CERTIFICATE-----)."
             }
         }
     }
