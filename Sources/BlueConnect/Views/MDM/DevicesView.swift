@@ -20,6 +20,7 @@ struct DevicesView: View {
     /// serial number, so one machine shows both identities.
     @Environment(BlueSkyHostListStore.self) private var hostStore
     @Environment(ActivityLog.self) private var activity
+    @Environment(TerminalSessionsManager.self) private var terminals
 
     @State private var enrollments: [MDMEnrollment] = []
     @State private var loading = false
@@ -202,6 +203,13 @@ struct DevicesView: View {
                             deviceRow(enr)
                                 .tag(enr.id)
                                 .contextMenu { selectionContextMenu(enr) }
+                        }
+                        if !onboardableHosts.isEmpty {
+                            Section("Not yet enrolled — from BlueSky") {
+                                ForEach(onboardableHosts, id: \.blueskyid) { host in
+                                    onboardRow(host)
+                                }
+                            }
                         }
                     }
                     .listStyle(.inset)
@@ -428,6 +436,96 @@ struct DevicesView: View {
             .disabled(busyDeviceID != nil)
         }
         .padding(.vertical, 3)
+    }
+
+    // MARK: - Onboard from BlueSky
+
+    /// Online BlueSky fleet hosts whose serial isn't in the MDM enrollment
+    /// list — candidates to onboard. We can reach them over the existing
+    /// BSC tunnel to hand them the enrollment profile.
+    private var onboardableHosts: [BlueSkyHost] {
+        let enrolledSerials = Set(devices.compactMap { $0.serialNumber?.lowercased() })
+        return hostStore.hosts.filter { h in
+            h.active
+                && !(h.serialnum ?? "").isEmpty
+                && !enrolledSerials.contains((h.serialnum ?? "").lowercased())
+        }
+    }
+
+    private func onboardRow(_ host: BlueSkyHost) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "laptopcomputer.and.arrow.down").foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(host.displayName)
+                Text(host.serialnum ?? "").font(.caption2.monospaced()).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if busyDeviceID == "bsc-\(host.blueskyid)" {
+                ProgressView().controlSize(.small)
+            }
+            Button {
+                Task { await onboard(host) }
+            } label: {
+                Label("Send Profile", systemImage: "paperplane")
+            }
+            .help("Push the enrollment profile to this Mac's Desktop over the BlueSky tunnel — the user double-clicks it to enroll")
+            .disabled(busyDeviceID != nil)
+        }
+        .padding(.vertical, 2)
+    }
+
+    @MainActor
+    private func onboard(_ host: BlueSkyHost) async {
+        busyDeviceID = "bsc-\(host.blueskyid)"
+        defer { busyDeviceID = nil }
+        // Build the profile from settings + live topic.
+        guard !settings.mdmPublicURL.trimmingCharacters(in: .whitespaces).isEmpty,
+              !settings.scepChallenge.isEmpty else {
+            actionError = "Set the Public enrollment URL and SCEP challenge in Settings → Device Management first."
+            return
+        }
+        guard let topic = pushCert?.topic else {
+            actionError = "Push topic unavailable — check the Devices API URL."
+            return
+        }
+        let user = host.effectiveUser(default: settings.defaultRemoteUser)
+        guard !user.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            actionError = "No remote username for \(host.displayName) — set one in BlueSky first."
+            return
+        }
+        do {
+            let profile = try EnrollmentProfileExporter.makeProfile(.init(
+                publicURL: settings.mdmPublicURL,
+                challenge: settings.scepChallenge,
+                topic: topic,
+                profileIdentifier: settings.mdmEnrollmentProfileID
+            ))
+            let tmp = FileManager.default.temporaryDirectory
+                .appendingPathComponent("edict-enroll-\(host.blueskyid).mobileconfig")
+            try profile.write(to: tmp)
+            defer { try? FileManager.default.removeItem(at: tmp) }
+
+            let svc = ConnectionService(
+                server: settings.serverFqdn,
+                adminKeyPath: settings.expandedKeyPath,
+                serverSshPort: settings.sshTunnelPort,
+                terminals: terminals
+            )
+            let (status, stderr) = await svc.pushFileViaSCP(
+                localPath: tmp.path,
+                remotePath: "/Users/\(user)/Desktop/Edict-Enroll.mobileconfig",
+                host: host, remoteUser: user
+            )
+            if status == 0 {
+                flash("Profile sent to \(host.displayName) — have them open Edict-Enroll.mobileconfig on the Desktop")
+                activity.record(.connect, title: "Sent enrollment profile to \(host.displayName)",
+                                detail: "via BlueSky tunnel")
+            } else {
+                actionError = "Couldn't deliver to \(host.displayName): \(stderr.isEmpty ? "exit \(status)" : stderr)"
+            }
+        } catch {
+            actionError = error.localizedDescription
+        }
     }
 
     // MARK: - Update rollout
