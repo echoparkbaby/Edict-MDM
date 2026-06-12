@@ -95,6 +95,39 @@ struct NanoMDMService {
         return uuid
     }
 
+    /// Queue an `InstallProfile` of a configuration profile (mobileconfig
+    /// bytes). The profile installs on the device's next checkin.
+    @discardableResult
+    func installProfile(enrollmentID: String, profile: Data) async throws -> Data {
+        let b64 = profile.base64EncodedString()
+        let plist = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+        \t<key>Command</key>
+        \t<dict>
+        \t\t<key>RequestType</key>
+        \t\t<string>InstallProfile</string>
+        \t\t<key>Payload</key>
+        \t\t<data>\(b64)</data>
+        \t</dict>
+        \t<key>CommandUUID</key>
+        \t<string>\(UUID().uuidString)</string>
+        </dict>
+        </plist>
+        """
+        return try await enqueue(enrollmentIDs: enrollmentID, commandPlist: Data(plist.utf8))
+    }
+
+    /// Queue a `RemoveProfile` for an arbitrary installed profile by its
+    /// PayloadIdentifier (not just the enrollment profile).
+    @discardableResult
+    func removeProfile(enrollmentID: String, identifier: String) async throws -> Data {
+        try await enqueue(enrollmentIDs: enrollmentID,
+                          commandPlist: Self.removeProfileCommand(identifier: identifier))
+    }
+
     /// Queue a `RestartDevice` command.
     @discardableResult
     func restart(enrollmentID: String) async throws -> Data {

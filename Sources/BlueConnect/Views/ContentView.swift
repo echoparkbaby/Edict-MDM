@@ -132,7 +132,7 @@ struct ContentView: View {
         case .inactive:      result = result.filter { !$0.active }
         case .uncategorized: result = result.filter { ($0.category ?? "").isEmpty }
         case .category(let c): result = result.filter { ($0.category ?? "") == c }
-        case .mdmDeclarations, .mdmDevices: break  // center pane shows an MDM view, not the table
+        case .mdmDeclarations, .mdmDevices, .mdmProfiles: break  // center pane shows an MDM view, not the table
         }
         if !searchText.isEmpty {
             let q = searchText
@@ -727,6 +727,8 @@ struct ContentView: View {
                     DeclarationsView()
                 case .mdmDevices:
                     DevicesView()
+                case .mdmProfiles:
+                    ProfilesView()
                 default:
                     topBar
                     Divider()
@@ -1981,6 +1983,7 @@ struct ContentView: View {
         case "uncat": return .uncategorized
         case "mdm:decl": return .mdmDeclarations
         case "mdm:dev": return .mdmDevices
+        case "mdm:prof": return .mdmProfiles
         default:
             if raw.hasPrefix("cat:") { return .category(String(raw.dropFirst(4))) }
             return .all
@@ -1998,6 +2001,7 @@ struct ContentView: View {
         case .category(let c): return "cat:\(c)"
         case .mdmDeclarations: return "mdm:decl"
         case .mdmDevices: return "mdm:dev"
+        case .mdmProfiles: return "mdm:prof"
         }
     }
 }

@@ -256,6 +256,7 @@ struct SidebarView: View {
             Text("Device Management").font(.caption).bold().foregroundStyle(.secondary)
                 .padding(.bottom, 2)
             mdmRow(.mdmDevices, label: "Devices", icon: "laptopcomputer")
+            mdmRow(.mdmProfiles, label: "Profiles", icon: "doc.text.fill")
             mdmRow(.mdmDeclarations, label: "Declarations", icon: "doc.badge.gearshape")
         }
     }
