@@ -67,14 +67,24 @@ struct CommandResult: Decodable {
     /// InstalledApplicationList response). Empty for terminal NotNow.
     let result: String
 
+    /// The parsed result plist as a dictionary.
+    private var plist: [String: Any] {
+        guard let data = result.data(using: .utf8),
+              let obj = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        else { return [:] }
+        return obj
+    }
+
     /// Parse a top-level array out of the result plist by key, e.g.
     /// "ProfileList" or "InstalledApplicationList", as dictionaries.
     func array(_ key: String) -> [[String: Any]] {
-        guard let data = result.data(using: .utf8),
-              let obj = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
-              let arr = obj[key] as? [[String: Any]]
-        else { return [] }
-        return arr
+        plist[key] as? [[String: Any]] ?? []
+    }
+
+    /// Parse a top-level dictionary out of the result plist (e.g.
+    /// DeviceInformation's "QueryResponses").
+    func dict(_ key: String) -> [String: Any] {
+        plist[key] as? [String: Any] ?? [:]
     }
 }
 

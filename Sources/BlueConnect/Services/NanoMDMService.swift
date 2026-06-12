@@ -95,6 +95,38 @@ struct NanoMDMService {
         return uuid
     }
 
+    /// Queue a `DeviceInformation` query for hardware facts (storage,
+    /// battery, model, MACs). Returns the command UUID.
+    func requestDeviceInformation(enrollmentID: String) async throws -> String {
+        let uuid = UUID().uuidString
+        let queries = ["AvailableDeviceCapacity", "DeviceCapacity", "BatteryLevel",
+                       "ProductName", "OSVersion", "BuildVersion", "ModelName",
+                       "DeviceName", "SerialNumber", "IsActivationLockEnabled",
+                       "WiFiMAC", "EthernetMAC", "AvailableDeviceCapacity"]
+        let items = queries.map { "\t\t\t<string>\($0)</string>" }.joined(separator: "\n")
+        let plist = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+        \t<key>Command</key>
+        \t<dict>
+        \t\t<key>RequestType</key>
+        \t\t<string>DeviceInformation</string>
+        \t\t<key>Queries</key>
+        \t\t<array>
+        \(items)
+        \t\t</array>
+        \t</dict>
+        \t<key>CommandUUID</key>
+        \t<string>\(uuid)</string>
+        </dict>
+        </plist>
+        """
+        _ = try await enqueue(enrollmentIDs: enrollmentID, commandPlist: Data(plist.utf8))
+        return uuid
+    }
+
     /// Queue an `InstallProfile` of a configuration profile (mobileconfig
     /// bytes). The profile installs on the device's next checkin.
     @discardableResult

@@ -76,7 +76,7 @@ struct DevicesView: View {
     @State private var inventoryLoading = false
     @State private var inventoryError: String?
 
-    enum InventoryKind: String { case profiles = "Profiles", apps = "Installed Apps" }
+    enum InventoryKind: String { case hardware = "Hardware", profiles = "Profiles", apps = "Installed Apps" }
 
     // Bulk selection
     @State private var multiSelection = Set<String>()
@@ -1051,11 +1051,12 @@ struct DevicesView: View {
         statusValue("device.operating-system.version") != nil
     }
 
-    @ViewBuilder
+    /// Always a ScrollView with a stable identity so selecting a device
+    /// doesn't make the HSplitView re-derive widths and jump.
     private var deviceDetail: some View {
-        if let enr = selectedEnrollment {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if let enr = selectedEnrollment {
                     detailHeader(enr)
                     if let err = statusError {
                         Label(err, systemImage: "exclamationmark.triangle.fill")
@@ -1076,17 +1077,19 @@ struct DevicesView: View {
                     if hasDeviceFacts {
                         cardBackground { rawValuesDisclosure }
                     }
+                } else {
+                    VStack(spacing: 8) {
+                        Image(systemName: "laptopcomputer").font(.system(size: 34)).foregroundStyle(.tertiary)
+                        Text("Select a device").foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 320)
                 }
-                .padding(14)
             }
-            .background(Color(NSColor.windowBackgroundColor).opacity(0.5))
-        } else {
-            VStack(spacing: 8) {
-                Image(systemName: "laptopcomputer").font(.system(size: 34)).foregroundStyle(.tertiary)
-                Text("Select a device").foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(NSColor.windowBackgroundColor).opacity(0.5))
     }
 
     /// Big device header: name, model subtitle, online + BlueSky badges,
@@ -1314,6 +1317,8 @@ struct DevicesView: View {
             HStack {
                 Text("Inventory").font(.caption).bold().foregroundStyle(.secondary)
                 Spacer()
+                Button("Hardware") { Task { await fetchInventory(enr, .hardware) } }
+                    .buttonStyle(.link).font(.caption)
                 Button("Profiles") { Task { await fetchInventory(enr, .profiles) } }
                     .buttonStyle(.link).font(.caption)
                 Button("Apps") { Task { await fetchInventory(enr, .apps) } }
@@ -1353,6 +1358,7 @@ struct DevicesView: View {
         do {
             let uuid: String
             switch kind {
+            case .hardware: uuid = try await nano.requestDeviceInformation(enrollmentID: enr.id)
             case .profiles: uuid = try await nano.requestProfileList(enrollmentID: enr.id)
             case .apps:     uuid = try await nano.requestInstalledApps(enrollmentID: enr.id)
             }
@@ -1362,6 +1368,8 @@ struct DevicesView: View {
                 try? await Task.sleep(for: .seconds(2))
                 if let res = try await api.commandResult(uuid: uuid) {
                     switch kind {
+                    case .hardware:
+                        inventoryItems = Self.formatDeviceInformation(res.dict("QueryResponses"))
                     case .profiles:
                         inventoryItems = res.array("ProfileList").compactMap {
                             ($0["PayloadDisplayName"] as? String) ?? ($0["PayloadIdentifier"] as? String)
@@ -1380,6 +1388,30 @@ struct DevicesView: View {
         } catch {
             inventoryError = error.localizedDescription
         }
+    }
+
+    /// Turn a DeviceInformation QueryResponses dict into readable rows.
+    private static func formatDeviceInformation(_ q: [String: Any]) -> [String] {
+        var out: [String] = []
+        func gb(_ v: Any?) -> String? {
+            if let d = v as? Double { return String(format: "%.1f GB", d) }
+            if let i = v as? Int { return "\(i) GB" }
+            return nil
+        }
+        if let model = q["ModelName"] as? String ?? q["ProductName"] as? String { out.append("Model: \(model)") }
+        if let os = q["OSVersion"] as? String {
+            out.append("OS: \(os)" + ((q["BuildVersion"] as? String).map { " (\($0))" } ?? ""))
+        }
+        if let avail = gb(q["AvailableDeviceCapacity"]), let total = gb(q["DeviceCapacity"]) {
+            out.append("Storage: \(avail) free of \(total)")
+        }
+        if let b = q["BatteryLevel"] as? Double, b >= 0 { out.append("Battery: \(Int(b * 100))%") }
+        if let serial = q["SerialNumber"] as? String { out.append("Serial: \(serial)") }
+        if let name = q["DeviceName"] as? String { out.append("Device name: \(name)") }
+        if let lock = q["IsActivationLockEnabled"] as? Bool { out.append("Activation Lock: \(lock ? "on" : "off")") }
+        if let mac = q["WiFiMAC"] as? String { out.append("Wi-Fi MAC: \(mac)") }
+        if let mac = q["EthernetMAC"] as? String { out.append("Ethernet MAC: \(mac)") }
+        return out
     }
 
     @MainActor
