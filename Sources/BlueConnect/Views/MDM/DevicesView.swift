@@ -317,7 +317,22 @@ struct DevicesView: View {
         loadError = nil
         defer { loading = false }
         do {
-            enrollments = try await EnrollmentsAPI(settings: settings).list()
+            let api = EnrollmentsAPI(settings: settings)
+            var rows = try await api.list()
+            // Self-clean: a checked-out device is dead weight. Purge its
+            // leftover rows (server refuses with 409 if it's actually
+            // still enabled) so the list only ever shows live
+            // enrollments — no matter whether the unenroll came from
+            // Edict or the user removing the profile on the Mac.
+            let dead = rows.filter { $0.isDevice && !$0.isEnabled }
+            if !dead.isEmpty {
+                for d in dead {
+                    try? await api.purge(deviceID: d.id)
+                    setLabel("", for: d)
+                }
+                rows = try await api.list()
+            }
+            enrollments = rows
         } catch {
             loadError = error.localizedDescription
         }
@@ -354,18 +369,30 @@ struct DevicesView: View {
     private func unenroll(_ enr: MDMEnrollment) async {
         busyDeviceID = enr.id
         defer { busyDeviceID = nil }
+        let name = label(for: enr)
         do {
             _ = try await NanoMDMService(settings: settings).unenroll(
                 enrollmentID: enr.id,
                 profileIdentifier: settings.mdmEnrollmentProfileID
             )
-            flash("Unenroll sent — \(label(for: enr)) removes its profile on next checkin")
-            // Give the device a moment to check out, then reflect reality.
-            try? await Task.sleep(for: .seconds(4))
-            await refresh()
         } catch {
             actionError = error.localizedDescription
+            return
         }
+        // Wait for the device to receive the push and check out. refresh()
+        // auto-purges checked-out devices, so success == the row is gone.
+        // ~30s covers an online Mac comfortably; an offline one keeps its
+        // row and disappears on whichever refresh follows its checkout.
+        flash("Unenroll sent — waiting for \(name) to check out…")
+        for _ in 0..<10 {
+            try? await Task.sleep(for: .seconds(3))
+            await refresh()
+            if !enrollments.contains(where: { $0.id == enr.id }) {
+                flash("\(name) removed and purged")
+                return
+            }
+        }
+        flash("\(name) hasn't checked out yet (offline?) — it disappears automatically once it does")
     }
 
     @MainActor

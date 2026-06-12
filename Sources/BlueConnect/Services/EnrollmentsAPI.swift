@@ -50,12 +50,31 @@ struct EnrollmentsAPI {
 
     /// `GET /v1/enrollments` → every enrollment NanoMDM knows about.
     func list() async throws -> [MDMEnrollment] {
+        let data = try await request("v1/enrollments")
+        do {
+            return try JSONDecoder().decode([MDMEnrollment].self, from: data)
+        } catch {
+            throw MDMError.transport("Unexpected response shape: \(error)")
+        }
+    }
+
+    /// `DELETE /v1/enrollments/<deviceID>` — purge every row the MDM
+    /// database holds for an unenrolled device (enrollments, device
+    /// record, command history, cert association). The server refuses
+    /// with 409 while the device is still enrolled.
+    func purge(deviceID: String) async throws {
+        let esc = deviceID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? deviceID
+        _ = try await request("v1/enrollments/\(esc)", method: "DELETE")
+    }
+
+    private func request(_ path: String, method: String = "GET") async throws -> Data {
         let base = baseURL.trimmingCharacters(in: .whitespaces)
         guard !base.isEmpty, !apiKey.isEmpty else { throw MDMError.notConfigured }
-        let joined = base.hasSuffix("/") ? base + "v1/enrollments" : base + "/v1/enrollments"
+        let joined = base.hasSuffix("/") ? base + path : base + "/" + path
         guard let url = URL(string: joined) else { throw MDMError.badURL(joined) }
 
         var req = URLRequest(url: url)
+        req.httpMethod = method
         req.timeoutInterval = 15
         let token = Data("nanomdm:\(apiKey)".utf8).base64EncodedString()
         req.setValue("Basic \(token)", forHTTPHeaderField: "Authorization")
@@ -68,11 +87,9 @@ struct EnrollmentsAPI {
             guard (200...299).contains(http.statusCode) else {
                 throw MDMError.http(http.statusCode, String(data: data, encoding: .utf8) ?? "")
             }
-            return try JSONDecoder().decode([MDMEnrollment].self, from: data)
+            return data
         } catch let e as MDMError {
             throw e
-        } catch let e as DecodingError {
-            throw MDMError.transport("Unexpected response shape: \(e)")
         } catch {
             throw MDMError.transport(error.localizedDescription)
         }
