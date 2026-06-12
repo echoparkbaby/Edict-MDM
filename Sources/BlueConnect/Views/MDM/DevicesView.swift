@@ -752,7 +752,7 @@ struct DevicesView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if let r = complianceResult(for: enr) {
-                        complianceCard(r)
+                        complianceCard(r, enr)
                     }
                     if hasDeviceFacts {
                         osCard
@@ -871,7 +871,7 @@ struct DevicesView: View {
     }
 
     @ViewBuilder
-    private func complianceCard(_ r: ComplianceResult) -> some View {
+    private func complianceCard(_ r: ComplianceResult, _ enr: MDMEnrollment) -> some View {
         cardBackground {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
@@ -883,13 +883,36 @@ struct DevicesView: View {
                         .foregroundStyle(r.passing ? .green : (r.failures.isEmpty ? .secondary : .red))
                 }
                 ForEach(r.failures, id: \.self) { f in
-                    Label(f, systemImage: "xmark.circle").font(.caption).foregroundStyle(.red)
+                    HStack {
+                        Label(f, systemImage: "xmark.circle").font(.caption).foregroundStyle(.red)
+                        Spacer()
+                        if f.hasPrefix("FileVault") {
+                            Button("Turn on") { Task { await remediateFileVault(enr) } }
+                                .font(.caption).buttonStyle(.link)
+                                .disabled(busyDeviceID != nil)
+                        }
+                    }
                 }
                 ForEach(r.unknowns, id: \.self) { u in
                     Label("\(u) not reported", systemImage: "questionmark.circle")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+        }
+    }
+
+    @MainActor
+    private func remediateFileVault(_ enr: MDMEnrollment) async {
+        busyDeviceID = enr.id
+        defer { busyDeviceID = nil }
+        do {
+            let profile = ProfilePayloads.fileVault(deferEnable: true)
+            _ = try await NanoMDMService(settings: settings).installProfile(enrollmentID: enr.id, profile: profile)
+            _ = try? await NanoMDMService(settings: settings).push(enrollmentIDs: enr.id)
+            flash("FileVault profile pushed to \(label(for: enr)) — enables at next logout")
+            activity.record(.category, title: "Remediated FileVault on \(label(for: enr))")
+        } catch {
+            actionError = error.localizedDescription
         }
     }
 
