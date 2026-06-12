@@ -76,6 +76,11 @@ struct DevicesView: View {
     @State private var inventoryLoading = false
     @State private var inventoryError: String?
 
+    // Drift: profile identifiers actually present on the selected device
+    // (from a ProfileList query). nil = not checked yet.
+    @State private var installedProfileIDs: Set<String>?
+    @State private var driftChecking = false
+
     enum InventoryKind: String { case hardware = "Hardware", profiles = "Profiles", apps = "Installed Apps" }
 
     // Bulk selection
@@ -324,6 +329,7 @@ struct DevicesView: View {
                     .onChange(of: selectedDeviceID) { _, newID in
                         statusValues = []; statusError = nil
                         inventoryKind = nil; inventoryItems = []; inventoryError = nil
+                        installedProfileIDs = nil
                         if let id = newID { Task { await loadStatus(id: id) } }
                     }
                     deviceDetail
@@ -1073,6 +1079,10 @@ struct DevicesView: View {
                     } else if !statusLoading {
                         cardBackground { reportingSetup }
                     }
+                    let deployed = DeploymentLog.entries(for: enr.id)
+                    if !deployed.isEmpty {
+                        cardBackground { managedProfilesCard(enr, deployed) }
+                    }
                     cardBackground { inventorySection(enr) }
                     if hasDeviceFacts {
                         cardBackground { rawValuesDisclosure }
@@ -1308,6 +1318,73 @@ struct DevicesView: View {
             Text("This device must be in the set too (⋯ → Assign to Set…). Values appear after its next sync — usually seconds.")
                 .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Profiles Edict deployed to this device, with present/missing
+    /// (drift) status after a check against the device's actual ProfileList.
+    @ViewBuilder
+    private func managedProfilesCard(_ enr: MDMEnrollment, _ deployed: [DeploymentLog.Entry]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Managed Profiles").font(.caption).bold().foregroundStyle(.secondary)
+                Spacer()
+                Button { Task { await checkDrift(enr) } } label: {
+                    if driftChecking { ProgressView().controlSize(.small) }
+                    else { Text("Check").font(.caption) }
+                }
+                .buttonStyle(.link)
+                .help("Query the device and flag any deployed profile that's no longer installed")
+            }
+            ForEach(deployed, id: \.identifier) { e in
+                HStack(spacing: 6) {
+                    if let present = installedProfileIDs {
+                        let ok = present.contains(e.identifier)
+                        Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(ok ? .green : .red).font(.caption)
+                    } else {
+                        Image(systemName: "circle.dashed").foregroundStyle(.secondary).font(.caption)
+                    }
+                    Text(e.name).font(.caption)
+                    Spacer()
+                    if let present = installedProfileIDs, !present.contains(e.identifier) {
+                        Text("missing").font(.caption2).foregroundStyle(.red)
+                    }
+                    Button {
+                        DeploymentLog.forget(deviceID: enr.id, identifier: e.identifier)
+                        installedProfileIDs = installedProfileIDs   // nudge refresh
+                    } label: { Image(systemName: "xmark.circle").font(.caption2) }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .help("Stop tracking this profile for this device")
+                }
+            }
+            if installedProfileIDs == nil {
+                Text("Click Check to compare against what's actually installed.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @MainActor
+    private func checkDrift(_ enr: MDMEnrollment) async {
+        driftChecking = true
+        defer { driftChecking = false }
+        let nano = NanoMDMService(settings: settings)
+        let api = EnrollmentsAPI(settings: settings)
+        do {
+            let uuid = try await nano.requestProfileList(enrollmentID: enr.id)
+            _ = try? await nano.push(enrollmentIDs: enr.id)
+            for _ in 0..<12 {
+                try? await Task.sleep(for: .seconds(2))
+                if let res = try await api.commandResult(uuid: uuid) {
+                    let ids = res.array("ProfileList").compactMap { $0["PayloadIdentifier"] as? String }
+                    installedProfileIDs = Set(ids)
+                    return
+                }
+            }
+            actionError = "No profile list yet — device may be offline."
+        } catch {
+            actionError = error.localizedDescription
         }
     }
 

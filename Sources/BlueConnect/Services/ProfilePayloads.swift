@@ -229,6 +229,39 @@ enum ProfilePayloads {
                        identifier: "xyz.hellocomputer.edict.singleapp", payloads: [lock])
     }
 
+    /// `com.apple.notificationsettings` — per-app notification behavior.
+    /// AlertType: 0 none, 1 banner, 2 persistent alert.
+    static func notifications(bundleID: String, enabled: Bool, alertType: Int,
+                              sounds: Bool, badges: Bool, lockScreen: Bool,
+                              notificationCenter: Bool, critical: Bool) -> Data {
+        let setting: [String: Any] = [
+            "BundleIdentifier": bundleID,
+            "NotificationsEnabled": enabled,
+            "AlertType": alertType,
+            "SoundsEnabled": sounds,
+            "BadgesEnabled": badges,
+            "ShowInLockScreen": lockScreen,
+            "ShowInNotificationCenter": notificationCenter,
+            "CriticalAlertEnabled": critical,
+        ]
+        var n: [String: Any] = base("com.apple.notificationsettings", displayName: "Notifications")
+        n["NotificationSettings"] = [setting]
+        return profile(displayName: "Notifications: \(bundleID)",
+                       identifier: "xyz.hellocomputer.edict.notifications.\(bundleID)", payloads: [n])
+    }
+
+    /// `com.apple.webcontent-filter` — built-in web content filter with
+    /// always-permitted and always-blocked URL lists.
+    static func webFilter(autoFilter: Bool, allowedURLs: [String], blockedURLs: [String]) -> Data {
+        var w: [String: Any] = base("com.apple.webcontent-filter", displayName: "Web Content Filter")
+        w["FilterType"] = "BuiltIn"
+        w["AutoFilterEnabled"] = autoFilter
+        if !allowedURLs.isEmpty { w["PermittedURLs"] = allowedURLs }
+        if !blockedURLs.isEmpty { w["BlacklistedURLs"] = blockedURLs }
+        return profile(displayName: "Web Content Filter",
+                       identifier: "xyz.hellocomputer.edict.webfilter", payloads: [w])
+    }
+
     // MARK: - iMazing-catalog–derived templates
 
     /// `com.apple.MCX.TimeMachine` — managed Time Machine backup.

@@ -21,6 +21,8 @@ struct ProfilesView: View {
         case certificate = "Root Certificate"
         case pppc = "Privacy (PPPC)"
         case singleApp = "Single App Mode"
+        case notifications = "Notifications"
+        case webFilter = "Web Content Filter"
         case munki = "Munki (BlueConnect)"
         case timeMachine = "Time Machine"
         case dns = "Encrypted DNS"
@@ -37,6 +39,7 @@ struct ProfilesView: View {
             case .wifi, .certificate, .dns, .restrictions: return "macOS · iOS · tvOS"
             case .passcode: return "macOS · iOS"
             case .singleApp: return "iOS · tvOS"
+            case .notifications, .webFilter: return "macOS · iOS"
             case .custom: return "any"
             default: return "macOS"
             }
@@ -53,6 +56,8 @@ struct ProfilesView: View {
             case .certificate: return "seal"
             case .pppc: return "hand.raised.circle"
             case .singleApp: return "apps.iphone"
+            case .notifications: return "bell.badge"
+            case .webFilter: return "globe.badge.chevron.backward"
             case .munki: return "shippingbox"
             case .timeMachine: return "clock.arrow.circlepath"
             case .dns: return "network.badge.shield.half.filled"
@@ -76,6 +81,8 @@ struct ProfilesView: View {
             case .certificate: return "Install and trust a root CA from a pasted PEM certificate."
             case .pppc: return "Pre-grant an app Full Disk Access, Accessibility, Screen Recording, etc."
             case .singleApp: return "Lock a device to one app — kiosk mode for Apple TV / iPad."
+            case .notifications: return "Control an app's notification behavior — alerts, sounds, lock screen."
+            case .webFilter: return "Built-in web content filter with allow / block URL lists."
             case .munki: return "Point the Mac at your BlueConnect Munki repo for managed software."
             case .timeMachine: return "Managed Time Machine backup destination and schedule."
             case .dns: return "Encrypted DNS (DoH/DoT) — route lookups through a private resolver."
@@ -153,6 +160,19 @@ struct ProfilesView: View {
     @State private var singleAppID = ""
     @State private var singleDisableAutoLock = true
     @State private var singleDisableTouch = false
+    // Notifications
+    @State private var notifBundleID = ""
+    @State private var notifEnabled = true
+    @State private var notifAlertType = 2
+    @State private var notifSounds = true
+    @State private var notifBadges = true
+    @State private var notifLockScreen = true
+    @State private var notifCenter = true
+    @State private var notifCritical = false
+    // Web filter
+    @State private var wfAutoFilter = false
+    @State private var wfAllowed = ""
+    @State private var wfBlocked = ""
     // Drag-drop feedback
     @State private var dropHighlight = false
 
@@ -574,6 +594,35 @@ struct ProfilesView: View {
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             .formStyle(.columns)
+        case .notifications:
+            Form {
+                TextField("App bundle ID", text: $notifBundleID, prompt: Text("com.apple.Safari"))
+                Toggle("Notifications enabled", isOn: $notifEnabled)
+                Picker("Alert style", selection: $notifAlertType) {
+                    Text("None").tag(0); Text("Banner").tag(1); Text("Persistent alert").tag(2)
+                }
+                Toggle("Sounds", isOn: $notifSounds)
+                Toggle("Badges", isOn: $notifBadges)
+                Toggle("Show on lock screen", isOn: $notifLockScreen)
+                Toggle("Show in Notification Center", isOn: $notifCenter)
+                Toggle("Allow critical alerts", isOn: $notifCritical)
+            }
+            .formStyle(.columns)
+        case .webFilter:
+            Form {
+                Toggle("Limit adult content (auto filter)", isOn: $wfAutoFilter)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Always allow (one URL per line)").font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: $wfAllowed).font(.caption.monospaced()).frame(minHeight: 60)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1))
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Always block (one URL per line)").font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: $wfBlocked).font(.caption.monospaced()).frame(minHeight: 60)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1))
+                }
+            }
+            .formStyle(.columns)
         case .munki:
             Form {
                 HStack {
@@ -715,6 +764,7 @@ struct ProfilesView: View {
         case .munki: return !munkiRepoURL.trimmingCharacters(in: .whitespaces).isEmpty
         case .dns: return !dnsServer.trimmingCharacters(in: .whitespaces).isEmpty
         case .singleApp: return !singleAppID.trimmingCharacters(in: .whitespaces).isEmpty
+        case .notifications: return !notifBundleID.trimmingCharacters(in: .whitespaces).isEmpty
         case .pppc:
             return !pppcID.trimmingCharacters(in: .whitespaces).isEmpty
                 && !pppcCodeReq.trimmingCharacters(in: .whitespaces).isEmpty
@@ -785,6 +835,16 @@ struct ProfilesView: View {
             return (ProfilePayloads.singleAppMode(bundleID: singleAppID.trimmingCharacters(in: .whitespaces),
                                                   disableAutoLock: singleDisableAutoLock,
                                                   disableTouch: singleDisableTouch), "Single App Mode")
+        case .notifications:
+            return (ProfilePayloads.notifications(bundleID: notifBundleID.trimmingCharacters(in: .whitespaces),
+                                                  enabled: notifEnabled, alertType: notifAlertType,
+                                                  sounds: notifSounds, badges: notifBadges,
+                                                  lockScreen: notifLockScreen, notificationCenter: notifCenter,
+                                                  critical: notifCritical), "Notifications")
+        case .webFilter:
+            let allow = wfAllowed.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            let block = wfBlocked.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            return (ProfilePayloads.webFilter(autoFilter: wfAutoFilter, allowedURLs: allow, blockedURLs: block), "Web Content Filter")
         case .wifi:
             return (ProfilePayloads.wifi(ssid: ssid, password: wifiPassword,
                                          hidden: wifiHidden, security: wifiSecurity),
@@ -852,13 +912,18 @@ struct ProfilesView: View {
         let nano = NanoMDMService(settings: settings)
         let targets = resolvedTargets
         var ok = 0, failed = 0
+        var deployedTo: [String] = []
         for t in targets {
             do {
                 try await nano.installProfile(enrollmentID: t.id, profile: data)
                 _ = try? await nano.push(enrollmentIDs: t.id)
+                deployedTo.append(t.id)
                 ok += 1
             } catch { failed += 1 }
         }
+        // Track for drift detection in the device detail.
+        DeploymentLog.record(profileData: data, name: name, to: deployedTo,
+                             nowEpoch: Date().timeIntervalSince1970)
         result = failed == 0
             ? "Deployed \(name) to \(ok) device\(ok == 1 ? "" : "s")"
             : "Deployed to \(ok), failed \(failed)"
