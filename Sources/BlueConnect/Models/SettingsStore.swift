@@ -500,6 +500,42 @@ final class SettingsStore: ObservableObject {
         KeychainHelper.save(unifiAPIKey, account: Self.unifiAPIKeyAccount)
     }
 
+    // MARK: - Edict MDM (NanoMDM + KMFDDM admin APIs)
+
+    /// Master toggle. Gates the Device Management features so a v1.5-style
+    /// operator who never touches MDM doesn't see any of it.
+    @AppStorage("mdmEnabled") var mdmEnabled: Bool = false
+    /// NanoMDM admin API base — reached over the tailnet
+    /// (e.g. `http://192.0.2.10:9090`). This is the ADMIN surface, not the
+    /// public device-facing `/mdm` checkin URL that enrolled Macs hit.
+    @AppStorage("nanoMDMBaseURL") var nanoMDMBaseURL: String = ""
+    /// KMFDDM admin API base over the tailnet (e.g. `http://192.0.2.10:9093`).
+    @AppStorage("kmfddmBaseURL") var kmfddmBaseURL: String = ""
+    /// HTTP Basic API keys, loaded from Keychain at runtime (not @AppStorage).
+    @Published var nanoMDMAPIKey: String = ""
+    @Published var kmfddmAPIKey: String = ""
+
+    private static let nanoMDMAPIKeyAccount = "EdictMDM.nanoMDMAPIKey"
+    private static let kmfddmAPIKeyAccount  = "EdictMDM.kmfddmAPIKey"
+
+    func loadMDMKeysFromKeychain() {
+        nanoMDMAPIKey = KeychainHelper.read(account: Self.nanoMDMAPIKeyAccount) ?? ""
+        kmfddmAPIKey  = KeychainHelper.read(account: Self.kmfddmAPIKeyAccount) ?? ""
+    }
+    func setNanoMDMAPIKey(_ key: String) {
+        nanoMDMAPIKey = key
+        KeychainHelper.save(key, account: Self.nanoMDMAPIKeyAccount)
+    }
+    func setKMFDDMAPIKey(_ key: String) {
+        kmfddmAPIKey = key
+        KeychainHelper.save(key, account: Self.kmfddmAPIKeyAccount)
+    }
+    /// Both halves of the MDM admin config present?
+    var mdmConfigured: Bool {
+        !nanoMDMBaseURL.trimmingCharacters(in: .whitespaces).isEmpty
+            && !kmfddmBaseURL.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
     // MARK: - UniFi profiles (multi-controller)
 
     /// Per-profile Keychain account name. Suffixed by the profile's

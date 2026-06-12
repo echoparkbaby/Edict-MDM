@@ -43,7 +43,7 @@ struct SettingsView: View {
         /// remote user, and Sign Out.
         case blueConnect, security, discovery,
              tailscaleDefaults, packageRepo, eraseInstall,
-             munkiRepo, munkiReport, unifi, quickActions,
+             munkiRepo, munkiReport, unifi, mdm, quickActions,
              terminal, notifications, about
 
         var id: String { rawValue }
@@ -58,6 +58,7 @@ struct SettingsView: View {
             case .munkiRepo:        return "Munki Repo"
             case .munkiReport:      return "MunkiReport"
             case .unifi:            return "Network"
+            case .mdm:              return "Device Management"
             case .quickActions:     return "Quick Actions"
             case .terminal:         return "Terminal"
             case .notifications:    return "Notifications"
@@ -75,6 +76,7 @@ struct SettingsView: View {
             case .munkiRepo:        return "cube.box"
             case .munkiReport:      return "chart.bar.doc.horizontal"
             case .unifi:            return "network"
+            case .mdm:              return "laptopcomputer.and.arrow.down"
             case .quickActions:     return "bolt.fill"
             case .terminal:         return "terminal"
             case .notifications:    return "bell"
@@ -165,6 +167,7 @@ struct SettingsView: View {
         case .munkiRepo:        MunkiRepoSettingsPane()
         case .munkiReport:      MunkiReportSettingsPane()
         case .unifi:            UniFiSettingsPane()
+        case .mdm:              MDMSettingsPane()
         case .quickActions:     quickActionsPane
         case .terminal:         TerminalSettingsPane()
         case .notifications:    notificationsPane

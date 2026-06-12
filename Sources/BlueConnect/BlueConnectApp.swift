@@ -60,6 +60,7 @@ struct BlueConnectAdminApp: App {
                 settings.loadMunkiSecretFromKeychain()
                 settings.loadMunkiReportTokenFromKeychain()
                 settings.loadUnifiAPIKeyFromKeychain()
+                settings.loadMDMKeysFromKeychain()
                 if settings.localNetworkEnabled { rendezvous.start() }
                 tailscale.settings = settings
                 if settings.tailscaleEnabled { tailscale.start() }

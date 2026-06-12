@@ -112,6 +112,16 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
         <string>_ssh._tcp</string>
         <string>_rfb._tcp</string>
     </array>
+    <!-- App Transport Security: allow plain HTTP. The Edict MDM admin
+         APIs (NanoMDM/KMFDDM) are reached over the tailnet at private
+         IPs with no TLS — the network layer (WireGuard/Tailscale) is the
+         encryption boundary. The operator also configures arbitrary
+         internal URLs, so a per-domain exception can't cover them. This
+         is an internal/notarized tool, not an App Store app. -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>             <true/>
+    </dict>
 </dict>
 </plist>
 PLIST

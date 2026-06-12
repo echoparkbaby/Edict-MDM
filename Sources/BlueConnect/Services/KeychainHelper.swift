@@ -2,7 +2,12 @@ import Foundation
 import Security
 
 enum KeychainHelper {
-    static let service = "xyz.hellocomputer.BlueConnectAdmin"
+    // Derive the keychain service from the running app's bundle ID so the
+    // v2 "Edict MDM" build (xyz.hellocomputer.EdictMDM) keeps its secrets in
+    // a separate namespace from "BlueConnect Admin" when both are installed
+    // side-by-side. Resolves identically to the old literal on the v1.5
+    // BlueConnect Admin build, so existing users' stored secrets survive.
+    static let service = Bundle.main.bundleIdentifier ?? "xyz.hellocomputer.BlueConnectAdmin"
 
     static func save(_ value: String, account: String) {
         let data = value.data(using: .utf8) ?? Data()
