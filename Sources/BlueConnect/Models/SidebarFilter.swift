@@ -15,6 +15,8 @@ enum SidebarFilter: Hashable {
     case mdmDevices
     /// Edict MDM: configuration-profile library.
     case mdmProfiles
+    /// Edict MDM: enrollment-profile builder.
+    case mdmEnrollment
 
     var key: String {
         switch self {
@@ -28,6 +30,7 @@ enum SidebarFilter: Hashable {
         case .mdmDeclarations: "mdm:decl"
         case .mdmDevices: "mdm:dev"
         case .mdmProfiles: "mdm:prof"
+        case .mdmEnrollment: "mdm:enroll"
         }
     }
 }
