@@ -133,6 +133,30 @@ struct KMFDDMService {
         return decoded.values.first ?? []
     }
 
+    /// The facts the device list, dashboard, and smart groups all need —
+    /// read in ONE status query and picked by exact leaf path. A device
+    /// that's only sent client-capabilities reports path strings as
+    /// "values" (e.g. `device.operating-system.family`); those are
+    /// rejected here so callers see nil ("not reported"), never a path
+    /// masquerading as an OS version or model.
+    func deviceFacts(enrollmentID: String) async -> (os: String?, fileVault: Bool?, model: String?) {
+        let items = (try? await statusValues(enrollmentID: enrollmentID,
+                                             pathPrefix: ".StatusItems")) ?? []
+        func leaf(_ suffix: String) -> String? {
+            guard let raw = items.first(where: { $0.path.hasSuffix(suffix) })?.value else { return nil }
+            let v = raw.trimmingCharacters(in: .whitespaces)
+            // Reject capability paths that come back as values.
+            if v.isEmpty || v.hasPrefix(".") || v.hasPrefix("device.")
+                || v.hasPrefix("management.") || v.hasPrefix("StatusItems") { return nil }
+            return v
+        }
+        let os = leaf("operating-system.version")
+        let model = leaf("model.marketing-name") ?? leaf("model.identifier")
+        let fv = (items.first { $0.path.hasSuffix("filevault.enabled") })?.value
+        let fileVault: Bool? = fv.map { $0 == "true" || $0 == "1" }
+        return (os: os, fileVault: fileVault, model: model)
+    }
+
     // MARK: - HTTP
 
     private func pathEsc(_ s: String) -> String {

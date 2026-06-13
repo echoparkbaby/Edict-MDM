@@ -108,13 +108,11 @@ final class MDMScheduler {
         let svc = KMFDDMService(settings: settings)
         var out: [String: SmartGroup.DeviceFacts] = [:]
         for d in devices {
-            let os = try? await svc.statusValues(enrollmentID: d.id, pathPrefix: ".StatusItems.device.operating-system.version").first?.value
-            let fv = try? await svc.statusValues(enrollmentID: d.id, pathPrefix: ".StatusItems.diskmanagement.filevault.enabled").first?.value
-            let mdl = try? await svc.statusValues(enrollmentID: d.id, pathPrefix: ".StatusItems.device.model.marketing-name").first?.value
+            let f = await svc.deviceFacts(enrollmentID: d.id)
             out[d.id] = SmartGroup.DeviceFacts(
-                osVersion: os ?? nil,
-                fileVaultOn: (fv ?? nil).map { $0 == "true" || $0 == "1" },
-                model: mdl ?? nil,
+                osVersion: f.os,
+                fileVaultOn: f.fileVault,
+                model: f.model,
                 matchedBlueSky: false,
                 enrolled: d.isEnabled)
         }

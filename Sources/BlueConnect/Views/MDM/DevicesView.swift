@@ -1008,24 +1008,10 @@ struct DevicesView: View {
         var fv: [String: String] = [:]
         var mdl: [String: String] = [:]
         for d in allDevices {
-            if let values = try? await svc.statusValues(
-                enrollmentID: d.id,
-                pathPrefix: ".StatusItems.device.operating-system.version"
-            ), let v = values.first?.value {
-                versions[d.id] = v
-            }
-            if let values = try? await svc.statusValues(
-                enrollmentID: d.id,
-                pathPrefix: ".StatusItems.diskmanagement.filevault.enabled"
-            ), let v = values.first?.value {
-                fv[d.id] = v
-            }
-            if let values = try? await svc.statusValues(
-                enrollmentID: d.id,
-                pathPrefix: ".StatusItems.device.model.marketing-name"
-            ), let v = values.first?.value {
-                mdl[d.id] = v
-            }
+            let f = await svc.deviceFacts(enrollmentID: d.id)
+            if let v = f.os { versions[d.id] = v }
+            if let v = f.model { mdl[d.id] = v }
+            if let v = f.fileVault { fv[d.id] = v ? "true" : "false" }
         }
         osVersions = versions
         fileVault = fv

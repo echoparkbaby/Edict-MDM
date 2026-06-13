@@ -1030,9 +1030,10 @@ struct ProfilesView: View {
         let svc = KMFDDMService(settings: settings)
         var os: [String: String] = [:], fv: [String: String] = [:], mdl: [String: String] = [:]
         for d in devices {
-            if let v = try? await svc.statusValues(enrollmentID: d.id, pathPrefix: ".StatusItems.device.operating-system.version").first?.value { os[d.id] = v }
-            if let v = try? await svc.statusValues(enrollmentID: d.id, pathPrefix: ".StatusItems.diskmanagement.filevault.enabled").first?.value { fv[d.id] = v }
-            if let v = try? await svc.statusValues(enrollmentID: d.id, pathPrefix: ".StatusItems.device.model.marketing-name").first?.value { mdl[d.id] = v }
+            let f = await svc.deviceFacts(enrollmentID: d.id)
+            if let v = f.os { os[d.id] = v }
+            if let v = f.model { mdl[d.id] = v }
+            if let v = f.fileVault { fv[d.id] = v ? "true" : "false" }
         }
         osVersions = os; fileVault = fv; models = mdl
     }

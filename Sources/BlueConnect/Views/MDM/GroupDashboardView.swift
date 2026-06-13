@@ -111,7 +111,7 @@ struct GroupDashboardView: View {
         var counts: [String: Int] = [:]
         for d in scoped {
             let key = pick(d)?.trimmingCharacters(in: .whitespaces)
-            counts[(key?.isEmpty == false ? key! : "Unknown"), default: 0] += 1
+            counts[(key?.isEmpty == false ? key! : "Not reported"), default: 0] += 1
         }
         return counts.sorted { $0.value > $1.value || ($0.value == $1.value && $0.key < $1.key) }
             .map { (label: $0.key, count: $0.value) }
@@ -517,9 +517,10 @@ struct GroupDashboardView: View {
             let svc = KMFDDMService(settings: settings)
             var os: [String: String] = [:], fv: [String: String] = [:], mdl: [String: String] = [:]
             for d in allDevices {
-                if let values = try? await svc.statusValues(enrollmentID: d.id, pathPrefix: ".StatusItems.device.operating-system.version"), let v = values.first?.value { os[d.id] = v }
-                if let values = try? await svc.statusValues(enrollmentID: d.id, pathPrefix: ".StatusItems.diskmanagement.filevault.enabled"), let v = values.first?.value { fv[d.id] = v }
-                if let values = try? await svc.statusValues(enrollmentID: d.id, pathPrefix: ".StatusItems.device.model.marketing-name"), let v = values.first?.value { mdl[d.id] = v }
+                let f = await svc.deviceFacts(enrollmentID: d.id)
+                if let v = f.os { os[d.id] = v }
+                if let v = f.model { mdl[d.id] = v }
+                if let v = f.fileVault { fv[d.id] = v ? "true" : "false" }
             }
             osVersions = os; fileVault = fv; models = mdl
         } catch {
