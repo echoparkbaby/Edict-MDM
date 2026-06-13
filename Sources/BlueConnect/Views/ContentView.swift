@@ -122,8 +122,15 @@ struct ContentView: View {
     /// full filter+sort cost.
     @State private var filteredAndSorted: [BlueSkyHost] = []
 
+    /// MDM overlay: lets the BSC hosts table double as the merged fleet
+    /// view — status per serial + synthetic rows for MDM-only Macs.
+    @State private var mdmFleet = MDMFleetIndex()
+
     private func computeFilteredAndSorted() -> [BlueSkyHost] {
         var result = hostStore.hosts
+        // Merge in Macs that are MDM-enrolled but not in BlueSky, so the
+        // table shows the whole fleet. Skipped entirely when MDM is off.
+        if settings.mdmEnabled { result += mdmFleet.mdmOnly }
         switch sidebarFilter {
         case .all:           break
         case .favorites:     result = result.filter { $0.isFavorite }
@@ -157,6 +164,16 @@ struct ContentView: View {
 
     private var selectedHosts: [BlueSkyHost] {
         filteredAndSorted.filter { selection.contains($0.id) }
+    }
+
+    /// Reload the MDM overlay, telling it which serials BlueSky already
+    /// covers so it only synthesizes rows for the genuinely MDM-only Macs.
+    @MainActor
+    private func refreshMDMFleet() async {
+        let serials = Set(hostStore.hosts.compactMap {
+            $0.serialnum?.trimmingCharacters(in: .whitespaces).uppercased()
+        }.filter { !$0.isEmpty })
+        await mdmFleet.refresh(settings: settings, bscSerials: serials)
     }
 
     private var bottomPaneVisible: Bool {
@@ -198,7 +215,13 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .blueConnectOpenActivityLog)) { _ in
                 showingActivityLog = true
             }
-            .onChange(of: hostStore.lastResponse) { _, newValue in handleResponseChange(newValue) }
+            .onChange(of: hostStore.lastResponse) { _, newValue in
+                handleResponseChange(newValue)
+                Task { await refreshMDMFleet() }   // re-join MDM data when hosts change
+            }
+            .task { await refreshMDMFleet() }
+            .onChange(of: mdmFleet.version) { _, _ in filteredAndSorted = computeFilteredAndSorted() }
+            .onChange(of: settings.mdmEnabled) { _, _ in Task { await refreshMDMFleet() } }
             .onChange(of: settings.notifyOnStateChange) { _, newValue in
                 if newValue { notifier.requestAuthorizationIfNeeded() }
             }
@@ -636,7 +659,7 @@ struct ContentView: View {
 
     private func assignCategoryFromSheet(_ newCategory: String?) {
         Task {
-            let r = await categories.assign(newCategory, to: categoryTargets, settings: settings)
+            let r = await categories.assign(newCategory, to: categoryTargets.filter { !$0.isMDMOnly }, settings: settings)
             await hostStore.refresh(settings: settings)
             if !r.failed.isEmpty {
                 alert = .result(
@@ -871,6 +894,54 @@ struct ContentView: View {
         return "\(base)\n\n\(names)\(suffix)"
     }
 
+    /// The MDM columns, grouped so they count as a single child of the
+    /// Table's column builder (which caps at 10 top-level columns).
+    @TableColumnBuilder<BlueSkyHost, KeyPathComparator<BlueSkyHost>>
+    private var mdmColumns: some TableColumnContent<BlueSkyHost, KeyPathComparator<BlueSkyHost>> {
+        TableColumn("MDM") { (h: BlueSkyHost) in mdmCell(h) }
+            .width(min: 56, ideal: 70, max: 110)
+            .customizationID("mdm")
+        TableColumn("OS") { (h: BlueSkyHost) in
+            Text(mdmFleet.entry(forSerial: h.serialnum)?.os ?? "—")
+                .foregroundStyle(.secondary)
+        }
+        .width(min: 50, ideal: 70, max: 110)
+        .customizationID("mdm_os")
+        TableColumn("FileVault") { (h: BlueSkyHost) in fileVaultCell(h) }
+            .width(min: 60, ideal: 80, max: 120)
+            .customizationID("mdm_filevault")
+    }
+
+    /// MDM-enrollment chip for the merged fleet table.
+    @ViewBuilder
+    private func mdmCell(_ h: BlueSkyHost) -> some View {
+        if let e = mdmFleet.entry(forSerial: h.serialnum) {
+            HStack(spacing: 3) {
+                Image(systemName: e.enrolled ? "checkmark.shield.fill" : "shield.slash")
+                    .foregroundStyle(e.enrolled ? .green : .secondary)
+                if let c = e.compliant {
+                    Image(systemName: c ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(c ? .green : .orange)
+                        .help(c ? "Meets compliance baseline" : "Out of compliance")
+                }
+            }
+            .help(e.enrolled ? "Enrolled in MDM" : "MDM enrollment checked out")
+        } else {
+            Text("—").foregroundStyle(.secondary)
+                .help(h.isMDMOnly ? "" : "Not enrolled in MDM")
+        }
+    }
+
+    /// FileVault chip sourced from MDM-reported facts.
+    @ViewBuilder
+    private func fileVaultCell(_ h: BlueSkyHost) -> some View {
+        switch mdmFleet.entry(forSerial: h.serialnum)?.fileVault {
+        case .some(true): Image(systemName: "lock.fill").foregroundStyle(.green).help("FileVault on")
+        case .some(false): Image(systemName: "lock.open").foregroundStyle(.red).help("FileVault off")
+        case nil: Text("—").foregroundStyle(.secondary)
+        }
+    }
+
     private var hostsTable: some View {
         Table(of: BlueSkyHost.self,
               selection: $selection,
@@ -986,6 +1057,7 @@ struct ContentView: View {
             }
             .width(min: 160, ideal: 220, max: 280)
             .customizationID("last_seen")
+            mdmColumns
         } rows: {
             ForEach(filteredAndSorted) { h in
                 TableRow(h)
@@ -1686,7 +1758,7 @@ struct ContentView: View {
 
     private func assignCategoryDirect(_ category: String?, to hosts: [BlueSkyHost]) {
         Task {
-            let r = await categories.assign(category, to: hosts, settings: settings)
+            let r = await categories.assign(category, to: hosts.filter { !$0.isMDMOnly }, settings: settings)
             await hostStore.refresh(settings: settings)
             if !r.failed.isEmpty {
                 alert = .result(
@@ -1698,6 +1770,7 @@ struct ContentView: View {
     }
 
     private func updateField(host: BlueSkyHost, field: String, value: Any) {
+        guard !host.isMDMOnly else { return }
         Task {
             do {
                 _ = try await BlueSkyAPI.shared.updateHost(
@@ -1716,6 +1789,7 @@ struct ContentView: View {
     }
 
     private func saveNotes(host: BlueSkyHost, notes: String) {
+        guard !host.isMDMOnly else { return }
         Task {
             do {
                 _ = try await BlueSkyAPI.shared.updateHost(
@@ -1734,6 +1808,7 @@ struct ContentView: View {
     }
 
     private func runSetUsername(hosts: [BlueSkyHost], newUsername: String) {
+        let hosts = hosts.filter { !$0.isMDMOnly }
         guard !hosts.isEmpty else { return }
         Task {
             var ok = 0
@@ -1778,7 +1853,7 @@ struct ContentView: View {
     private func setFavorite(_ favorite: Bool, on hosts: [BlueSkyHost]) async {
         var ok = 0
         var failed: [String] = []
-        for h in hosts {
+        for h in hosts where !h.isMDMOnly {
             do {
                 _ = try await BlueSkyAPI.shared.updateHost(
                     blueskyid: h.blueskyid,
@@ -1803,6 +1878,7 @@ struct ContentView: View {
     }
 
     private func runRename(host: BlueSkyHost, newHostname: String) {
+        guard !host.isMDMOnly else { return }
         let api = settings.apiURL
         let user = settings.apiUsername
         let pwd = settings.webAdminPass
@@ -1823,6 +1899,11 @@ struct ContentView: View {
     }
 
     private func runAction(_ action: HostAction, on host: BlueSkyHost) {
+        guard !host.isMDMOnly else {
+            alert = .result(title: "MDM-only device",
+                            message: "\(host.displayName) is managed over MDM, not BlueSky. Use the MDM Devices tab to lock, erase, or unenroll it.")
+            return
+        }
         let api = settings.apiURL
         let user = settings.apiUsername
         let pwd = settings.webAdminPass
@@ -1860,6 +1941,8 @@ struct ContentView: View {
     }
 
     private func runBulk(_ action: HostAction, on hosts: [BlueSkyHost]) {
+        let hosts = hosts.filter { !$0.isMDMOnly }   // BSC actions skip MDM-only rows
+        guard !hosts.isEmpty else { return }
         let api = settings.apiURL
         let user = settings.apiUsername
         let pwd = settings.webAdminPass
