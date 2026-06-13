@@ -303,6 +303,60 @@ enum ProfilePayloads {
                        identifier: "xyz.hellocomputer.edict.assoc", payloads: [a])
     }
 
+    /// Identity-provider preset for Platform SSO. The extension + team IDs
+    /// are the vendor's published values; URLs are the IdP's auth hosts.
+    enum SSOVendor: String, CaseIterable, Identifiable {
+        case entra = "Microsoft Entra ID"
+        case okta = "Okta"
+        case custom = "Custom"
+        var id: String { rawValue }
+        var extensionID: String {
+            switch self {
+            case .entra:  return "com.microsoft.CompanyPortalMac.ssoextension"
+            case .okta:   return "com.okta.mobile.auth-service-extension"
+            case .custom: return ""
+            }
+        }
+        var teamID: String {
+            switch self {
+            case .entra:  return "UBF8T346G9"
+            case .okta:   return "B7F62B65BN"
+            case .custom: return ""
+            }
+        }
+        /// Default redirect URLs the extension should handle.
+        var urls: [String] {
+            switch self {
+            case .entra:  return ["https://login.microsoftonline.com",
+                                  "https://login.microsoft.com",
+                                  "https://sts.windows.net",
+                                  "https://login.windows.net"]
+            case .okta:   return ["https://example.okta.com"]
+            case .custom: return []
+            }
+        }
+    }
+
+    /// `com.apple.extensiblesso` — Platform Single Sign-On. Ties macOS
+    /// login to an IdP (Entra ID, Okta, …). macOS 13+. The PlatformSSO
+    /// sub-dictionary turns on device-bound (passwordless) auth.
+    static func platformSSO(extensionID: String, teamID: String,
+                            urls: [String], authMethod: String,
+                            useSharedDeviceKeys: Bool) -> Data {
+        var sso: [String: Any] = base("com.apple.extensiblesso",
+                                      displayName: "Single Sign-On Extension")
+        sso["ExtensionIdentifier"] = extensionID
+        sso["TeamIdentifier"] = teamID
+        sso["Type"] = "Redirect"
+        if !urls.isEmpty { sso["URLs"] = urls }
+        sso["PlatformSSO"] = [
+            "AuthenticationMethod": authMethod,            // Password | UserSecureEnclaveKey | SmartCard
+            "UseSharedDeviceKeys": useSharedDeviceKeys,
+        ]
+        return profile(displayName: "Platform SSO", identifier: "xyz.hellocomputer.edict.platformsso",
+                       payloads: [sso])
+    }
+
     // MARK: - iMazing-catalog–derived templates
 
     /// `com.apple.MCX.TimeMachine` — managed Time Machine backup.

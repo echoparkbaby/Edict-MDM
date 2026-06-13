@@ -26,6 +26,7 @@ struct ProfilesView: View {
         case calDAV = "Calendar (CalDAV)"
         case cardDAV = "Contacts (CardDAV)"
         case associatedDomains = "Associated Domains"
+        case platformSSO = "Platform SSO"
         case munki = "Munki (BlueConnect)"
         case timeMachine = "Time Machine"
         case dns = "Encrypted DNS"
@@ -65,6 +66,7 @@ struct ProfilesView: View {
             case .calDAV: return "calendar"
             case .cardDAV: return "person.crop.square.filled.and.at.rectangle"
             case .associatedDomains: return "link.circle"
+            case .platformSSO: return "person.badge.key.fill"
             case .munki: return "shippingbox"
             case .timeMachine: return "clock.arrow.circlepath"
             case .dns: return "network.badge.shield.half.filled"
@@ -93,6 +95,7 @@ struct ProfilesView: View {
             case .calDAV: return "Calendar account (CalDAV) pushed to the device."
             case .cardDAV: return "Contacts account (CardDAV) pushed to the device."
             case .associatedDomains: return "Associate an app with web domains (universal links)."
+            case .platformSSO: return "Tie macOS login to Entra ID or Okta (Platform Single Sign-On)."
             case .munki: return "Point the Mac at your BlueConnect Munki repo for managed software."
             case .timeMachine: return "Managed Time Machine backup destination and schedule."
             case .dns: return "Encrypted DNS (DoH/DoT) — route lookups through a private resolver."
@@ -193,6 +196,13 @@ struct ProfilesView: View {
     // Associated domains
     @State private var assocAppID = ""
     @State private var assocDomains = ""
+    // Platform SSO
+    @State private var ssoVendor: ProfilePayloads.SSOVendor = .entra
+    @State private var ssoExtensionID = ProfilePayloads.SSOVendor.entra.extensionID
+    @State private var ssoTeamID = ProfilePayloads.SSOVendor.entra.teamID
+    @State private var ssoURLs = ProfilePayloads.SSOVendor.entra.urls.joined(separator: "\n")
+    @State private var ssoAuthMethod = "UserSecureEnclaveKey"
+    @State private var ssoSharedKeys = false
     // Drag-drop feedback
     @State private var dropHighlight = false
 
@@ -684,6 +694,35 @@ struct ProfilesView: View {
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             .formStyle(.columns)
+        case .platformSSO:
+            Form {
+                Picker("Identity provider", selection: $ssoVendor) {
+                    ForEach(ProfilePayloads.SSOVendor.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .onChange(of: ssoVendor) { _, v in
+                    if v != .custom {
+                        ssoExtensionID = v.extensionID
+                        ssoTeamID = v.teamID
+                        ssoURLs = v.urls.joined(separator: "\n")
+                    }
+                }
+                TextField("Extension identifier", text: $ssoExtensionID)
+                TextField("Team identifier", text: $ssoTeamID)
+                Picker("Authentication", selection: $ssoAuthMethod) {
+                    Text("Secure Enclave key (passwordless)").tag("UserSecureEnclaveKey")
+                    Text("Password").tag("Password")
+                    Text("Smart Card").tag("SmartCard")
+                }
+                Toggle("Share device keys across users", isOn: $ssoSharedKeys)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Redirect URLs (one per line)").font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: $ssoURLs).font(.caption.monospaced()).frame(minHeight: 70)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1))
+                }
+                Text("macOS 13+. The IdP's SSO extension app (Company Portal for Entra, Okta Verify for Okta) must be installed separately — push it with Munki. For Okta, replace example.okta.com with your tenant.")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .formStyle(.columns)
         case .associatedDomains:
             Form {
                 TextField("App bundle ID", text: $assocAppID, prompt: Text("com.example.app"))
@@ -842,6 +881,9 @@ struct ProfilesView: View {
         case .associatedDomains:
             return !assocAppID.trimmingCharacters(in: .whitespaces).isEmpty
                 && !assocDomains.trimmingCharacters(in: .whitespaces).isEmpty
+        case .platformSSO:
+            return !ssoExtensionID.trimmingCharacters(in: .whitespaces).isEmpty
+                && !ssoTeamID.trimmingCharacters(in: .whitespaces).isEmpty
         case .pppc:
             return !pppcID.trimmingCharacters(in: .whitespaces).isEmpty
                 && !pppcCodeReq.trimmingCharacters(in: .whitespaces).isEmpty
@@ -940,6 +982,13 @@ struct ProfilesView: View {
             let domains = assocDomains.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
             return (ProfilePayloads.associatedDomains(appID: assocAppID.trimmingCharacters(in: .whitespaces),
                                                       domains: domains), "Associated Domains: \(assocAppID)")
+        case .platformSSO:
+            let urls = ssoURLs.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            return (ProfilePayloads.platformSSO(extensionID: ssoExtensionID.trimmingCharacters(in: .whitespaces),
+                                                teamID: ssoTeamID.trimmingCharacters(in: .whitespaces),
+                                                urls: urls, authMethod: ssoAuthMethod,
+                                                useSharedDeviceKeys: ssoSharedKeys),
+                    "Platform SSO (\(ssoVendor.rawValue))")
         case .wifi:
             return (ProfilePayloads.wifi(ssid: ssid, password: wifiPassword,
                                          hidden: wifiHidden, security: wifiSecurity),
