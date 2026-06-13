@@ -23,6 +23,9 @@ struct ProfilesView: View {
         case singleApp = "Single App Mode"
         case notifications = "Notifications"
         case webFilter = "Web Content Filter"
+        case calDAV = "Calendar (CalDAV)"
+        case cardDAV = "Contacts (CardDAV)"
+        case associatedDomains = "Associated Domains"
         case munki = "Munki (BlueConnect)"
         case timeMachine = "Time Machine"
         case dns = "Encrypted DNS"
@@ -39,7 +42,8 @@ struct ProfilesView: View {
             case .wifi, .certificate, .dns, .restrictions: return "macOS · iOS · tvOS"
             case .passcode: return "macOS · iOS"
             case .singleApp: return "iOS · tvOS"
-            case .notifications, .webFilter: return "macOS · iOS"
+            case .notifications, .webFilter, .calDAV, .cardDAV: return "macOS · iOS"
+            case .associatedDomains: return "macOS · iOS · tvOS"
             case .custom: return "any"
             default: return "macOS"
             }
@@ -58,6 +62,9 @@ struct ProfilesView: View {
             case .singleApp: return "apps.iphone"
             case .notifications: return "bell.badge"
             case .webFilter: return "globe.badge.chevron.backward"
+            case .calDAV: return "calendar"
+            case .cardDAV: return "person.crop.square.filled.and.at.rectangle"
+            case .associatedDomains: return "link.circle"
             case .munki: return "shippingbox"
             case .timeMachine: return "clock.arrow.circlepath"
             case .dns: return "network.badge.shield.half.filled"
@@ -83,6 +90,9 @@ struct ProfilesView: View {
             case .singleApp: return "Lock a device to one app — kiosk mode for Apple TV / iPad."
             case .notifications: return "Control an app's notification behavior — alerts, sounds, lock screen."
             case .webFilter: return "Built-in web content filter with allow / block URL lists."
+            case .calDAV: return "Calendar account (CalDAV) pushed to the device."
+            case .cardDAV: return "Contacts account (CardDAV) pushed to the device."
+            case .associatedDomains: return "Associate an app with web domains (universal links)."
             case .munki: return "Point the Mac at your BlueConnect Munki repo for managed software."
             case .timeMachine: return "Managed Time Machine backup destination and schedule."
             case .dns: return "Encrypted DNS (DoH/DoT) — route lookups through a private resolver."
@@ -173,6 +183,16 @@ struct ProfilesView: View {
     @State private var wfAutoFilter = false
     @State private var wfAllowed = ""
     @State private var wfBlocked = ""
+    // CalDAV / CardDAV
+    @State private var davDesc = ""
+    @State private var davHost = ""
+    @State private var davPort = 0
+    @State private var davPrincipal = ""
+    @State private var davUser = ""
+    @State private var davSSL = true
+    // Associated domains
+    @State private var assocAppID = ""
+    @State private var assocDomains = ""
     // Drag-drop feedback
     @State private var dropHighlight = false
 
@@ -219,6 +239,18 @@ struct ProfilesView: View {
     @State private var saveName = ""
     @State private var saveFavorite = false
 
+    /// Set when a deploy would replace a profile already on a device —
+    /// drives the diff-review sheet before the push goes out.
+    @State private var pendingDeploy: PendingDeploy?
+
+    struct PendingDeploy: Identifiable {
+        let id = UUID()
+        let data: Data
+        let name: String
+        let changes: [ProfileDiff.Change]
+        let deviceCount: Int
+    }
+
     /// Templates alphabetized; Custom pinned last.
     private var sortedTemplates: [Template] {
         Template.allCases.filter { $0 != .custom }
@@ -264,6 +296,7 @@ struct ProfilesView: View {
         }
         .onChange(of: selected) { _, v in if case .template(let t) = v { template = t } }
         .sheet(isPresented: $showingSaveSheet) { saveSheet }
+        .sheet(item: $pendingDeploy) { diffSheet($0) }
     }
 
     private var unconfigured: some View {
@@ -357,7 +390,7 @@ struct ProfilesView: View {
                     .help("Save this configured profile to reuse or favorite")
                 Spacer()
                 Button {
-                    Task { await deployBuilt() }
+                    Task { await attemptDeployBuilt() }
                 } label: {
                     if deploying { ProgressView().controlSize(.small) }
                     else { Label("Deploy to \(resolvedTargets.count) device\(resolvedTargets.count == 1 ? "" : "s")",
@@ -401,7 +434,7 @@ struct ProfilesView: View {
             HStack {
                 Spacer()
                 Button {
-                    Task { await deploy(data: sp.data, name: sp.name) }
+                    Task { await attemptDeploy(data: sp.data, name: sp.name) }
                 } label: {
                     if deploying { ProgressView().controlSize(.small) }
                     else { Label("Deploy to \(resolvedTargets.count) device\(resolvedTargets.count == 1 ? "" : "s")",
@@ -623,6 +656,27 @@ struct ProfilesView: View {
                 }
             }
             .formStyle(.columns)
+        case .calDAV, .cardDAV:
+            Form {
+                TextField("Account description", text: $davDesc, prompt: Text("Work Calendar"))
+                TextField("Server host", text: $davHost, prompt: Text("dav.example.com"))
+                TextField("Principal URL (optional)", text: $davPrincipal, prompt: Text("/principals/users/me/"))
+                TextField("Username (optional)", text: $davUser)
+                Toggle("Use SSL", isOn: $davSSL)
+                Text("Password isn't stored in the profile — the user is prompted on install. Port auto-detects unless you need a custom one.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .formStyle(.columns)
+        case .associatedDomains:
+            Form {
+                TextField("App bundle ID", text: $assocAppID, prompt: Text("com.example.app"))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Domains (one per line, e.g. applinks:example.com)").font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: $assocDomains).font(.caption.monospaced()).frame(minHeight: 70)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1))
+                }
+            }
+            .formStyle(.columns)
         case .munki:
             Form {
                 HStack {
@@ -765,6 +819,12 @@ struct ProfilesView: View {
         case .dns: return !dnsServer.trimmingCharacters(in: .whitespaces).isEmpty
         case .singleApp: return !singleAppID.trimmingCharacters(in: .whitespaces).isEmpty
         case .notifications: return !notifBundleID.trimmingCharacters(in: .whitespaces).isEmpty
+        case .calDAV, .cardDAV:
+            return !davDesc.trimmingCharacters(in: .whitespaces).isEmpty
+                && !davHost.trimmingCharacters(in: .whitespaces).isEmpty
+        case .associatedDomains:
+            return !assocAppID.trimmingCharacters(in: .whitespaces).isEmpty
+                && !assocDomains.trimmingCharacters(in: .whitespaces).isEmpty
         case .pppc:
             return !pppcID.trimmingCharacters(in: .whitespaces).isEmpty
                 && !pppcCodeReq.trimmingCharacters(in: .whitespaces).isEmpty
@@ -845,6 +905,24 @@ struct ProfilesView: View {
             let allow = wfAllowed.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
             let block = wfBlocked.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
             return (ProfilePayloads.webFilter(autoFilter: wfAutoFilter, allowedURLs: allow, blockedURLs: block), "Web Content Filter")
+        case .calDAV:
+            return (ProfilePayloads.calDAV(description: davDesc.trimmingCharacters(in: .whitespaces),
+                                           host: davHost.trimmingCharacters(in: .whitespaces),
+                                           port: davPort,
+                                           principalURL: davPrincipal.trimmingCharacters(in: .whitespaces),
+                                           username: davUser.trimmingCharacters(in: .whitespaces),
+                                           useSSL: davSSL), "CalDAV: \(davDesc)")
+        case .cardDAV:
+            return (ProfilePayloads.cardDAV(description: davDesc.trimmingCharacters(in: .whitespaces),
+                                            host: davHost.trimmingCharacters(in: .whitespaces),
+                                            port: davPort,
+                                            principalURL: davPrincipal.trimmingCharacters(in: .whitespaces),
+                                            username: davUser.trimmingCharacters(in: .whitespaces),
+                                            useSSL: davSSL), "CardDAV: \(davDesc)")
+        case .associatedDomains:
+            let domains = assocDomains.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            return (ProfilePayloads.associatedDomains(appID: assocAppID.trimmingCharacters(in: .whitespaces),
+                                                      domains: domains), "Associated Domains: \(assocAppID)")
         case .wifi:
             return (ProfilePayloads.wifi(ssid: ssid, password: wifiPassword,
                                          hidden: wifiHidden, security: wifiSecurity),
@@ -900,6 +978,104 @@ struct ProfilesView: View {
         do { built = try buildProfile() }
         catch { result = "Couldn't build profile: \(error.localizedDescription)"; return }
         await deploy(data: built.data, name: built.name)
+    }
+
+    /// Build the template, then run it through the diff gate.
+    @MainActor
+    private func attemptDeployBuilt() async {
+        let built: (data: Data, name: String)
+        do { built = try buildProfile() }
+        catch { result = "Couldn't build profile: \(error.localizedDescription)"; return }
+        await attemptDeploy(data: built.data, name: built.name)
+    }
+
+    /// If any target already has a profile with this identifier (per the
+    /// deployment log), show a diff sheet first; otherwise deploy straight
+    /// away. The diff compares the last bytes Edict sent against the new
+    /// ones, so the operator sees exactly what this push will change.
+    @MainActor
+    private func attemptDeploy(data: Data, name: String) async {
+        guard let newID = DeploymentLog.payloadIdentifier(data) else {
+            await deploy(data: data, name: name); return
+        }
+        let log = DeploymentLog.load()
+        var newest: DeploymentLog.Entry?
+        var affected = 0
+        for t in resolvedTargets {
+            guard let prior = (log[t.id] ?? []).first(where: { $0.identifier == newID }) else { continue }
+            affected += 1
+            if newest == nil || prior.epoch > newest!.epoch { newest = prior }
+        }
+        if let newest, !newest.dataBase64.isEmpty {
+            let changes = ProfileDiff.compare(old: newest.data, new: data)
+            if !changes.isEmpty {
+                pendingDeploy = PendingDeploy(data: data, name: name, changes: changes, deviceCount: affected)
+                return
+            }
+        }
+        await deploy(data: data, name: name)
+    }
+
+    private func diffSheet(_ pending: PendingDeploy) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.triangle.2.circlepath").foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Replacing “\(pending.name)”").font(.headline)
+                    Text("\(pending.deviceCount) of \(resolvedTargets.count) target device\(resolvedTargets.count == 1 ? "" : "s") already \(pending.deviceCount == 1 ? "has" : "have") this profile. \(pending.changes.count) change\(pending.changes.count == 1 ? "" : "s") versus what Edict last sent:")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(pending.changes) { c in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text(c.kind.rawValue)
+                                .font(.caption2.bold())
+                                .foregroundStyle(diffColor(c.kind))
+                                .frame(width: 56, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(c.path).font(.caption.bold())
+                                switch c.kind {
+                                case .changed:
+                                    Text("\(c.before ?? "—")  →  \(c.after ?? "—")")
+                                        .font(.caption2.monospaced()).foregroundStyle(.secondary)
+                                case .added:
+                                    Text(c.after ?? "—").font(.caption2.monospaced()).foregroundStyle(.green)
+                                case .removed:
+                                    Text(c.before ?? "—").font(.caption2.monospaced()).foregroundStyle(.red)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 2)
+                        Divider()
+                    }
+                }
+            }
+            .frame(maxHeight: 280)
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.2), lineWidth: 1))
+            HStack {
+                Spacer()
+                Button("Cancel") { pendingDeploy = nil }.keyboardShortcut(.cancelAction)
+                Button("Deploy anyway") {
+                    let p = pending
+                    pendingDeploy = nil
+                    Task { await deploy(data: p.data, name: p.name) }
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(20).frame(width: 460)
+    }
+
+    private func diffColor(_ kind: ProfileDiff.Change.Kind) -> Color {
+        switch kind {
+        case .added: return .green
+        case .removed: return .red
+        case .changed: return .orange
+        }
     }
 
     /// Deploy raw profile bytes (template-built or saved/imported) to the

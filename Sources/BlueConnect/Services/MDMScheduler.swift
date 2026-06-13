@@ -53,8 +53,45 @@ final class MDMScheduler {
         switch t.kind {
         case .fleetCheck:        await fleetCheck(settings)
         case .remediateFileVault: await remediateFileVault(settings)
+        case .remediateDrift:    await remediateDrift(settings)
         case .reapplyProfile:    await reapply(t, settings)
         }
+    }
+
+    /// For each device, query its installed profiles and re-push any
+    /// Edict-deployed profile that's no longer present.
+    private func remediateDrift(_ settings: SettingsStore) async {
+        let devices = await enrolledDevices(settings)
+        let nano = NanoMDMService(settings: settings)
+        let api = EnrollmentsAPI(settings: settings)
+        let log = DeploymentLog.load()
+        var repushed = 0
+        for d in devices {
+            let tracked = log[d.id] ?? []
+            guard !tracked.isEmpty else { continue }
+            guard let uuid = try? await nano.requestProfileList(enrollmentID: d.id) else { continue }
+            _ = try? await nano.push(enrollmentIDs: d.id)
+            var installed: Set<String>?
+            for _ in 0..<10 {
+                try? await Task.sleep(for: .seconds(2))
+                if let res = try? await api.commandResult(uuid: uuid) {
+                    installed = Set(res.array("ProfileList").compactMap { $0["PayloadIdentifier"] as? String })
+                    break
+                }
+            }
+            guard let present = installed else { continue }
+            for e in tracked where !present.contains(e.identifier) && !e.dataBase64.isEmpty {
+                if (try? await nano.installProfile(enrollmentID: d.id, profile: e.data)) != nil {
+                    _ = try? await nano.push(enrollmentIDs: d.id)
+                    repushed += 1
+                }
+            }
+        }
+        if repushed > 0 {
+            notifier?.notify(title: "Profile drift corrected", body: "Re-pushed \(repushed) missing profile(s).", identifier: "edict-sched")
+            activity?.record(.category, title: "Scheduled: re-pushed \(repushed) drifted profile(s)")
+        }
+        note("Drift sweep: \(repushed) re-pushed")
     }
 
     // MARK: - Task implementations

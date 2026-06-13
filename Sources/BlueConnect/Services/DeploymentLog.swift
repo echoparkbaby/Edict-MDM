@@ -8,6 +8,9 @@ enum DeploymentLog {
         var identifier: String   // PayloadIdentifier
         var name: String
         var epoch: Double
+        /// The deployed bytes, so drift remediation can re-push exactly.
+        var dataBase64: String = ""
+        var data: Data { Data(base64Encoded: dataBase64) ?? Data() }
     }
 
     private static var fileURL: URL {
@@ -38,7 +41,8 @@ enum DeploymentLog {
         for d in deviceIDs {
             var list = map[d] ?? []
             list.removeAll { $0.identifier == id }
-            list.append(Entry(identifier: id, name: name, epoch: nowEpoch))
+            list.append(Entry(identifier: id, name: name, epoch: nowEpoch,
+                              dataBase64: profileData.base64EncodedString()))
             map[d] = list
         }
         save(map)

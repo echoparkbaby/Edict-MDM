@@ -19,12 +19,14 @@ struct ScheduledTask: Codable, Identifiable, Hashable {
     enum Kind: String, Codable, CaseIterable, Identifiable {
         case fleetCheck = "Fleet check + notify"
         case remediateFileVault = "Auto-enable FileVault on non-compliant"
+        case remediateDrift = "Re-push profiles that have gone missing"
         case reapplyProfile = "Re-apply a saved profile to a group"
         var id: String { rawValue }
         var detail: String {
             switch self {
             case .fleetCheck: return "Refresh the device list and push notifications for new enrollments, non-compliance, and cert expiry — even when you're not looking."
             case .remediateFileVault: return "Push the FileVault profile to any Mac reporting FileVault off."
+            case .remediateDrift: return "Check every device against the profiles Edict deployed to it; re-push any that a user removed or that fell off."
             case .reapplyProfile: return "Re-deploy a saved profile to a smart group's members to correct drift."
             }
         }

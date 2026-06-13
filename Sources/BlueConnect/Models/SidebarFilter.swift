@@ -19,6 +19,8 @@ enum SidebarFilter: Hashable {
     case mdmEnrollment
     /// Edict MDM: scheduled automation.
     case mdmScheduling
+    /// Edict MDM: fleet/group compliance dashboard.
+    case mdmDashboard
 
     var key: String {
         switch self {
@@ -34,6 +36,7 @@ enum SidebarFilter: Hashable {
         case .mdmProfiles: "mdm:prof"
         case .mdmEnrollment: "mdm:enroll"
         case .mdmScheduling: "mdm:sched"
+        case .mdmDashboard: "mdm:dash"
         }
     }
 }

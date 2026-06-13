@@ -262,6 +262,47 @@ enum ProfilePayloads {
                        identifier: "xyz.hellocomputer.edict.webfilter", payloads: [w])
     }
 
+    /// `com.apple.caldav.account` — calendar account.
+    static func calDAV(description: String, host: String, port: Int, principalURL: String,
+                       username: String, useSSL: Bool) -> Data {
+        var c: [String: Any] = base("com.apple.caldav.account", displayName: "CalDAV")
+        c["CalDAVAccountDescription"] = description
+        c["CalDAVHostName"] = host
+        if port > 0 { c["CalDAVPort"] = port }
+        if !principalURL.isEmpty { c["CalDAVPrincipalURL"] = principalURL }
+        if !username.isEmpty { c["CalDAVUsername"] = username }
+        c["CalDAVUseSSL"] = useSSL
+        return profile(displayName: "CalDAV: \(description)",
+                       identifier: "xyz.hellocomputer.edict.caldav", payloads: [c])
+    }
+
+    /// `com.apple.carddav.account` — contacts account.
+    static func cardDAV(description: String, host: String, port: Int, principalURL: String,
+                        username: String, useSSL: Bool) -> Data {
+        var c: [String: Any] = base("com.apple.carddav.account", displayName: "CardDAV")
+        c["CardDAVAccountDescription"] = description
+        c["CardDAVHostName"] = host
+        if port > 0 { c["CardDAVPort"] = port }
+        if !principalURL.isEmpty { c["CardDAVPrincipalURL"] = principalURL }
+        if !username.isEmpty { c["CardDAVUsername"] = username }
+        c["CardDAVUseSSL"] = useSSL
+        return profile(displayName: "CardDAV: \(description)",
+                       identifier: "xyz.hellocomputer.edict.carddav", payloads: [c])
+    }
+
+    /// `com.apple.associated-domains` — associate an app with web domains
+    /// (universal links, shared web credentials).
+    static func associatedDomains(appID: String, domains: [String]) -> Data {
+        var a: [String: Any] = base("com.apple.associated-domains", displayName: "Associated Domains")
+        a["Configuration"] = [[
+            "ApplicationIdentifier": appID,
+            "AssociatedDomains": domains,
+            "EnableDirectDownloads": false,
+        ]]
+        return profile(displayName: "Associated Domains: \(appID)",
+                       identifier: "xyz.hellocomputer.edict.assoc", payloads: [a])
+    }
+
     // MARK: - iMazing-catalog–derived templates
 
     /// `com.apple.MCX.TimeMachine` — managed Time Machine backup.
