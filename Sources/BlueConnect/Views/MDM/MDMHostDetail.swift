@@ -29,7 +29,31 @@ struct MDMHostDetail: View {
     @State private var invLoading = false
     @State private var invError: String?
 
+    /// Freshly-read DDM facts for this device. The `entry` we're handed is
+    /// a snapshot from the fleet index that never updates on its own, so we
+    /// re-read here on open and after Refresh / Enable reporting — that's
+    /// how the operator sees "Not reported" turn into real values.
+    @State private var live: (os: String?, fileVault: Bool?, model: String?)?
+
     private var nano: NanoMDMService { NanoMDMService(settings: settings) }
+
+    private var os: String? { live?.os ?? entry.os }
+    private var model: String? { live?.model ?? entry.model }
+    private var fileVault: Bool? { live?.fileVault ?? entry.fileVault }
+
+    private var hasBaseline: Bool {
+        settings.mdmRequireFileVault || !settings.mdmMinOSVersion.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+    private var complianceState: Bool? {
+        SmartGroup.compliant(
+            SmartGroup.DeviceFacts(osVersion: os, fileVaultOn: fileVault, model: model,
+                                   matchedBlueSky: false, enrolled: entry.enrolled),
+            requireFileVault: settings.mdmRequireFileVault, minOS: settings.mdmMinOSVersion)
+    }
+
+    private func loadFacts() async {
+        live = await KMFDDMService(settings: settings).deviceFacts(enrollmentID: entry.enrollmentID)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -52,6 +76,7 @@ struct MDMHostDetail: View {
         .task(id: entry.enrollmentID) {
             deployed = DeploymentLog.entries(for: entry.enrollmentID)
             savedProfiles = SavedProfilesStore.load()
+            await loadFacts()
         }
         .sheet(isPresented: $showLock) {
             LockDeviceSheet(deviceName: host.displayName) { pin, message in
@@ -95,15 +120,17 @@ struct MDMHostDetail: View {
                     .foregroundStyle(entry.enrolled ? .green : .secondary)
                 Text(entry.enrolled ? "Enrolled in MDM" : "MDM enrollment checked out").font(.subheadline.bold())
             }
-            if let c = entry.compliant {
+            if !hasBaseline {
+                row("Compliance", "No baseline set", color: .secondary)
+            } else if let c = complianceState {
                 row("Compliance", c ? "Meets baseline" : "Out of compliance",
                     color: c ? .green : .orange)
             } else {
-                row("Compliance", "Not determined", color: .secondary)
+                row("Compliance", "Can’t tell — facts not reported", color: .secondary)
             }
-            row("macOS", entry.os ?? "Not reported")
-            row("Model", entry.model ?? "Not reported")
-            switch entry.fileVault {
+            row("macOS", os ?? "Not reported", color: os == nil ? .secondary : .primary)
+            row("Model", model ?? "Not reported", color: model == nil ? .secondary : .primary)
+            switch fileVault {
             case .some(true): row("FileVault", "On", color: .green)
             case .some(false): row("FileVault", "Off", color: .red)
             case nil: row("FileVault", "Not reported", color: .secondary)
@@ -186,7 +213,13 @@ struct MDMHostDetail: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("MDM Actions").font(.caption.bold())
             HStack(spacing: 8) {
-                Button { Task { await act("Pushed — \(host.displayName) should check in") { try await nano.push(enrollmentIDs: entry.enrollmentID) } } } label: {
+                Button {
+                    Task {
+                        await act("Pushed — re-read facts in a moment") { try await nano.push(enrollmentIDs: entry.enrollmentID) }
+                        try? await Task.sleep(for: .seconds(3))
+                        await loadFacts()
+                    }
+                } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 if !savedProfiles.isEmpty {
@@ -201,7 +234,7 @@ struct MDMHostDetail: View {
             .buttonStyle(.bordered).controlSize(.small)
             // Enable reporting fixes the "Not reported" facts: subscribes
             // the Mac to report OS / model / FileVault via DDM status.
-            if entry.os == nil || entry.fileVault == nil {
+            if os == nil || fileVault == nil {
                 Button { Task { await enableReporting() } } label: {
                     if enablingReporting { ProgressView().controlSize(.small) }
                     else { Label("Enable reporting", systemImage: "antenna.radiowaves.left.and.right") }
@@ -269,7 +302,10 @@ struct MDMHostDetail: View {
                                  configID: configID, toSet: set)
             try await kmf.assign(enrollmentID: entry.enrollmentID, toSet: set)
             _ = try? await nano.push(enrollmentIDs: entry.enrollmentID)
-            notice = "Reporting enabled — facts arrive as the Mac syncs."
+            notice = "Reporting enabled — facts arrive once the Mac syncs (can take a few minutes). Hit Refresh."
+            // Best-effort early re-read in case the Mac answers quickly.
+            try? await Task.sleep(for: .seconds(6))
+            await loadFacts()
         } catch {
             errorText = error.localizedDescription
         }
