@@ -65,11 +65,13 @@ struct ConnectPanel: View {
 
     // MARK: - Single host
 
-    /// Tabs available for this host: Connect always; Inventory when MR is
-    /// configured; MDM when device management is on.
+    /// Tabs available for this host: Connect always; Inventory whenever a
+    /// MunkiReport URL is set (the tab guides you if the token's missing,
+    /// rather than vanishing on a half-configured setup); MDM when device
+    /// management is on.
     private func availableTabs(_ host: BlueSkyHost) -> [Tab] {
         var t: [Tab] = [.connect]
-        if settings.isMunkiReportAPIConfigured { t.append(.inventory) }
+        if !settings.munkiReportURL.trimmingCharacters(in: .whitespaces).isEmpty { t.append(.inventory) }
         if settings.mdmEnabled { t.append(.mdm) }
         return t
     }
@@ -148,7 +150,14 @@ struct ConnectPanel: View {
     /// fetch fires automatically on host change via `.task(id:)`.
     @ViewBuilder
     private func inventoryTab(host: BlueSkyHost) -> some View {
-        if let serial = host.serialnum?.trimmingCharacters(in: .whitespaces),
+        if !settings.isMunkiReportAPIConfigured {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("MunkiReport needs an API token", systemImage: "key.slash").font(.subheadline.bold())
+                Text("A MunkiReport URL is set, but the API token is empty — add it in Settings → MunkiReport to pull inventory here. (Edict keeps its own settings separate from BlueConnect Admin, so you may need to re-enter it.)")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else if let serial = host.serialnum?.trimmingCharacters(in: .whitespaces),
            !serial.isEmpty {
             inventoryHeader(host: host, serial: serial)
             if let err = mrInventory.errorBySerial[serial] {
