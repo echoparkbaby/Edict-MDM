@@ -18,12 +18,24 @@ struct MDMHostDetail: View {
     @State private var showRename = false
     @State private var renameText = ""
     @State private var confirmUnenroll = false
+    @State private var showErase = false
+    @State private var confirmShutdown = false
+    @State private var enablingReporting = false
+
+    // Live inventory pulled straight from the Mac.
+    enum InvKind: String { case hardware = "Hardware", profiles = "Profiles", apps = "Apps" }
+    @State private var invKind: InvKind?
+    @State private var invItems: [String] = []
+    @State private var invLoading = false
+    @State private var invError: String?
 
     private var nano: NanoMDMService { NanoMDMService(settings: settings) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             statusGrid
+            Divider()
+            inventorySection
             Divider()
             profilesSection
             Divider()
@@ -47,6 +59,21 @@ struct MDMHostDetail: View {
             }
         }
         .sheet(isPresented: $showRename) { renameSheet }
+        .sheet(isPresented: $showErase) {
+            EraseDeviceSheet(deviceName: host.displayName) { pin in
+                await act("Erase command sent — the Mac wipes on receipt") {
+                    try await nano.erase(enrollmentID: entry.enrollmentID, pin: pin)
+                }
+            }
+        }
+        .alert("Shut down \(host.displayName)?", isPresented: $confirmShutdown) {
+            Button("Cancel", role: .cancel) {}
+            Button("Shut Down", role: .destructive) {
+                Task { await act("Shutdown command sent") { try await nano.shutDown(enrollmentID: entry.enrollmentID) } }
+            }
+        } message: {
+            Text("The Mac powers off when it receives the command. It must be online now.")
+        }
         .alert("Remove \(host.displayName) from MDM?", isPresented: $confirmUnenroll) {
             Button("Cancel", role: .cancel) {}
             Button("Unenroll", role: .destructive) {
@@ -96,6 +123,45 @@ struct MDMHostDetail: View {
         }
     }
 
+    // MARK: - Live inventory (queried from the Mac)
+
+    private var inventorySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Inventory").font(.caption.bold())
+                Spacer()
+                if invLoading { ProgressView().controlSize(.small) }
+            }
+            HStack(spacing: 6) {
+                ForEach([InvKind.hardware, .profiles, .apps], id: \.self) { kind in
+                    Button(kind.rawValue) { Task { await fetchInv(kind) } }
+                        .buttonStyle(.bordered).controlSize(.small)
+                        .disabled(invLoading)
+                }
+            }
+            if let invError {
+                Text(invError).font(.caption2).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            } else if let invKind, !invLoading {
+                if invItems.isEmpty {
+                    Text("\(invKind.rawValue): nothing reported.").font(.caption2).foregroundStyle(.secondary)
+                } else {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(invItems.prefix(40), id: \.self) { item in
+                            Text(item).font(.caption2).foregroundStyle(.secondary)
+                                .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                        }
+                        if invItems.count > 40 {
+                            Text("+ \(invItems.count - 40) more…").font(.caption2).foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            } else {
+                Text("Query live hardware, installed profiles, or apps straight from this Mac.")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     // MARK: - Deployed profiles
 
     private var profilesSection: some View {
@@ -133,16 +199,34 @@ struct MDMHostDetail: View {
                 }
             }
             .buttonStyle(.bordered).controlSize(.small)
+            // Enable reporting fixes the "Not reported" facts: subscribes
+            // the Mac to report OS / model / FileVault via DDM status.
+            if entry.os == nil || entry.fileVault == nil {
+                Button { Task { await enableReporting() } } label: {
+                    if enablingReporting { ProgressView().controlSize(.small) }
+                    else { Label("Enable reporting", systemImage: "antenna.radiowaves.left.and.right") }
+                }
+                .buttonStyle(.bordered).controlSize(.small)
+                .help("Subscribe this Mac to report OS, model, and FileVault status so its facts stop showing “Not reported”.")
+            }
             HStack(spacing: 8) {
                 Button { renameText = host.displayName; showRename = true } label: { Label("Rename", systemImage: "pencil") }
                 Button { showLock = true } label: { Label("Lock", systemImage: "lock.fill") }
                 Button { Task { await act("Restart command sent") { try await nano.restart(enrollmentID: entry.enrollmentID) } } } label: { Label("Restart", systemImage: "restart") }
+                Button { confirmShutdown = true } label: { Label("Shut Down", systemImage: "power") }
             }
             .buttonStyle(.bordered).controlSize(.small)
-            Button(role: .destructive) { confirmUnenroll = true } label: {
-                Label("Unenroll from MDM", systemImage: "shield.slash")
+            HStack(spacing: 8) {
+                Button(role: .destructive) { confirmUnenroll = true } label: {
+                    Label("Unenroll", systemImage: "shield.slash")
+                }
+                .tint(.red)
+                Button(role: .destructive) { showErase = true } label: {
+                    Label("Erase", systemImage: "trash.fill")
+                }
+                .tint(.red)
             }
-            .buttonStyle(.bordered).controlSize(.small).tint(.red)
+            .buttonStyle(.bordered).controlSize(.small)
             if busy { ProgressView().controlSize(.small) }
         }
     }
@@ -169,6 +253,89 @@ struct MDMHostDetail: View {
     }
 
     // MARK: - Helpers
+
+    /// Subscribe the Mac to DDM status reporting (OS / model / FileVault),
+    /// so the dashboard, columns, and this pane stop reading "Not reported".
+    /// Deploys the subscription to the default set and assigns this device.
+    private func enableReporting() async {
+        enablingReporting = true
+        notice = nil; errorText = nil
+        defer { enablingReporting = false }
+        let set = "default"
+        let configID = "com.hellocomputer.edict.status-subscriptions"
+        do {
+            let kmf = KMFDDMService(settings: settings)
+            try await kmf.deploy(configJSON: DDMDeclarations.statusSubscriptions(identifier: configID),
+                                 configID: configID, toSet: set)
+            try await kmf.assign(enrollmentID: entry.enrollmentID, toSet: set)
+            _ = try? await nano.push(enrollmentIDs: entry.enrollmentID)
+            notice = "Reporting enabled — facts arrive as the Mac syncs."
+        } catch {
+            errorText = error.localizedDescription
+        }
+    }
+
+    /// Query live inventory from the Mac (DeviceInformation / ProfileList /
+    /// InstalledApplicationList), pushing so an idle Mac wakes to answer.
+    private func fetchInv(_ kind: InvKind) async {
+        invKind = kind; invItems = []; invError = nil; invLoading = true
+        defer { invLoading = false }
+        let api = EnrollmentsAPI(settings: settings)
+        do {
+            let uuid: String
+            switch kind {
+            case .hardware: uuid = try await nano.requestDeviceInformation(enrollmentID: entry.enrollmentID)
+            case .profiles: uuid = try await nano.requestProfileList(enrollmentID: entry.enrollmentID)
+            case .apps:     uuid = try await nano.requestInstalledApps(enrollmentID: entry.enrollmentID)
+            }
+            _ = try? await nano.push(enrollmentIDs: entry.enrollmentID)
+            for _ in 0..<12 {
+                try? await Task.sleep(for: .seconds(2))
+                guard let res = try await api.commandResult(uuid: uuid) else { continue }
+                switch kind {
+                case .hardware:
+                    invItems = Self.formatDeviceInformation(res.dict("QueryResponses"))
+                case .profiles:
+                    invItems = res.array("ProfileList").compactMap {
+                        ($0["PayloadDisplayName"] as? String) ?? ($0["PayloadIdentifier"] as? String)
+                    }.sorted()
+                case .apps:
+                    invItems = res.array("InstalledApplicationList").compactMap { app in
+                        let name = (app["Name"] as? String) ?? (app["Identifier"] as? String) ?? "?"
+                        let ver = app["ShortVersion"] as? String ?? app["Version"] as? String
+                        return ver.map { "\(name) \($0)" } ?? name
+                    }.sorted()
+                }
+                return
+            }
+            invError = "No answer yet — the Mac may be offline. Try again."
+        } catch {
+            invError = error.localizedDescription
+        }
+    }
+
+    /// Readable rows from a DeviceInformation QueryResponses dict.
+    private static func formatDeviceInformation(_ q: [String: Any]) -> [String] {
+        var out: [String] = []
+        func gb(_ v: Any?) -> String? {
+            if let d = v as? Double { return String(format: "%.1f GB", d) }
+            if let i = v as? Int { return "\(i) GB" }
+            return nil
+        }
+        if let model = q["ModelName"] as? String ?? q["ProductName"] as? String { out.append("Model: \(model)") }
+        if let os = q["OSVersion"] as? String {
+            out.append("OS: \(os)" + ((q["BuildVersion"] as? String).map { " (\($0))" } ?? ""))
+        }
+        if let avail = gb(q["AvailableDeviceCapacity"]), let total = gb(q["DeviceCapacity"]) {
+            out.append("Storage: \(avail) free of \(total)")
+        }
+        if let b = q["BatteryLevel"] as? Double, b >= 0 { out.append("Battery: \(Int(b * 100))%") }
+        if let serial = q["SerialNumber"] as? String { out.append("Serial: \(serial)") }
+        if let name = q["DeviceName"] as? String { out.append("Device name: \(name)") }
+        if let mac = q["WiFiMAC"] as? String { out.append("Wi-Fi MAC: \(mac)") }
+        if let mac = q["EthernetMAC"] as? String { out.append("Ethernet MAC: \(mac)") }
+        return out
+    }
 
     private func deploy(_ p: SavedProfile) async {
         await act("Deployed \(p.name)") {

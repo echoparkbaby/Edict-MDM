@@ -1930,7 +1930,7 @@ struct LockDeviceSheet: View {
 
 /// Remote wipe with a typed-name confirmation — the one action in the
 /// app with no undo, so it gets the strongest guard.
-private struct EraseDeviceSheet: View {
+struct EraseDeviceSheet: View {
     @Environment(\.dismiss) private var dismiss
     let deviceName: String
     let onErase: (String) async -> Void
