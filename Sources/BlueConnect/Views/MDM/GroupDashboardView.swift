@@ -27,6 +27,18 @@ struct GroupDashboardView: View {
     /// Which summary card is expanded to its device list (nil = none).
     @State private var drillKey: String?
 
+    // Prism: the configurable "chart the fleet by <attribute>" layer.
+    @State private var attribute: PrismView.Attribute = .osVersion
+    @State private var savedViews: [PrismView] = []
+    @State private var activeViewID: UUID?
+    /// Which prism-chart bar is expanded to its device list.
+    @State private var prismBucket: String?
+    /// enrollmentID → count of profiles Edict deployed (for the profile
+    /// attribute), loaded alongside the facts.
+    @State private var deploymentCounts: [String: Int] = [:]
+    @State private var showSaveView = false
+    @State private var saveViewName = ""
+
     var body: some View {
         Group {
             if !settings.mdmEnabled || !settings.mdmConfigured {
@@ -106,17 +118,6 @@ struct GroupDashboardView: View {
         return t
     }
 
-    /// Count by value, descending — used for OS-version and model spreads.
-    private func distribution(_ pick: (MDMEnrollment) -> String?) -> [(label: String, count: Int)] {
-        var counts: [String: Int] = [:]
-        for d in scoped {
-            let key = pick(d)?.trimmingCharacters(in: .whitespaces)
-            counts[(key?.isEmpty == false ? key! : "Not reported"), default: 0] += 1
-        }
-        return counts.sorted { $0.value > $1.value || ($0.value == $1.value && $0.key < $1.key) }
-            .map { (label: $0.key, count: $0.value) }
-    }
-
     private var driftDeviceCount: Int { driftMissing.values.filter { !$0.isEmpty }.count }
     private var driftProfileCount: Int { driftMissing.values.reduce(0) { $0 + $1.count } }
 
@@ -126,6 +127,7 @@ struct GroupDashboardView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 groupPicker
+                savedViewsBar
                 if let err = loadError {
                     Label(err, systemImage: "exclamationmark.triangle")
                         .font(.caption).foregroundStyle(.orange)
@@ -139,8 +141,8 @@ struct GroupDashboardView: View {
                     if let drillKey, !drillDevices(drillKey).isEmpty {
                         drillList(drillKey)
                     }
+                    prismChart
                     breakdownRow
-                    distributionRow
                     assignmentsCard
                     driftCard
                 }
@@ -148,6 +150,181 @@ struct GroupDashboardView: View {
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .sheet(isPresented: $showSaveView) { saveViewSheet }
+    }
+
+    // MARK: - Prism (saved, configurable views)
+
+    private var savedViewsBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(savedViews) { v in
+                    let isActive = activeViewID == v.id
+                    HStack(spacing: 4) {
+                        Button { apply(v) } label: {
+                            Label(v.name, systemImage: v.attribute.icon).font(.caption)
+                        }
+                        .buttonStyle(.plain)
+                        if isActive {
+                            Button { deleteView(v) } label: { Image(systemName: "xmark.circle.fill").font(.caption2) }
+                                .buttonStyle(.plain).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(Capsule().fill(isActive ? Color.accentColor.opacity(0.2) : Color(NSColor.controlBackgroundColor)))
+                    .overlay(Capsule().stroke(isActive ? Color.accentColor : .clear, lineWidth: 1))
+                }
+                Button { saveViewName = suggestedViewName; showSaveView = true } label: {
+                    Label("Save view", systemImage: "plus").font(.caption)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(Capsule().strokeBorder(Color.secondary.opacity(0.4), style: StrokeStyle(lineWidth: 1, dash: [3])))
+            }
+        }
+    }
+
+    private var suggestedViewName: String {
+        (selectedGroup?.name).map { "\($0) — \(attribute.rawValue)" } ?? "Fleet — \(attribute.rawValue)"
+    }
+
+    private func apply(_ v: PrismView) {
+        activeViewID = v.id
+        selectedGroupID = v.groupID
+        attribute = v.attribute
+        prismBucket = nil
+    }
+
+    private func deleteView(_ v: PrismView) {
+        savedViews.removeAll { $0.id == v.id }
+        settings.prismViews = savedViews
+        if activeViewID == v.id { activeViewID = nil }
+    }
+
+    private func saveCurrentView() {
+        let name = saveViewName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        let v = PrismView(name: name, groupID: selectedGroupID, attribute: attribute)
+        savedViews.append(v)
+        settings.prismViews = savedViews
+        activeViewID = v.id
+        showSaveView = false
+    }
+
+    private var saveViewSheet: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Save Prism View").font(.headline)
+            Text("Saves the current scope (\(selectedGroup?.name ?? "All devices")) and breakdown (\(attribute.rawValue)).")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            TextField("View name", text: $saveViewName).textFieldStyle(.roundedBorder)
+            HStack {
+                Spacer()
+                Button("Cancel") { showSaveView = false }.keyboardShortcut(.cancelAction)
+                Button("Save") { saveCurrentView() }.keyboardShortcut(.defaultAction)
+                    .disabled(saveViewName.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(20).frame(width: 380)
+    }
+
+    /// The configurable Prism chart: break the scoped fleet down by the
+    /// chosen attribute, each bar drillable to its devices.
+    private var prismChart: some View {
+        let buckets = prismBuckets()
+        let maxCount = max(1, buckets.map(\.count).max() ?? 1)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Breakdown", systemImage: attribute.icon).font(.headline)
+                Spacer()
+                Picker("", selection: $attribute) {
+                    ForEach(PrismView.Attribute.allCases) { a in
+                        Label(a.rawValue, systemImage: a.icon).tag(a)
+                    }
+                }
+                .labelsHidden().frame(maxWidth: 200)
+                .onChange(of: attribute) { _, _ in prismBucket = nil; activeViewID = nil }
+            }
+            ForEach(buckets, id: \.label) { row in
+                Button { prismBucket = (prismBucket == row.label) ? nil : row.label } label: {
+                    HStack(spacing: 8) {
+                        Text(row.label).font(.caption).frame(width: 150, alignment: .leading)
+                            .lineLimit(1).truncationMode(.middle)
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(Color.accentColor.opacity(0.15))
+                                Capsule().fill(Color.accentColor.opacity(prismBucket == row.label ? 0.95 : 0.7))
+                                    .frame(width: max(6, geo.size.width * CGFloat(row.count) / CGFloat(maxCount)))
+                            }
+                        }
+                        .frame(height: 16)
+                        Text("\(row.count)").font(.caption.monospacedDigit()).frame(width: 32, alignment: .trailing)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            if let b = prismBucket {
+                let matches = devicesInBucket(b)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(b) — \(matches.count) device\(matches.count == 1 ? "" : "s")")
+                        .font(.caption.bold())
+                    ForEach(matches, id: \.id) { d in
+                        HStack(spacing: 6) {
+                            Image(systemName: "laptopcomputer").foregroundStyle(.secondary)
+                            Text(label(for: d)).font(.caption)
+                            Spacer()
+                            if let os = osVersions[d.id] { Text("macOS \(os)").font(.caption2).foregroundStyle(.secondary) }
+                        }
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.06)))
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(NSColor.controlBackgroundColor)))
+    }
+
+    /// The bucket label a device falls into for the current attribute.
+    private func bucket(for d: MDMEnrollment) -> String {
+        switch attribute {
+        case .osVersion: return osVersions[d.id] ?? "Not reported"
+        case .model: return models[d.id] ?? "Not reported"
+        case .fileVault:
+            switch facts(for: d).fileVaultOn {
+            case .some(true): return "On"
+            case .some(false): return "Off"
+            case nil: return "Not reported"
+            }
+        case .compliance:
+            switch SmartGroup.compliant(facts(for: d), requireFileVault: settings.mdmRequireFileVault,
+                                        minOS: settings.mdmMinOSVersion) {
+            case .some(true): return "Compliant"
+            case .some(false): return "Out of compliance"
+            case nil: return "Unknown"
+            }
+        case .enrollment: return d.isEnabled ? "Enrolled" : "Checked out"
+        case .blueSky: return bscHost(for: d) != nil ? "Linked to BlueSky" : "MDM-only"
+        case .profileCount:
+            switch deploymentCounts[d.id] ?? 0 {
+            case 0: return "No profiles"
+            case 1...2: return "1–2 profiles"
+            default: return "3+ profiles"
+            }
+        }
+    }
+
+    private func prismBuckets() -> [(label: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for d in scoped { counts[bucket(for: d), default: 0] += 1 }
+        return counts.sorted { $0.value > $1.value || ($0.value == $1.value && $0.key < $1.key) }
+            .map { (label: $0.key, count: $0.value) }
+    }
+
+    private func devicesInBucket(_ b: String) -> [MDMEnrollment] {
+        scoped.filter { bucket(for: $0) == b }
     }
 
     private var groupPicker: some View {
@@ -260,13 +437,6 @@ struct GroupDashboardView: View {
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(NSColor.controlBackgroundColor)))
-    }
-
-    private var distributionRow: some View {
-        HStack(alignment: .top, spacing: 12) {
-            distributionCard("macOS versions", distribution { osVersions[$0.id] })
-            distributionCard("Models", distribution { models[$0.id] })
-        }
     }
 
     private var driftCard: some View {
@@ -436,36 +606,6 @@ struct GroupDashboardView: View {
         }
     }
 
-    private func distributionCard(_ title: String, _ rows: [(label: String, count: Int)]) -> some View {
-        let maxCount = max(1, rows.map(\.count).max() ?? 1)
-        return VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.headline)
-            if rows.isEmpty {
-                Text("No data").font(.caption).foregroundStyle(.secondary)
-            } else {
-                ForEach(rows.prefix(8), id: \.label) { row in
-                    HStack(spacing: 8) {
-                        Text(row.label).font(.caption).frame(width: 120, alignment: .leading)
-                            .lineLimit(1).truncationMode(.middle)
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(Color.accentColor.opacity(0.15))
-                                Capsule().fill(Color.accentColor.opacity(0.7))
-                                    .frame(width: max(4, geo.size.width * CGFloat(row.count) / CGFloat(maxCount)))
-                            }
-                        }
-                        .frame(height: 12)
-                        Text("\(row.count)").font(.caption.monospacedDigit())
-                            .frame(width: 28, alignment: .trailing)
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(NSColor.controlBackgroundColor)))
-    }
-
     private func label(for enr: MDMEnrollment) -> String {
         if let stored = settings.mdmDevices.first(where: { $0.id == enr.id })?.label,
            !stored.isEmpty { return stored }
@@ -506,6 +646,9 @@ struct GroupDashboardView: View {
 
     @MainActor
     private func refresh() async {
+        savedViews = settings.prismViews
+        let log = DeploymentLog.load()
+        deploymentCounts = log.mapValues { $0.count }
         guard settings.mdmEnabled, settings.mdmConfigured,
               !settings.mdmDevicesAPIBaseURL.trimmingCharacters(in: .whitespaces).isEmpty
         else { return }

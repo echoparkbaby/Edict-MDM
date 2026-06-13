@@ -575,6 +575,21 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    /// Saved Prism (fleet-analytics) views — scope + attribute to chart.
+    @AppStorage("mdmPrismViewsRaw") private var prismViewsRaw: String = "[]"
+    var prismViews: [PrismView] {
+        get {
+            guard let data = prismViewsRaw.data(using: .utf8),
+                  let arr = try? JSONDecoder().decode([PrismView].self, from: data)
+            else { return [] }
+            return arr
+        }
+        set {
+            let data = (try? JSONEncoder().encode(newValue)) ?? Data("[]".utf8)
+            prismViewsRaw = String(data: data, encoding: .utf8) ?? "[]"
+        }
+    }
+
     /// PayloadIdentifier of the enrollment profile installed on managed
     /// Macs. "Remove from MDM" sends a RemoveProfile for this identifier —
     /// pulling the enrollment profile unenrolls the device.
