@@ -126,6 +126,10 @@ struct ContentView: View {
     /// view — status per serial + synthetic rows for MDM-only Macs.
     @State private var mdmFleet = MDMFleetIndex()
 
+    /// One-time offer to import settings from the v1.5 BlueConnect Admin app.
+    @State private var showLegacyImport = false
+    @State private var legacyImportSummary: String?
+
     private func computeFilteredAndSorted() -> [BlueSkyHost] {
         var result = hostStore.hosts
         // Merge in Macs that are MDM-enrolled but not in BlueSky, so the
@@ -164,6 +168,14 @@ struct ContentView: View {
 
     private var selectedHosts: [BlueSkyHost] {
         filteredAndSorted.filter { selection.contains($0.id) }
+    }
+
+    /// Run the one-time BlueConnect Admin import and refresh so the
+    /// brought-over MunkiReport / host data shows immediately.
+    private func runLegacyImport() {
+        let r = LegacyMigration.run(settings: settings)
+        legacyImportSummary = "Imported \(r.defaults) preference\(r.defaults == 1 ? "" : "s") and \(r.secrets) saved secret\(r.secrets == 1 ? "" : "s") from BlueConnect Admin."
+        Task { await hostStore.refresh(settings: settings); await refreshMDMFleet() }
     }
 
     /// Reload the MDM overlay, telling it which serials BlueSky already
@@ -220,6 +232,13 @@ struct ContentView: View {
                 Task { await refreshMDMFleet() }   // re-join MDM data when hosts change
             }
             .task { await refreshMDMFleet() }
+            .task { if LegacyMigration.isAvailable { showLegacyImport = true } }
+            .modifier(LegacyImportAlerts(
+                show: $showLegacyImport,
+                summary: $legacyImportSummary,
+                onImport: runLegacyImport,
+                onSkip: { LegacyMigration.markDone() }
+            ))
             .environment(mdmFleet)
             .onChange(of: mdmFleet.version) { _, _ in filteredAndSorted = computeFilteredAndSorted() }
             .onChange(of: settings.mdmEnabled) { _, _ in Task { await refreshMDMFleet() } }
@@ -2126,5 +2145,33 @@ private struct FilteredAndSortedCacheInvalidator: ViewModifier {
             .onChange(of: sidebarFilterRaw) { recompute() }
             .onChange(of: sortOrder) { recompute() }
             .onChange(of: recentConnects) { recompute() }
+    }
+}
+
+/// The one-time "import from BlueConnect Admin" prompt + its result alert,
+/// pulled into a ViewModifier so ContentView's already-large body stays
+/// inside the compiler's type-check budget.
+private struct LegacyImportAlerts: ViewModifier {
+    @Binding var show: Bool
+    @Binding var summary: String?
+    let onImport: () -> Void
+    let onSkip: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .alert("Import settings from BlueConnect Admin?", isPresented: $show) {
+                Button("Import") { onImport() }
+                Button("Not now", role: .cancel) { onSkip() }
+            } message: {
+                Text("Edict keeps its own settings, so a fresh install starts blank. This copies your BlueConnect Admin preferences and saved passwords (MunkiReport, UniFi, Munki repo, …) over — it never overwrites anything you've already set here. macOS may ask you to “Always Allow” access to each saved password.")
+            }
+            .alert("Import complete", isPresented: Binding(
+                get: { summary != nil },
+                set: { if !$0 { summary = nil } }
+            )) {
+                Button("OK") { summary = nil }
+            } message: {
+                Text(summary ?? "")
+            }
     }
 }

@@ -23,6 +23,13 @@ enum KeychainHelper {
     }
 
     static func read(account: String) -> String? {
+        read(account: account, service: service)
+    }
+
+    /// Read from a specific service namespace — used by the one-time
+    /// import that pulls secrets out of the legacy BlueConnect Admin
+    /// keychain into this app's namespace.
+    static func read(account: String, service: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -37,6 +44,22 @@ enum KeychainHelper {
               let str = String(data: data, encoding: .utf8)
         else { return nil }
         return str
+    }
+
+    /// All generic-password account names stored under `service`. Returns
+    /// attributes only (not secret data), so it does not trigger keychain
+    /// access prompts — used to discover what to migrate.
+    static func accounts(inService service: String) -> [String] {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+            kSecReturnAttributes as String: true,
+        ]
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let items = result as? [[String: Any]] else { return [] }
+        return items.compactMap { $0[kSecAttrAccount as String] as? String }
     }
 
     static func delete(account: String) {
