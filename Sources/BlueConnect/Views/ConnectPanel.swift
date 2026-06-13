@@ -6,11 +6,12 @@ struct ConnectPanel: View {
     @Environment(CategoryStore.self) var categories
     @Environment(TerminalSessionsManager.self) var terminals
     @Environment(MunkiReportInventoryStore.self) private var mrInventory
+    @Environment(MDMFleetIndex.self) private var mdmFleet
 
     /// Tab inside the single-host pane. Persists across app launches so
     /// admins who live on the Inventory tab stay there.
     @AppStorage("connectPanelTab") private var tabRaw: String = "connect"
-    private enum Tab: String { case connect, inventory }
+    private enum Tab: String { case connect, inventory, mdm }
     private var tab: Tab {
         get { Tab(rawValue: tabRaw) ?? .connect }
     }
@@ -64,24 +65,61 @@ struct ConnectPanel: View {
 
     // MARK: - Single host
 
+    /// Tabs available for this host: Connect always; Inventory when MR is
+    /// configured; MDM when device management is on.
+    private func availableTabs(_ host: BlueSkyHost) -> [Tab] {
+        var t: [Tab] = [.connect]
+        if settings.isMunkiReportAPIConfigured { t.append(.inventory) }
+        if settings.mdmEnabled { t.append(.mdm) }
+        return t
+    }
+
+    private func tabLabel(_ t: Tab) -> String {
+        switch t { case .connect: return "Connect"; case .inventory: return "Inventory"; case .mdm: return "MDM" }
+    }
+
     private func singleHostBody(host: BlueSkyHost) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let tabs = availableTabs(host)
+        // Resolve the active tab against what's available (a persisted
+        // tab may not apply to this host / config). An MDM-only Mac has no
+        // BSC connect actions, so land it on the MDM tab.
+        let active: Tab = {
+            if host.isMDMOnly && tabs.contains(.mdm) { return .mdm }
+            return tabs.contains(tab) ? tab : .connect
+        }()
+        return VStack(alignment: .leading, spacing: 14) {
             hostHeader(host)
-            // Only show the tab switcher when MR creds are configured —
-            // otherwise the Inventory tab would be a dead-end stub.
-            if settings.isMunkiReportAPIConfigured {
+            if tabs.count > 1 {
                 Picker("View", selection: tabBinding) {
-                    Text("Connect").tag(Tab.connect)
-                    Text("Inventory").tag(Tab.inventory)
+                    ForEach(tabs, id: \.self) { Text(tabLabel($0)).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
             }
-            switch tab {
+            switch active {
             case .connect:   connectTab(host: host)
             case .inventory: inventoryTab(host: host)
+            case .mdm:       mdmTab(host: host)
             }
             Spacer(minLength: 0)
+        }
+    }
+
+    /// The MDM half of the unified detail. Shows the device's MDM status +
+    /// actions when it's enrolled (matched by serial), otherwise a hint.
+    @ViewBuilder
+    private func mdmTab(host: BlueSkyHost) -> some View {
+        if let entry = mdmFleet.entry(forSerial: host.serialnum) {
+            MDMHostDetail(host: host, entry: entry)
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Not enrolled in MDM", systemImage: "shield.slash").font(.subheadline.bold())
+                Text(host.serialnum?.isEmpty == false
+                     ? "No MDM enrollment matches this Mac's serial. Enroll it from the Enrollment tab, then it'll manage here."
+                     : "This host has no serial number, so it can't be matched to an MDM enrollment.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

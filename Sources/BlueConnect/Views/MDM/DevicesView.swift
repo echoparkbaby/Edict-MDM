@@ -1875,7 +1875,7 @@ private struct SmartGroupEditor: View {
 /// PIN + optional message for DeviceLock. The PIN is what unlocks the
 /// Mac afterward — losing it means a trip to recovery, so it's front
 /// and center in the confirmation.
-private struct LockDeviceSheet: View {
+struct LockDeviceSheet: View {
     @Environment(\.dismiss) private var dismiss
     let deviceName: String
     let onLock: (String, String?) async -> Void

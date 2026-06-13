@@ -220,6 +220,7 @@ struct ContentView: View {
                 Task { await refreshMDMFleet() }   // re-join MDM data when hosts change
             }
             .task { await refreshMDMFleet() }
+            .environment(mdmFleet)
             .onChange(of: mdmFleet.version) { _, _ in filteredAndSorted = computeFilteredAndSorted() }
             .onChange(of: settings.mdmEnabled) { _, _ in Task { await refreshMDMFleet() } }
             .onChange(of: settings.notifyOnStateChange) { _, newValue in
