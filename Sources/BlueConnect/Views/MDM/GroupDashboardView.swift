@@ -24,6 +24,9 @@ struct GroupDashboardView: View {
     @State private var driftChecking = false
     @State private var driftCheckedAt: Date?
 
+    /// Which summary card is expanded to its device list (nil = none).
+    @State private var drillKey: String?
+
     var body: some View {
         Group {
             if !settings.mdmEnabled || !settings.mdmConfigured {
@@ -133,8 +136,12 @@ struct GroupDashboardView: View {
                     emptyScope
                 } else {
                     summaryRow
+                    if let drillKey, !drillDevices(drillKey).isEmpty {
+                        drillList(drillKey)
+                    }
                     breakdownRow
                     distributionRow
+                    assignmentsCard
                     driftCard
                 }
             }
@@ -175,15 +182,69 @@ struct GroupDashboardView: View {
         let total = scoped.count
         let pct = total > 0 ? Int((Double(c.compliant) / Double(total) * 100).rounded()) : 0
         return HStack(spacing: 12) {
-            statCard("Devices", "\(total)", "laptopcomputer", .accentColor)
+            statCard("Devices", "\(total)", "laptopcomputer", .accentColor, drill: "all")
             statCard("Compliant", "\(pct)%", "checkmark.seal.fill",
                      pct >= 90 ? .green : (pct >= 70 ? .yellow : .red),
-                     subtitle: "\(c.compliant) of \(total)")
+                     subtitle: "\(c.compliant) of \(total)", drill: "compliant")
             statCard("Out of compliance", "\(c.nonCompliant)", "xmark.seal.fill",
-                     c.nonCompliant == 0 ? .secondary : .red)
+                     c.nonCompliant == 0 ? .secondary : .red, drill: "nonCompliant")
             statCard("Unknown", "\(c.unknown)", "questionmark.circle",
                      c.unknown == 0 ? .secondary : .yellow,
-                     subtitle: c.unknown > 0 ? "haven't reported" : nil)
+                     subtitle: c.unknown > 0 ? "haven't reported" : nil, drill: "unknown")
+        }
+    }
+
+    /// Devices matching a summary-card category, for the drill-down list.
+    private func drillDevices(_ key: String) -> [MDMEnrollment] {
+        switch key {
+        case "all": return scoped
+        case "compliant", "nonCompliant", "unknown":
+            return scoped.filter { d in
+                switch SmartGroup.compliant(facts(for: d),
+                                            requireFileVault: settings.mdmRequireFileVault,
+                                            minOS: settings.mdmMinOSVersion) {
+                case .some(true): return key == "compliant"
+                case .some(false): return key == "nonCompliant"
+                case nil: return key == "unknown"
+                }
+            }
+        default: return []
+        }
+    }
+
+    private func drillList(_ key: String) -> some View {
+        let title: String = ["all": "All devices", "compliant": "Compliant devices",
+                             "nonCompliant": "Out of compliance", "unknown": "Not yet reported"][key] ?? ""
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title).font(.subheadline.bold())
+                Spacer()
+                Button { drillKey = nil } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                    .buttonStyle(.plain)
+            }
+            ForEach(drillDevices(key), id: \.id) { d in
+                HStack(spacing: 8) {
+                    Image(systemName: "laptopcomputer").foregroundStyle(.secondary)
+                    Text(label(for: d)).font(.callout)
+                    Spacer()
+                    if let os = osVersions[d.id] { Text("macOS \(os)").font(.caption).foregroundStyle(.secondary) }
+                    fileVaultChip(for: d)
+                }
+                .padding(.vertical, 2)
+                Divider()
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.accentColor.opacity(0.06)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.accentColor.opacity(0.25), lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private func fileVaultChip(for enr: MDMEnrollment) -> some View {
+        switch facts(for: enr).fileVaultOn {
+        case .some(true): Label("FV", systemImage: "lock.fill").font(.caption2).foregroundStyle(.green)
+        case .some(false): Label("FV off", systemImage: "lock.open").font(.caption2).foregroundStyle(.red)
+        case nil: EmptyView()
         }
     }
 
@@ -263,17 +324,88 @@ struct GroupDashboardView: View {
     // MARK: - Reusable bits
 
     private func statCard(_ title: String, _ value: String, _ icon: String,
-                          _ tint: Color, subtitle: String? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+                          _ tint: Color, subtitle: String? = nil, drill: String? = nil) -> some View {
+        let isOpen = drill != nil && drillKey == drill
+        let card = VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 5) {
                 Image(systemName: icon).foregroundStyle(tint)
                 Text(title).font(.caption).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                if drill != nil {
+                    Image(systemName: isOpen ? "chevron.up" : "chevron.down")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
             }
             Text(value).font(.system(size: 26, weight: .semibold, design: .rounded))
             if let subtitle { Text(subtitle).font(.caption2).foregroundStyle(.secondary) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(NSColor.controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 10)
+            .stroke(Color.accentColor.opacity(isOpen ? 0.6 : 0), lineWidth: 1.5))
+        return Group {
+            if let drill {
+                Button { drillKey = (drillKey == drill) ? nil : drill } label: { card }
+                    .buttonStyle(.plain)
+            } else {
+                card
+            }
+        }
+    }
+
+    /// A compact device × profile matrix from the deployment log — at a
+    /// glance, which Edict-deployed profiles each device is supposed to
+    /// have. Columns are the distinct profile names across the scope.
+    private var assignmentsCard: some View {
+        let log = DeploymentLog.load()
+        let rows = scoped.compactMap { d -> (enr: MDMEnrollment, ids: Set<String>)? in
+            let entries = log[d.id] ?? []
+            return entries.isEmpty ? nil : (enr: d, ids: Set(entries.map(\.identifier)))
+        }
+        // Distinct profiles across the scope, keyed by identifier → name.
+        var nameByID: [String: String] = [:]
+        for d in scoped { for e in (log[d.id] ?? []) where nameByID[e.identifier] == nil { nameByID[e.identifier] = e.name } }
+        let columns = nameByID.sorted { $0.value.localizedCaseInsensitiveCompare($1.value) == .orderedAscending }
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Profile assignments").font(.headline)
+            if rows.isEmpty {
+                Text("Edict hasn't deployed any profiles to these devices yet. Deploys you make from the Profiles tab show up here.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            } else {
+                ScrollView(.horizontal, showsIndicators: true) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        // Header row of profile names (rotated would be nicer
+                        // but vertical text is fiddly — keep them readable).
+                        HStack(spacing: 0) {
+                            Text("Device").font(.caption2.bold()).frame(width: 150, alignment: .leading)
+                            ForEach(columns, id: \.key) { col in
+                                Text(col.value).font(.caption2).frame(width: 84, alignment: .center)
+                                    .lineLimit(2).truncationMode(.tail)
+                            }
+                        }
+                        Divider()
+                        ForEach(rows, id: \.enr.id) { row in
+                            HStack(spacing: 0) {
+                                Text(label(for: row.enr)).font(.caption).frame(width: 150, alignment: .leading)
+                                    .lineLimit(1).truncationMode(.middle)
+                                ForEach(columns, id: \.key) { col in
+                                    Image(systemName: row.ids.contains(col.key) ? "checkmark.circle.fill" : "minus")
+                                        .font(.caption)
+                                        .foregroundStyle(row.ids.contains(col.key) ? Color.green : Color.secondary.opacity(0.3))
+                                        .frame(width: 84, alignment: .center)
+                                }
+                            }
+                            .padding(.vertical, 1)
+                        }
+                    }
+                }
+                Text("A ✓ means Edict deployed that profile to the device. Run a drift check below to confirm it's still installed.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(NSColor.controlBackgroundColor)))
     }
 

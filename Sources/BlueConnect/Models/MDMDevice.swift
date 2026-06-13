@@ -11,4 +11,9 @@ struct MDMDevice: Codable, Identifiable, Hashable {
     var id: String
     /// Operator-friendly name, e.g. "juniper".
     var label: String
+    /// The device-reported computer name (DeviceInformation → DeviceName),
+    /// auto-resolved and cached so the list shows a real name even when
+    /// there's no operator label and no BlueSky match. Never overrides
+    /// `label`. Optional so older persisted records decode unchanged.
+    var autoName: String? = nil
 }

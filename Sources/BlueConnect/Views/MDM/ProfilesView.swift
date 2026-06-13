@@ -630,15 +630,32 @@ struct ProfilesView: View {
         case .notifications:
             Form {
                 TextField("App bundle ID", text: $notifBundleID, prompt: Text("com.apple.Safari"))
+                HStack {
+                    Button("Deliver quietly") {
+                        notifEnabled = true; notifAlertType = 0
+                        notifSounds = false; notifBadges = false
+                        notifLockScreen = false; notifCenter = true; notifCritical = false
+                    }
+                    .help("Silence this app's banners and sounds — warnings still land in Notification Center but never pop an alert. Good for chatty background agents.")
+                    Button("Silence completely") {
+                        notifEnabled = false; notifAlertType = 0
+                        notifSounds = false; notifBadges = false
+                        notifLockScreen = false; notifCenter = false; notifCritical = false
+                    }
+                    .help("Turn the app's notifications off entirely.")
+                }
                 Toggle("Notifications enabled", isOn: $notifEnabled)
                 Picker("Alert style", selection: $notifAlertType) {
                     Text("None").tag(0); Text("Banner").tag(1); Text("Persistent alert").tag(2)
                 }
-                Toggle("Sounds", isOn: $notifSounds)
-                Toggle("Badges", isOn: $notifBadges)
-                Toggle("Show on lock screen", isOn: $notifLockScreen)
-                Toggle("Show in Notification Center", isOn: $notifCenter)
-                Toggle("Allow critical alerts", isOn: $notifCritical)
+                .disabled(!notifEnabled)
+                Toggle("Sounds", isOn: $notifSounds).disabled(!notifEnabled)
+                Toggle("Badges", isOn: $notifBadges).disabled(!notifEnabled)
+                Toggle("Show on lock screen", isOn: $notifLockScreen).disabled(!notifEnabled)
+                Toggle("Show in Notification Center", isOn: $notifCenter).disabled(!notifEnabled)
+                Toggle("Allow critical alerts", isOn: $notifCritical).disabled(!notifEnabled)
+                Text("“Deliver quietly” keeps the app running normally but stops its warning banners and sounds from interrupting. Requires the app's bundle ID (find it with the app's Info.plist or `osascript -e 'id of app \"Name\"'`).")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             .formStyle(.columns)
         case .webFilter:

@@ -1533,12 +1533,53 @@ struct DevicesView: View {
     // MARK: - Labels (local-only friendly names)
 
     private func label(for enr: MDMEnrollment) -> String {
-        if let stored = settings.mdmDevices.first(where: { $0.id == enr.id })?.label,
-           !stored.isEmpty {
-            return stored
-        }
+        let entry = settings.mdmDevices.first(where: { $0.id == enr.id })
+        if let stored = entry?.label, !stored.isEmpty { return stored }
         if let host = bscHost(for: enr) { return host.displayName }
+        if let auto = entry?.autoName, !auto.isEmpty { return auto }
         return enr.serialNumber ?? String(enr.id.prefix(8))
+    }
+
+    /// Cache a device-reported computer name without touching the
+    /// operator label. Used by the background name resolver.
+    private func setAutoName(_ name: String, for id: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        var list = settings.mdmDevices
+        if let idx = list.firstIndex(where: { $0.id == id }) {
+            guard list[idx].autoName != trimmed else { return }
+            list[idx].autoName = trimmed
+        } else {
+            list.append(MDMDevice(id: id, label: "", autoName: trimmed))
+        }
+        settings.mdmDevices = list
+    }
+
+    /// In the background, ask each device that still shows a bare serial
+    /// for its DeviceName and cache it, so the list reads like real Macs
+    /// rather than serial barcodes. Skips devices that already have an
+    /// operator label, a BlueSky match, or a cached name.
+    @MainActor
+    private func resolveDeviceNames() async {
+        let nano = NanoMDMService(settings: settings)
+        let api = EnrollmentsAPI(settings: settings)
+        for enr in allDevices {
+            let entry = settings.mdmDevices.first(where: { $0.id == enr.id })
+            if let l = entry?.label, !l.isEmpty { continue }
+            if bscHost(for: enr) != nil { continue }
+            if let a = entry?.autoName, !a.isEmpty { continue }
+            guard let uuid = try? await nano.requestDeviceInformation(enrollmentID: enr.id) else { continue }
+            _ = try? await nano.push(enrollmentIDs: enr.id)
+            for _ in 0..<6 {
+                try? await Task.sleep(for: .seconds(2))
+                if let res = try? await api.commandResult(uuid: uuid) {
+                    if let name = res.dict("QueryResponses")["DeviceName"] as? String {
+                        setAutoName(name, for: enr.id)
+                    }
+                    break
+                }
+            }
+        }
     }
 
     /// The BSC fleet host with the same serial number, if any.
@@ -1656,6 +1697,9 @@ struct DevicesView: View {
             await loadOSVersions()
             pushCert = try? await api.pushCert()
             fireMDMNotifications()
+            // Fill in friendly names for any device still showing a bare
+            // serial — background, so it never holds up the list.
+            Task { await resolveDeviceNames() }
         } catch {
             loadError = error.localizedDescription
         }
