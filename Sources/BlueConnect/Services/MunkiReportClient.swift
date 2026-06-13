@@ -29,7 +29,52 @@ final class MunkiReportClient {
         let url = try Self.buildURL(action: "host", serial: serial, settings: settings)
         let (data, response) = try await Self.send(url: url, token: settings.munkiReportAPIToken)
         try Self.assertOK(response, data: data)
-        return try JSONDecoder().decode(MRHostInventory.self, from: data)
+        // A 200 can still carry an error envelope ({"error": "..."}) or a
+        // non-JSON page (HTML login, PHP warning). Catch those explicitly
+        // so the operator sees the cause, not a bare "couldn't be read".
+        if let env = try? JSONDecoder().decode([String: String].self, from: data),
+           let err = env["error"] {
+            throw MunkiReportError.transport("MunkiReport: \(err)")
+        }
+        do {
+            return try JSONDecoder().decode(MRHostInventory.self, from: data)
+        } catch {
+            throw Self.decodeFailure(error, data: data)
+        }
+    }
+
+    /// Turn a JSON decode failure into something diagnosable: detect an
+    /// HTML page (wrong URL / path / token redirect), pull the failing key
+    /// path out of a DecodingError, and always include the first bytes of
+    /// the body so the actual server response is visible.
+    private static func decodeFailure(_ error: Error, data: Data) -> MunkiReportError {
+        let raw = (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let snippet = raw.prefix(220)
+        if raw.hasPrefix("<") || raw.localizedCaseInsensitiveContains("<!doctype") || raw.localizedCaseInsensitiveContains("<html") {
+            return .transport("Got an HTML page, not JSON — the MunkiReport URL or API path is wrong, or the token isn't being accepted. Check Settings → MunkiReport. Response began: \(snippet)")
+        }
+        if let de = error as? DecodingError {
+            return .transport("Couldn't parse MunkiReport JSON (\(describe(de))). Response began: \(snippet)")
+        }
+        return .transport("Couldn't read MunkiReport response. It began: \(snippet)")
+    }
+
+    private static func describe(_ error: DecodingError) -> String {
+        func path(_ ctx: DecodingError.Context) -> String {
+            ctx.codingPath.map(\.stringValue).joined(separator: ".")
+        }
+        switch error {
+        case .keyNotFound(let key, let ctx):
+            return "missing key “\(key.stringValue)” at \(path(ctx).isEmpty ? "root" : path(ctx))"
+        case .typeMismatch(let type, let ctx):
+            return "type mismatch (expected \(type)) at \(path(ctx).isEmpty ? "root" : path(ctx))"
+        case .valueNotFound(let type, let ctx):
+            return "null where \(type) expected at \(path(ctx).isEmpty ? "root" : path(ctx))"
+        case .dataCorrupted(let ctx):
+            return "data corrupted: \(ctx.debugDescription)"
+        @unknown default:
+            return "\(error)"
+        }
     }
 
     // MARK: - URL + transport helpers
