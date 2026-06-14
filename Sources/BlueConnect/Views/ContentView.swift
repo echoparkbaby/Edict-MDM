@@ -200,6 +200,56 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Bulk MDM (multi-select)
+
+    private func enrollmentIDs(_ hosts: [BlueSkyHost]) -> [(host: BlueSkyHost, id: String)] {
+        hosts.compactMap { h in mdmFleet.entry(forSerial: h.serialnum).map { (h, $0.enrollmentID) } }
+    }
+
+    private func bulkMDMCheckIn(_ hosts: [BlueSkyHost]) {
+        let targets = enrollmentIDs(hosts)
+        Task {
+            let nano = NanoMDMService(settings: settings)
+            for t in targets { _ = try? await nano.push(enrollmentIDs: t.id) }
+            activity.record(.category, title: "MDM check-in pushed", detail: "\(targets.count) Macs")
+        }
+    }
+
+    private func bulkMDMEnableReporting(_ hosts: [BlueSkyHost]) {
+        let targets = enrollmentIDs(hosts)
+        Task {
+            let set = "default"
+            let configID = "com.hellocomputer.edict.status-subscriptions"
+            let kmf = KMFDDMService(settings: settings)
+            let nano = NanoMDMService(settings: settings)
+            try? await kmf.deploy(configJSON: DDMDeclarations.statusSubscriptions(identifier: configID),
+                                  configID: configID, toSet: set)
+            for t in targets {
+                try? await kmf.assign(enrollmentID: t.id, toSet: set)
+                _ = try? await nano.push(enrollmentIDs: t.id)
+            }
+            activity.record(.category, title: "MDM reporting enabled", detail: "\(targets.count) Macs")
+            await refreshMDMFleet()
+        }
+    }
+
+    private func bulkMDMDeploy(_ p: SavedProfile, to hosts: [BlueSkyHost]) {
+        let targets = enrollmentIDs(hosts)
+        Task {
+            let nano = NanoMDMService(settings: settings)
+            var ok = 0
+            for t in targets {
+                if (try? await nano.installProfile(enrollmentID: t.id, profile: p.data)) != nil {
+                    _ = try? await nano.push(enrollmentIDs: t.id)
+                    ok += 1
+                }
+            }
+            DeploymentLog.record(profileData: p.data, name: p.name, to: targets.map(\.id),
+                                 nowEpoch: Date().timeIntervalSince1970)
+            activity.record(.category, title: "Deployed \(p.name)", detail: "\(ok) Macs")
+        }
+    }
+
     /// Deploy a saved configuration profile to the Mac via MDM, from the
     /// gavel row button.
     private func deployProfileFromRow(_ p: SavedProfile, to h: BlueSkyHost, enrollmentID: String) {
@@ -823,8 +873,6 @@ struct ContentView: View {
                 switch sidebarFilter {
                 case .mdmDeclarations:
                     DeclarationsView()
-                case .mdmDevices:
-                    DevicesView()
                 case .mdmProfiles:
                     ProfilesView()
                 case .mdmEnrollment:
@@ -1381,6 +1429,24 @@ struct ContentView: View {
                 }
                 Button("Delete \(menuTargets.count) Hosts from Database…", role: .destructive) {
                     alert = .bulkAction(hosts: menuTargets, action: .delete)
+                }
+                // Bulk MDM — operates on the enrolled subset of the selection.
+                let enrolled = menuTargets.filter { mdmFleet.entry(forSerial: $0.serialnum) != nil }
+                if settings.mdmEnabled, !enrolled.isEmpty {
+                    Divider()
+                    Menu("MDM (\(enrolled.count) enrolled)") {
+                        Button("Check In \(enrolled.count)") { bulkMDMCheckIn(enrolled) }
+                        Button("Enable Reporting on \(enrolled.count)") { bulkMDMEnableReporting(enrolled) }
+                        let saved = SavedProfilesStore.load()
+                        if !saved.isEmpty {
+                            Divider()
+                            Menu("Deploy profile to \(enrolled.count)") {
+                                ForEach(saved) { p in
+                                    Button(p.name) { bulkMDMDeploy(p, to: enrolled) }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2217,7 +2283,7 @@ struct ContentView: View {
         case "inactive": return .inactive
         case "uncat": return .uncategorized
         case "mdm:decl": return .mdmDeclarations
-        case "mdm:dev": return .mdmDevices
+        case "mdm:dev": return .mdmDashboard   // Devices tab retired → dashboard
         case "mdm:prof": return .mdmProfiles
         case "mdm:enroll": return .mdmEnrollment
         case "mdm:sched": return .mdmScheduling

@@ -104,6 +104,8 @@ struct GroupDashboardView: View {
     @State private var tableSearch = ""
     @State private var hoveredRow: String?
     @State private var enablingAll = false
+    @State private var editingGroup: SmartGroup?
+    @State private var pushCert: PushCertInfo?
 
     var body: some View {
         Group {
@@ -802,6 +804,25 @@ struct GroupDashboardView: View {
             }
             .labelsHidden()
             .frame(maxWidth: 240)
+            Menu {
+                Button("New Smart Group…") {
+                    editingGroup = SmartGroup(name: "New Group", rules: [SmartGroupRule(field: .fileVaultOff)])
+                }
+                if let g = selectedGroup {
+                    Button("Edit “\(g.name)”…") { editingGroup = g }
+                    Button("Delete “\(g.name)”", role: .destructive) {
+                        settings.smartGroups.removeAll { $0.id == g.id }
+                        selectedGroupID = nil
+                    }
+                }
+            } label: { Image(systemName: "person.2.badge.gearshape") }
+            .menuStyle(.borderlessButton).fixedSize()
+            .help("Manage smart groups")
+            if let cert = pushCert, let days = cert.daysLeft {
+                Label("\(days)d", systemImage: "key.horizontal")
+                    .font(.caption).foregroundStyle(days < 30 ? .orange : .secondary)
+                    .help("MDM push certificate expires in \(days) days (topic \(cert.topic))")
+            }
             Button {
                 Task { await refresh() }
             } label: {
@@ -810,6 +831,15 @@ struct GroupDashboardView: View {
             }
             .help("Refresh")
             .disabled(loading)
+        }
+        .sheet(item: $editingGroup) { g in
+            SmartGroupEditor(group: g) { saved in
+                var groups = settings.smartGroups
+                if let idx = groups.firstIndex(where: { $0.id == saved.id }) { groups[idx] = saved }
+                else { groups.append(saved) }
+                settings.smartGroups = groups
+                selectedGroupID = saved.id
+            }
         }
     }
 
@@ -1136,7 +1166,9 @@ struct GroupDashboardView: View {
         loadError = nil
         defer { loading = false }
         do {
-            enrollments = try await EnrollmentsAPI(settings: settings).list()
+            let api = EnrollmentsAPI(settings: settings)
+            enrollments = try await api.list()
+            pushCert = try? await api.pushCert()
             let svc = KMFDDMService(settings: settings)
             var os: [String: String] = [:], fv: [String: String] = [:], mdl: [String: String] = [:]
             for d in allDevices {
