@@ -12,6 +12,7 @@ struct GroupDashboardView: View {
 
     @EnvironmentObject private var settings: SettingsStore
     @Environment(BlueSkyHostListStore.self) private var hostStore
+    @Environment(MunkiReportInventoryStore.self) private var mrInventory
 
     @State private var enrollments: [MDMEnrollment] = []
     @State private var osVersions: [String: String] = [:]
@@ -43,18 +44,56 @@ struct GroupDashboardView: View {
     @State private var showSaveView = false
     @State private var saveViewName = ""
 
-    // Prism explorer: category rail + sortable device table.
+    // Prism explorer: category rail + sortable device table. Mirrors
+    // Kandji Prism's category list — each is a fleet-wide view of one
+    // data domain. Data-backed categories pull from MunkiReport + MDM;
+    // the rest are placeholders until that MunkiReport module is wired
+    // into the blueconnect_api.php endpoint.
     enum Category: String, CaseIterable, Identifiable {
-        case devices = "Devices", summary = "Summary", security = "Security"
-        case profiles = "Profiles", drift = "Drift"
+        case summary = "Summary"
+        case devices = "Devices"
+        case security = "Security"
+        case apps = "Apps"
+        case profiles = "Profiles"
+        case users = "Local Users"
+        case storage = "Storage"
+        case updates = "Software Updates"
+        case drift = "Drift"
+        // Not yet collected — need the matching MunkiReport module.
+        case activationLock = "Activation Lock"
+        case appFirewall = "Application Firewall"
+        case gatekeeper = "Gatekeeper & XProtect"
+        case certificates = "Certificates"
+        case kernelExtensions = "Kernel Extensions"
+
         var id: String { rawValue }
         var icon: String {
             switch self {
-            case .devices: return "laptopcomputer"
             case .summary: return "chart.bar.xaxis"
+            case .devices: return "laptopcomputer"
             case .security: return "lock.shield"
+            case .apps: return "app.badge"
             case .profiles: return "doc.on.doc"
+            case .users: return "person.2"
+            case .storage: return "internaldrive"
+            case .updates: return "arrow.down.circle"
             case .drift: return "arrow.triangle.2.circlepath"
+            case .activationLock: return "lock.circle"
+            case .appFirewall: return "firewall"
+            case .gatekeeper: return "checkmark.shield"
+            case .certificates: return "seal"
+            case .kernelExtensions: return "puzzlepiece.extension"
+            }
+        }
+        /// The MunkiReport module this category needs (nil = already wired).
+        var pendingModule: String? {
+            switch self {
+            case .activationLock: return "activation_lock / device info"
+            case .appFirewall: return "firewall"
+            case .gatekeeper: return "gatekeeper"
+            case .certificates: return "certificate"
+            case .kernelExtensions: return "kernel_panic / kext"
+            default: return nil
             }
         }
     }
@@ -231,8 +270,151 @@ struct GroupDashboardView: View {
                 ScrollView { assignmentsCard.padding(18) }
             case .drift:
                 ScrollView { driftCard.padding(18) }
+            case .apps:
+                inventoryTable(columns: [("Device", 230), ("Application", 0), ("Version", 120), ("Status", 110)], rows: appRows)
+            case .users:
+                inventoryTable(columns: [("Device", 230), ("User", 0), ("Admin", 80), ("Last login", 150)], rows: userRows)
+            case .storage:
+                inventoryTable(columns: [("Device", 230), ("Free", 110), ("Total", 110), ("Encrypted", 100), ("SMART", 90)], rows: storageRows)
+            case .updates:
+                inventoryTable(columns: [("Device", 230), ("Pending", 90), ("Last check", 170)], rows: updateRows)
+            case .activationLock, .appFirewall, .gatekeeper, .certificates, .kernelExtensions:
+                notCollected(category)
             }
         }
+    }
+
+    // MARK: - MunkiReport-backed category tables (Kandji Prism style)
+
+    private func mr(for d: MDMEnrollment) -> MRHostInventory? {
+        guard let s = d.serialNumber?.trimmingCharacters(in: .whitespaces), !s.isEmpty else { return nil }
+        return mrInventory.bySerial[s]
+    }
+
+    private var appRows: [(id: String, cells: [String])] {
+        var out: [(id: String, cells: [String])] = []
+        for d in scoped {
+            guard let apps = mr(for: d)?.managed_installs else { continue }
+            let name = label(for: d)
+            for a in apps where a.installed {
+                out.append((id: "\(d.id)|\(a.id)",
+                            cells: [name, a.display_name ?? a.name ?? "?", a.version ?? "—", a.status ?? "installed"]))
+            }
+        }
+        return out.sorted { $0.cells[1].localizedCaseInsensitiveCompare($1.cells[1]) == .orderedAscending }
+    }
+
+    private var userRows: [(id: String, cells: [String])] {
+        var out: [(id: String, cells: [String])] = []
+        let f = DateFormatter(); f.dateStyle = .short
+        for d in scoped {
+            guard let users = mr(for: d)?.users else { continue }
+            let name = label(for: d)
+            for u in users {
+                let last = u.lastLoginDate.map { f.string(from: $0) } ?? "—"
+                out.append((id: "\(d.id)|\(u.id)",
+                            cells: [name, u.shortName, (u.admin?.isOn == true) ? "Admin" : "", last]))
+            }
+        }
+        return out.sorted { $0.cells[0].localizedCaseInsensitiveCompare($1.cells[0]) == .orderedAscending }
+    }
+
+    private var storageRows: [(id: String, cells: [String])] {
+        scoped.compactMap { d in
+            guard let disk = mr(for: d)?.disk_report else { return nil }
+            return (id: d.id, cells: [label(for: d),
+                                      disk.freeString ?? "—", disk.totalString ?? "—",
+                                      (disk.encrypted ?? 0) == 1 ? "Yes" : "No",
+                                      disk.smartstatus ?? "—"])
+        }
+    }
+
+    private var updateRows: [(id: String, cells: [String])] {
+        scoped.compactMap { d in
+            guard let su = mr(for: d)?.software_updates else { return nil }
+            let pending = su.recommendedupdates?.value.map(String.init) ?? "—"
+            return (id: d.id, cells: [label(for: d), pending, su.lastsuccessfuldate ?? "—"])
+        }
+    }
+
+    private func filteredRows(_ rows: [(id: String, cells: [String])]) -> [(id: String, cells: [String])] {
+        let q = tableSearch.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return rows }
+        return rows.filter { row in row.cells.contains { $0.localizedCaseInsensitiveContains(q) } }
+    }
+
+    /// Generic Kandji-style category table: a toolbar with title + filter,
+    /// then a horizontally-scrolling sortable-width table. Column width 0
+    /// means "flexible".
+    private func inventoryTable(columns: [(String, CGFloat)], rows: [(id: String, cells: [String])]) -> some View {
+        let filtered = filteredRows(rows)
+        return VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text(category.rawValue).font(.title3.bold())
+                Text("\(filtered.count)").font(.callout).foregroundStyle(.secondary)
+                Spacer()
+                HStack(spacing: 5) {
+                    Image(systemName: "magnifyingglass").font(.caption).foregroundStyle(.secondary)
+                    TextField("Filter", text: $tableSearch).textFieldStyle(.plain).frame(width: 150)
+                }
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.controlBackgroundColor)))
+            }
+            .padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 8)
+            if filtered.isEmpty {
+                VStack(spacing: 6) {
+                    Image(systemName: "tray").font(.system(size: 28)).foregroundStyle(.secondary)
+                    Text("Nothing reported yet — MunkiReport fills this in as Macs check in.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 160)
+            } else {
+                ScrollView(.horizontal, showsIndicators: true) {
+                    VStack(spacing: 0) {
+                        HStack(spacing: 12) {
+                            ForEach(columns.indices, id: \.self) { i in invCell(columns[i].0, columns[i].1, header: true) }
+                        }
+                        .padding(.horizontal, 18).padding(.vertical, 5)
+                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Divider()
+                        ScrollView(.vertical, showsIndicators: true) {
+                            LazyVStack(spacing: 0) {
+                                ForEach(filtered, id: \.id) { row in
+                                    HStack(spacing: 12) {
+                                        ForEach(columns.indices, id: \.self) { i in
+                                            invCell(i < row.cells.count ? row.cells[i] : "", columns[i].1, header: false, first: i == 0)
+                                        }
+                                    }
+                                    .padding(.horizontal, 18).padding(.vertical, 5)
+                                    Divider().opacity(0.4)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private func invCell(_ text: String, _ width: CGFloat, header: Bool, first: Bool = false) -> some View {
+        let view = Text(text.isEmpty && !header ? "—" : text)
+            .font(header ? .caption.weight(.semibold) : (first ? .callout.weight(.medium) : .callout))
+            .foregroundStyle(header ? .secondary : (first ? .primary : .secondary))
+            .lineLimit(1).truncationMode(.tail)
+        if width == 0 { view.frame(maxWidth: .infinity, alignment: .leading) }
+        else { view.frame(width: width, alignment: .leading) }
+    }
+
+    private func notCollected(_ c: Category) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: c.icon).font(.system(size: 34)).foregroundStyle(.secondary)
+            Text("\(c.rawValue) — not collected yet").font(.headline)
+            Text("This view needs the MunkiReport “\(c.pendingModule ?? "?")” module surfaced through the blueconnect_api.php endpoint. Wire that module in and it fills in fleet-wide like Apps and Storage do.")
+                .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 440)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Prism device table
@@ -964,6 +1146,15 @@ struct GroupDashboardView: View {
                 if let v = f.fileVault { fv[d.id] = v ? "true" : "false" }
             }
             osVersions = os; fileVault = fv; models = mdl
+            // Pull MunkiReport inventory for the category tables (Apps,
+            // Users, Storage, Updates). loadIfNeeded dedupes.
+            if settings.isMunkiReportAPIConfigured {
+                for d in allDevices {
+                    if let s = d.serialNumber?.trimmingCharacters(in: .whitespaces), !s.isEmpty {
+                        mrInventory.loadIfNeeded(serial: s, settings: settings)
+                    }
+                }
+            }
         } catch {
             loadError = error.localizedDescription
         }
