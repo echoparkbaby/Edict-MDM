@@ -200,6 +200,61 @@ struct ContentView: View {
         }
     }
 
+    /// Hand-deliver the signed MDM enrollment profile to a Mac's Desktop
+    /// over the BlueSky SSH tunnel. Apple doesn't allow remote auto-install
+    /// of enrollment profiles, so someone at the Mac double-clicks it and
+    /// approves in System Settings → Device Management.
+    private func sendEnrollmentProfile(_ host: BlueSkyHost) {
+        Task {
+            guard !settings.mdmPublicURL.trimmingCharacters(in: .whitespaces).isEmpty,
+                  !settings.scepChallenge.isEmpty else {
+                alert = .result(title: "Not configured",
+                                message: "Set the public enrollment URL and SCEP challenge in Settings → Device Management first.")
+                return
+            }
+            guard let topic = (try? await EnrollmentsAPI(settings: settings).pushCert())?.topic, !topic.isEmpty else {
+                alert = .result(title: "Push topic unavailable",
+                                message: "Couldn't read the MDM push certificate — check the Devices API URL in Settings.")
+                return
+            }
+            let user = host.effectiveUser(default: settings.defaultRemoteUser)
+            do {
+                let profile = try EnrollmentProfileExporter.makeProfile(.init(
+                    publicURL: settings.mdmPublicURL,
+                    challenge: settings.scepChallenge,
+                    topic: topic,
+                    profileIdentifier: settings.mdmEnrollmentProfileID,
+                    displayName: settings.mdmProfileDisplayName,
+                    organization: settings.mdmProfileOrganization,
+                    profileDescription: settings.mdmProfileDescription,
+                    consentText: settings.mdmProfileConsentText
+                ))
+                let tmp = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("edict-enroll-\(host.blueskyid).mobileconfig")
+                try profile.write(to: tmp)
+                defer { try? FileManager.default.removeItem(at: tmp) }
+                let svc = ConnectionService(server: settings.serverFqdn,
+                                            adminKeyPath: settings.expandedKeyPath,
+                                            serverSshPort: settings.sshTunnelPort,
+                                            terminals: terminals)
+                let (status, stderr) = await svc.pushFileViaSCP(
+                    localPath: tmp.path,
+                    remotePath: "/Users/\(user)/Desktop/Edict-Enroll.mobileconfig",
+                    host: host, remoteUser: user)
+                if status == 0 {
+                    activity.record(.connect, title: "Sent enrollment profile to \(host.displayName)", detail: "via BlueSky tunnel")
+                    alert = .result(title: "Enrollment profile sent",
+                                    message: "Delivered to \(host.displayName)'s Desktop as Edict-Enroll.mobileconfig. Have someone at the Mac open it and approve in System Settings → Device Management — Apple doesn't allow remote auto-install.")
+                } else {
+                    alert = .result(title: "Delivery failed",
+                                    message: stderr.isEmpty ? "exit \(status)" : stderr)
+                }
+            } catch {
+                alert = .result(title: "Delivery failed", message: error.localizedDescription)
+            }
+        }
+    }
+
     // MARK: - Bulk MDM (multi-select)
 
     private func enrollmentIDs(_ hosts: [BlueSkyHost]) -> [(host: BlueSkyHost, id: String)] {
@@ -1384,15 +1439,23 @@ struct ContentView: View {
                 // matched to an MDM enrollment (by serial). Navigation +
                 // safe one-shot actions; lock/erase/profile-push live in
                 // the inspector's MDM tab with their confirmation sheets.
-                if settings.mdmEnabled, let e = mdmFleet.entry(forSerial: h.serialnum) {
-                    Divider()
-                    Menu("MDM") {
-                        Button("Open MDM Details") { openMDMDetails(h) }
+                if settings.mdmEnabled {
+                    if let e = mdmFleet.entry(forSerial: h.serialnum) {
                         Divider()
-                        Button("Check In Now") { mdmCheckIn(h, enrollmentID: e.enrollmentID) }
-                        if e.os == nil || e.fileVault == nil {
-                            Button("Enable Reporting") { mdmEnableReporting(h, enrollmentID: e.enrollmentID) }
+                        Menu("MDM") {
+                            Button("Open MDM Details") { openMDMDetails(h) }
+                            Divider()
+                            Button("Check In Now") { mdmCheckIn(h, enrollmentID: e.enrollmentID) }
+                            if e.os == nil || e.fileVault == nil {
+                                Button("Enable Reporting") { mdmEnableReporting(h, enrollmentID: e.enrollmentID) }
+                            }
                         }
+                    } else if !(h.serialnum ?? "").isEmpty {
+                        // Not enrolled — offer to hand-deliver the enrollment
+                        // profile to the Mac's Desktop over the BSC tunnel.
+                        Divider()
+                        Button("Send MDM Enrollment Profile to Desktop…") { sendEnrollmentProfile(h) }
+                            .disabled(!h.active)
                     }
                 }
                 // (Quick Actions + Open Chat moved to the top of the
