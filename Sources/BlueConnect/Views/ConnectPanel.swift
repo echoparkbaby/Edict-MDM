@@ -77,7 +77,7 @@ struct ConnectPanel: View {
     }
 
     private func tabLabel(_ t: Tab) -> String {
-        switch t { case .connect: return "Connect"; case .inventory: return "Inventory"; case .mdm: return "MDM" }
+        switch t { case .connect: return "Connect"; case .inventory: return "MunkiReport"; case .mdm: return "MDM" }
     }
 
     private func singleHostBody(host: BlueSkyHost) -> some View {
