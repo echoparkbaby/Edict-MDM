@@ -60,6 +60,7 @@ struct GroupDashboardView: View {
     @State private var sortAsc = true
     @State private var tableSearch = ""
     @State private var hoveredRow: String?
+    @State private var enablingAll = false
 
     var body: some View {
         Group {
@@ -238,6 +239,14 @@ struct GroupDashboardView: View {
                 Text(category.rawValue).font(.title3.bold())
                 Text("\(tableRows.count)").font(.callout).foregroundStyle(.secondary)
                 Spacer()
+                if scoped.contains(where: { osVersions[$0.id] == nil }) {
+                    Button { Task { await enableReportingAll() } } label: {
+                        if enablingAll { ProgressView().controlSize(.small) }
+                        else { Label("Enable reporting", systemImage: "antenna.radiowaves.left.and.right") }
+                    }
+                    .controlSize(.small)
+                    .help("Subscribe every device in scope to report OS, model, and FileVault so these columns fill in.")
+                }
                 HStack(spacing: 5) {
                     Image(systemName: "magnifyingglass").font(.caption).foregroundStyle(.secondary)
                     TextField("Filter", text: $tableSearch).textFieldStyle(.plain).frame(width: 150)
@@ -260,21 +269,22 @@ struct GroupDashboardView: View {
     }
 
     private func tableHeader(security: Bool) -> some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 12) {
             sortHeader("Device", .name).frame(maxWidth: .infinity, alignment: .leading)
+            Text("Serial").frame(width: 116, alignment: .leading)
             if security {
-                sortHeader("FileVault", .fileVault).frame(width: 96, alignment: .leading)
-                sortHeader("Compliance", .compliance).frame(width: 120, alignment: .leading)
-                sortHeader("macOS", .os).frame(width: 84, alignment: .leading)
+                sortHeader("FileVault", .fileVault).frame(width: 84, alignment: .leading)
+                sortHeader("Compliance", .compliance).frame(width: 104, alignment: .leading)
+                sortHeader("macOS", .os).frame(width: 66, alignment: .leading)
             } else {
-                sortHeader("Model", .model).frame(width: 150, alignment: .leading)
-                sortHeader("macOS", .os).frame(width: 84, alignment: .leading)
-                sortHeader("FileVault", .fileVault).frame(width: 96, alignment: .leading)
-                sortHeader("Compliance", .compliance).frame(width: 120, alignment: .leading)
+                sortHeader("Model", .model).frame(width: 138, alignment: .leading)
+                sortHeader("macOS", .os).frame(width: 66, alignment: .leading)
+                sortHeader("FileVault", .fileVault).frame(width: 84, alignment: .leading)
+                sortHeader("Compliance", .compliance).frame(width: 104, alignment: .leading)
             }
-            sortHeader("Last check-in", .lastSeen).frame(width: 120, alignment: .leading)
+            sortHeader("Last check-in", .lastSeen).frame(width: 104, alignment: .leading)
         }
-        .padding(.horizontal, 18).padding(.vertical, 6)
+        .padding(.horizontal, 18).padding(.vertical, 5)
         .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
     }
@@ -294,30 +304,26 @@ struct GroupDashboardView: View {
 
     private func tableRow(_ d: MDMEnrollment, security: Bool) -> some View {
         let hovered = hoveredRow == d.id
-        return HStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: deviceIcon(d)).foregroundStyle(Color.accentColor).frame(width: 18)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(label(for: d)).font(.callout.weight(.medium)).lineLimit(1)
-                    if let s = d.serialNumber, !s.isEmpty {
-                        Text(s).font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
+        return HStack(spacing: 12) {
+            HStack(spacing: 7) {
+                Image(systemName: deviceIcon(d)).font(.caption).foregroundStyle(Color.accentColor).frame(width: 16)
+                Text(label(for: d)).font(.callout.weight(.medium)).lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            Text(d.serialNumber ?? "—").font(.caption).foregroundStyle(.secondary).lineLimit(1).frame(width: 116, alignment: .leading)
             if security {
-                fvCell(d).frame(width: 96, alignment: .leading)
-                complianceCell(d).frame(width: 120, alignment: .leading)
-                Text(osVersions[d.id] ?? "—").font(.callout).foregroundStyle(osVersions[d.id] == nil ? .secondary : .primary).frame(width: 84, alignment: .leading)
+                fvCell(d).frame(width: 84, alignment: .leading)
+                complianceCell(d).frame(width: 104, alignment: .leading)
+                Text(osVersions[d.id] ?? "—").font(.callout).foregroundStyle(osVersions[d.id] == nil ? .secondary : .primary).frame(width: 66, alignment: .leading)
             } else {
-                Text(models[d.id] ?? "—").font(.callout).foregroundStyle(models[d.id] == nil ? .secondary : .primary).lineLimit(1).frame(width: 150, alignment: .leading)
-                Text(osVersions[d.id] ?? "—").font(.callout).foregroundStyle(osVersions[d.id] == nil ? .secondary : .primary).frame(width: 84, alignment: .leading)
-                fvCell(d).frame(width: 96, alignment: .leading)
-                complianceCell(d).frame(width: 120, alignment: .leading)
+                Text(models[d.id] ?? "—").font(.callout).foregroundStyle(models[d.id] == nil ? .secondary : .primary).lineLimit(1).frame(width: 138, alignment: .leading)
+                Text(osVersions[d.id] ?? "—").font(.callout).foregroundStyle(osVersions[d.id] == nil ? .secondary : .primary).frame(width: 66, alignment: .leading)
+                fvCell(d).frame(width: 84, alignment: .leading)
+                complianceCell(d).frame(width: 104, alignment: .leading)
             }
-            Text(lastSeenText(d)).font(.callout).foregroundStyle(.secondary).frame(width: 120, alignment: .leading)
+            Text(lastSeenText(d)).font(.caption).foregroundStyle(.secondary).lineLimit(1).frame(width: 104, alignment: .leading)
         }
-        .padding(.horizontal, 18).padding(.vertical, 7)
+        .padding(.horizontal, 18).padding(.vertical, 5)
         .background(hovered ? Color.accentColor.opacity(0.06) : .clear)
         .onHover { hoveredRow = $0 ? d.id : (hoveredRow == d.id ? nil : hoveredRow) }
     }
@@ -891,6 +897,27 @@ struct GroupDashboardView: View {
     }
 
     // MARK: - Loading
+
+    /// Subscribe every scoped device to DDM status reporting in one go, so
+    /// the table's Model / macOS / FileVault columns stop showing "—".
+    @MainActor
+    private func enableReportingAll() async {
+        enablingAll = true
+        defer { enablingAll = false }
+        let set = "default"
+        let configID = "com.hellocomputer.edict.status-subscriptions"
+        let kmf = KMFDDMService(settings: settings)
+        let nano = NanoMDMService(settings: settings)
+        try? await kmf.deploy(configJSON: DDMDeclarations.statusSubscriptions(identifier: configID),
+                              configID: configID, toSet: set)
+        for d in scoped {
+            try? await kmf.assign(enrollmentID: d.id, toSet: set)
+            _ = try? await nano.push(enrollmentIDs: d.id)
+        }
+        // Give the fleet a moment to process, then re-read facts.
+        try? await Task.sleep(for: .seconds(8))
+        await refresh()
+    }
 
     @MainActor
     private func refresh() async {
