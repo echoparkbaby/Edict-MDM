@@ -357,6 +357,67 @@ enum ProfilePayloads {
                        payloads: [sso])
     }
 
+    /// `com.apple.mail.managed` — a Mail account. The password isn't in the
+    /// profile; the user is prompted on install.
+    static func mail(accountDescription: String, address: String, host: String, port: Int,
+                     username: String, useSSL: Bool, imap: Bool) -> Data {
+        var m: [String: Any] = base("com.apple.mail.managed", displayName: "Mail")
+        m["EmailAccountDescription"] = accountDescription
+        m["EmailAccountName"] = address
+        m["EmailAddress"] = address
+        m["EmailAccountType"] = imap ? "EmailTypeIMAP" : "EmailTypePOP"
+        m["IncomingMailServerHostName"] = host
+        if port > 0 { m["IncomingMailServerPortNumber"] = port }
+        m["IncomingMailServerUseSSL"] = useSSL
+        m["OutgoingMailServerHostName"] = host
+        m["OutgoingMailServerUseSSL"] = useSSL
+        if !username.isEmpty {
+            m["IncomingMailServerUsername"] = username
+            m["OutgoingMailServerUsername"] = username
+        }
+        return profile(displayName: "Mail: \(accountDescription)",
+                       identifier: "xyz.hellocomputer.edict.mail", payloads: [m])
+    }
+
+    /// `com.apple.MCX` energy-saver schedule (sleep timers in minutes,
+    /// 0 = never). Applied to both AC profiles.
+    static func energy(displaySleep: Int, systemSleep: Int, wakeOnLAN: Bool,
+                       restartAfterPowerFailure: Bool) -> Data {
+        var e: [String: Any] = base("com.apple.MCX", displayName: "Energy Saver")
+        var ac: [String: Any] = ["Wake On LAN": wakeOnLAN ? 1 : 0,
+                                 "RestartAfterPowerFailure": restartAfterPowerFailure ? 1 : 0]
+        if displaySleep >= 0 { ac["Display Sleep Timer"] = displaySleep }
+        if systemSleep >= 0 { ac["System Sleep Timer"] = systemSleep }
+        e["com.apple.EnergySaver.desktop.ACPower"] = ac
+        e["com.apple.EnergySaver.portable.ACPower"] = ac
+        return profile(displayName: "Energy Saver",
+                       identifier: "xyz.hellocomputer.edict.energy", payloads: [e])
+    }
+
+    /// Managed Safari preferences (`com.apple.Safari` domain payload).
+    static func safari(homepage: String, openWithHomepage: Bool, disablePrivateBrowsing: Bool) -> Data {
+        var s: [String: Any] = base("com.apple.Safari", displayName: "Safari")
+        if !homepage.isEmpty { s["HomePage"] = homepage }
+        if openWithHomepage { s["NewWindowBehavior"] = 0; s["NewTabBehavior"] = 0 } // 0 = homepage
+        if disablePrivateBrowsing { s["DisablePrivateBrowsing"] = true }
+        return profile(displayName: "Safari (managed)",
+                       identifier: "xyz.hellocomputer.edict.safari", payloads: [s])
+    }
+
+    /// Managed Chrome enterprise policy (`com.google.Chrome` domain payload).
+    static func chrome(homepage: String, restoreLastSession: Bool, disableIncognito: Bool) -> Data {
+        var c: [String: Any] = base("com.google.Chrome", displayName: "Google Chrome")
+        if !homepage.isEmpty {
+            c["HomepageLocation"] = homepage
+            c["HomepageIsNewTabPage"] = false
+            c["ShowHomeButton"] = true
+        }
+        c["RestoreOnStartup"] = restoreLastSession ? 1 : 5   // 1 = restore last, 5 = new tab
+        if disableIncognito { c["IncognitoModeAvailability"] = 1 }  // 1 = disabled
+        return profile(displayName: "Chrome (managed)",
+                       identifier: "xyz.hellocomputer.edict.chrome", payloads: [c])
+    }
+
     // MARK: - iMazing-catalog–derived templates
 
     /// `com.apple.MCX.TimeMachine` — managed Time Machine backup.

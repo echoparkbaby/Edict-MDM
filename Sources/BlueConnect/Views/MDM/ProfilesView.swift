@@ -33,6 +33,10 @@ struct ProfilesView: View {
         case cardDAV = "Contacts (CardDAV)"
         case associatedDomains = "Associated Domains"
         case platformSSO = "Platform SSO"
+        case mail = "Mail"
+        case energy = "Energy Saver"
+        case safari = "Safari (managed)"
+        case chrome = "Chrome (managed)"
         case munki = "Munki (BlueConnect)"
         case timeMachine = "Time Machine"
         case dns = "Encrypted DNS"
@@ -49,7 +53,7 @@ struct ProfilesView: View {
             case .wifi, .certificate, .dns, .restrictions: return "macOS · iOS · tvOS"
             case .passcode: return "macOS · iOS"
             case .singleApp: return "iOS · tvOS"
-            case .notifications, .webFilter, .calDAV, .cardDAV: return "macOS · iOS"
+            case .notifications, .webFilter, .calDAV, .cardDAV, .mail: return "macOS · iOS"
             case .associatedDomains: return "macOS · iOS · tvOS"
             case .custom: return "any"
             default: return "macOS"
@@ -60,7 +64,7 @@ struct ProfilesView: View {
         var platformSet: Set<Platform> {
             switch self {
             case .wifi, .certificate, .dns, .restrictions, .associatedDomains: return [.macOS, .iOS, .tvOS]
-            case .passcode, .notifications, .webFilter, .calDAV, .cardDAV: return [.macOS, .iOS]
+            case .passcode, .notifications, .webFilter, .calDAV, .cardDAV, .mail: return [.macOS, .iOS]
             case .singleApp: return [.iOS, .tvOS]
             case .custom: return [.macOS, .iOS, .tvOS]
             default: return [.macOS]
@@ -84,6 +88,10 @@ struct ProfilesView: View {
             case .cardDAV: return "person.crop.square.filled.and.at.rectangle"
             case .associatedDomains: return "link.circle"
             case .platformSSO: return "person.badge.key.fill"
+            case .mail: return "envelope.fill"
+            case .energy: return "powersleep"
+            case .safari: return "safari"
+            case .chrome: return "globe"
             case .munki: return "shippingbox"
             case .timeMachine: return "clock.arrow.circlepath"
             case .dns: return "network.badge.shield.half.filled"
@@ -113,6 +121,10 @@ struct ProfilesView: View {
             case .cardDAV: return "Contacts account (CardDAV) pushed to the device."
             case .associatedDomains: return "Associate an app with web domains (universal links)."
             case .platformSSO: return "Tie macOS login to Entra ID or Okta (Platform Single Sign-On)."
+            case .mail: return "Mail account (IMAP/POP) pushed to the device."
+            case .energy: return "Energy Saver — display/system sleep, wake-on-LAN, restart after power failure."
+            case .safari: return "Managed Safari — homepage, new-window behavior, private browsing."
+            case .chrome: return "Managed Chrome enterprise policy — homepage, startup, incognito."
             case .munki: return "Point the Mac at your BlueConnect Munki repo for managed software."
             case .timeMachine: return "Managed Time Machine backup destination and schedule."
             case .dns: return "Encrypted DNS (DoH/DoT) — route lookups through a private resolver."
@@ -220,6 +232,27 @@ struct ProfilesView: View {
     @State private var ssoURLs = ProfilePayloads.SSOVendor.entra.urls.joined(separator: "\n")
     @State private var ssoAuthMethod = "UserSecureEnclaveKey"
     @State private var ssoSharedKeys = false
+    // Mail
+    @State private var mailDesc = ""
+    @State private var mailAddress = ""
+    @State private var mailHost = ""
+    @State private var mailPort = 0
+    @State private var mailUser = ""
+    @State private var mailSSL = true
+    @State private var mailIMAP = true
+    // Energy
+    @State private var energyDisplaySleep = 10
+    @State private var energySystemSleep = 0
+    @State private var energyWakeOnLAN = true
+    @State private var energyRestartAfterPower = true
+    // Safari
+    @State private var safariHome = ""
+    @State private var safariOpenHome = true
+    @State private var safariNoPrivate = false
+    // Chrome
+    @State private var chromeHome = ""
+    @State private var chromeRestore = false
+    @State private var chromeNoIncognito = false
     // Drag-drop feedback
     @State private var dropHighlight = false
 
@@ -772,6 +805,42 @@ struct ProfilesView: View {
                     .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             .formStyle(.columns)
+        case .mail:
+            Form {
+                TextField("Account description", text: $mailDesc, prompt: Text("Work Mail"))
+                TextField("Email address", text: $mailAddress, prompt: Text("user@example.com"))
+                TextField("Mail server", text: $mailHost, prompt: Text("mail.example.com"))
+                TextField("Username (optional)", text: $mailUser)
+                Picker("Type", selection: $mailIMAP) { Text("IMAP").tag(true); Text("POP").tag(false) }
+                Toggle("Use SSL", isOn: $mailSSL)
+                Text("Password isn't stored — the user is prompted on install. Port auto-detects unless set.")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .formStyle(.columns)
+        case .energy:
+            Form {
+                Stepper("Display sleep: \(energyDisplaySleep == 0 ? "Never" : "\(energyDisplaySleep) min")", value: $energyDisplaySleep, in: 0...180, step: 5)
+                Stepper("System sleep: \(energySystemSleep == 0 ? "Never" : "\(energySystemSleep) min")", value: $energySystemSleep, in: 0...180, step: 5)
+                Toggle("Wake on LAN", isOn: $energyWakeOnLAN)
+                Toggle("Restart after power failure", isOn: $energyRestartAfterPower)
+            }
+            .formStyle(.columns)
+        case .safari:
+            Form {
+                TextField("Homepage URL", text: $safariHome, prompt: Text("https://example.com"))
+                Toggle("New windows/tabs open to homepage", isOn: $safariOpenHome)
+                Toggle("Disable private browsing", isOn: $safariNoPrivate)
+            }
+            .formStyle(.columns)
+        case .chrome:
+            Form {
+                TextField("Homepage URL", text: $chromeHome, prompt: Text("https://example.com"))
+                Toggle("Restore last session on startup", isOn: $chromeRestore)
+                Toggle("Disable incognito mode", isOn: $chromeNoIncognito)
+                Text("Applies via Chrome's enterprise policy (com.google.Chrome).")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            .formStyle(.columns)
         case .associatedDomains:
             Form {
                 TextField("App bundle ID", text: $assocAppID, prompt: Text("com.example.app"))
@@ -933,6 +1002,10 @@ struct ProfilesView: View {
         case .platformSSO:
             return !ssoExtensionID.trimmingCharacters(in: .whitespaces).isEmpty
                 && !ssoTeamID.trimmingCharacters(in: .whitespaces).isEmpty
+        case .mail:
+            return !mailDesc.trimmingCharacters(in: .whitespaces).isEmpty
+                && !mailAddress.trimmingCharacters(in: .whitespaces).isEmpty
+                && !mailHost.trimmingCharacters(in: .whitespaces).isEmpty
         case .pppc:
             return !pppcID.trimmingCharacters(in: .whitespaces).isEmpty
                 && !pppcCodeReq.trimmingCharacters(in: .whitespaces).isEmpty
@@ -1038,6 +1111,24 @@ struct ProfilesView: View {
                                                 urls: urls, authMethod: ssoAuthMethod,
                                                 useSharedDeviceKeys: ssoSharedKeys),
                     "Platform SSO (\(ssoVendor.rawValue))")
+        case .mail:
+            return (ProfilePayloads.mail(accountDescription: mailDesc.trimmingCharacters(in: .whitespaces),
+                                         address: mailAddress.trimmingCharacters(in: .whitespaces),
+                                         host: mailHost.trimmingCharacters(in: .whitespaces),
+                                         port: mailPort, username: mailUser.trimmingCharacters(in: .whitespaces),
+                                         useSSL: mailSSL, imap: mailIMAP), "Mail: \(mailDesc)")
+        case .energy:
+            return (ProfilePayloads.energy(displaySleep: energyDisplaySleep, systemSleep: energySystemSleep,
+                                           wakeOnLAN: energyWakeOnLAN,
+                                           restartAfterPowerFailure: energyRestartAfterPower), "Energy Saver")
+        case .safari:
+            return (ProfilePayloads.safari(homepage: safariHome.trimmingCharacters(in: .whitespaces),
+                                           openWithHomepage: safariOpenHome,
+                                           disablePrivateBrowsing: safariNoPrivate), "Safari (managed)")
+        case .chrome:
+            return (ProfilePayloads.chrome(homepage: chromeHome.trimmingCharacters(in: .whitespaces),
+                                           restoreLastSession: chromeRestore,
+                                           disableIncognito: chromeNoIncognito), "Chrome (managed)")
         case .wifi:
             return (ProfilePayloads.wifi(ssid: ssid, password: wifiPassword,
                                          hidden: wifiHidden, security: wifiSecurity),
