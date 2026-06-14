@@ -28,6 +28,26 @@ struct BlueConnectAdminApp: App {
     @StateObject private var quickActionStore = QuickActionStore()
     @State private var quickActionLauncher = QuickActionLauncher()
 
+    /// The shipping app's display name ("Edict MDM" on main, "BlueConnect
+    /// Admin" on the 1.5 line) — driven by CFBundleDisplayName so the
+    /// About panel and menus match the build identity.
+    private var appDisplayName: String {
+        Bundle.main.infoDictionary?["CFBundleDisplayName"] as? String
+            ?? Bundle.main.infoDictionary?["CFBundleName"] as? String
+            ?? "BlueConnect Admin"
+    }
+
+    /// The app's own icon (Ember on Edict), loaded from the bundled
+    /// AppIcon.icns so the About panel shows it explicitly rather than
+    /// relying on the Dock icon cache.
+    private var appIconImage: NSImage {
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let img = NSImage(contentsOf: url) {
+            return img
+        }
+        return NSApplication.shared.applicationIconImage
+    }
+
     var body: some Scene {
         // id: "main" so `openWindow(id: "main")` can reopen the window
         // from the Window menu (⌘0) after the user closes it.
@@ -84,7 +104,7 @@ struct BlueConnectAdminApp: App {
         .commands {
             CommandGroup(replacing: .newItem) { }
             CommandGroup(replacing: .appInfo) {
-                Button("About BlueConnect Admin") {
+                Button("About \(appDisplayName)") {
                     let info = Bundle.main.infoDictionary
                     let appVer = info?["CFBundleShortVersionString"] as? String ?? "0.0.0"
                     let build = info?["CFBundleVersion"] as? String ?? "0"
@@ -103,7 +123,8 @@ struct BlueConnectAdminApp: App {
                         attributes: [.foregroundColor: NSColor.labelColor]
                     )
                     NSApplication.shared.orderFrontStandardAboutPanel(options: [
-                        .applicationName: "BlueConnect Admin",
+                        .applicationIcon: appIconImage,
+                        .applicationName: appDisplayName,
                         .applicationVersion: "App \(appVer)",
                         .version: "Build \(build)",
                         .credits: credits,
