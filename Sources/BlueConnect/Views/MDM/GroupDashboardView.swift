@@ -544,6 +544,15 @@ struct GroupDashboardView: View {
                     .controlSize(.small)
                     .help("Subscribe every device in scope to report OS, model, and FileVault so these columns fill in.")
                 }
+                Menu {
+                    ForEach(allDeviceColumns) { col in
+                        Toggle(col.title, isOn: Binding(
+                            get: { !hiddenColumns.contains(col.key) },
+                            set: { _ in toggleColumn(col.key) }))
+                    }
+                } label: { Image(systemName: "slider.horizontal.3") }
+                .menuStyle(.borderlessButton).fixedSize()
+                .help("Show / hide columns")
                 Button { exportDeviceTableCSV(security: security) } label: { Image(systemName: "square.and.arrow.up") }
                     .help("Export this view as CSV")
                 HStack(spacing: 5) {
@@ -575,25 +584,58 @@ struct GroupDashboardView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    // Column show/hide for the device table (persisted).
+    struct DevColumn: Identifiable { let key: String; let title: String; let width: CGFloat; let sort: SortKey?; var id: String { key } }
+    @AppStorage("prismHiddenColumns") private var hiddenColumnsRaw = ""
+    private var hiddenColumns: Set<String> { Set(hiddenColumnsRaw.split(separator: ",").map(String.init)) }
+    private func toggleColumn(_ key: String) {
+        var set = hiddenColumns
+        if set.contains(key) { set.remove(key) } else { set.insert(key) }
+        hiddenColumnsRaw = set.sorted().joined(separator: ",")
+    }
+    /// Every toggleable device column (Device is always shown).
+    private var allDeviceColumns: [DevColumn] {
+        [DevColumn(key: "serial", title: "Serial", width: 116, sort: nil),
+         DevColumn(key: "model", title: "Model", width: 138, sort: .model),
+         DevColumn(key: "os", title: "macOS", width: 66, sort: .os),
+         DevColumn(key: "fv", title: "FileVault", width: 84, sort: .fileVault),
+         DevColumn(key: "compliance", title: "Compliance", width: 104, sort: .compliance),
+         DevColumn(key: "lastSeen", title: "Last check-in", width: 104, sort: .lastSeen)]
+    }
+    /// Ordered, visible columns for the current layout.
+    private func deviceColumns(security: Bool) -> [DevColumn] {
+        let order = security
+            ? ["serial", "fv", "compliance", "os", "lastSeen"]
+            : ["serial", "model", "os", "fv", "compliance", "lastSeen"]
+        return order.compactMap { key in allDeviceColumns.first { $0.key == key } }
+            .filter { !hiddenColumns.contains($0.key) }
+    }
+
     private func tableHeader(security: Bool) -> some View {
         HStack(spacing: 12) {
             sortHeader("Device", .name).frame(width: 230, alignment: .leading)
-            Text("Serial").frame(width: 116, alignment: .leading)
-            if security {
-                sortHeader("FileVault", .fileVault).frame(width: 84, alignment: .leading)
-                sortHeader("Compliance", .compliance).frame(width: 104, alignment: .leading)
-                sortHeader("macOS", .os).frame(width: 66, alignment: .leading)
-            } else {
-                sortHeader("Model", .model).frame(width: 138, alignment: .leading)
-                sortHeader("macOS", .os).frame(width: 66, alignment: .leading)
-                sortHeader("FileVault", .fileVault).frame(width: 84, alignment: .leading)
-                sortHeader("Compliance", .compliance).frame(width: 104, alignment: .leading)
+            ForEach(deviceColumns(security: security)) { col in
+                Group {
+                    if let s = col.sort { sortHeader(col.title, s) } else { Text(col.title) }
+                }.frame(width: col.width, alignment: .leading)
             }
-            sortHeader("Last check-in", .lastSeen).frame(width: 104, alignment: .leading)
         }
         .padding(.horizontal, 18).padding(.vertical, 5)
         .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private func deviceCell(_ col: DevColumn, _ d: MDMEnrollment) -> some View {
+        switch col.key {
+        case "serial": Text(d.serialNumber ?? "—").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        case "model": Text(models[d.id] ?? "—").font(.callout).foregroundStyle(models[d.id] == nil ? .secondary : .primary).lineLimit(1)
+        case "os": Text(osVersions[d.id] ?? "—").font(.callout).foregroundStyle(osVersions[d.id] == nil ? .secondary : .primary)
+        case "fv": fvCell(d)
+        case "compliance": complianceCell(d)
+        case "lastSeen": Text(lastSeenText(d)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        default: EmptyView()
+        }
     }
 
     private func sortHeader(_ title: String, _ key: SortKey) -> some View {
@@ -625,18 +667,9 @@ struct GroupDashboardView: View {
                 Text(label(for: d)).font(.callout.weight(.medium)).lineLimit(1).truncationMode(.tail)
             }
             .frame(width: 230, alignment: .leading)
-            Text(d.serialNumber ?? "—").font(.caption).foregroundStyle(.secondary).lineLimit(1).frame(width: 116, alignment: .leading)
-            if security {
-                fvCell(d).frame(width: 84, alignment: .leading)
-                complianceCell(d).frame(width: 104, alignment: .leading)
-                Text(osVersions[d.id] ?? "—").font(.callout).foregroundStyle(osVersions[d.id] == nil ? .secondary : .primary).frame(width: 66, alignment: .leading)
-            } else {
-                Text(models[d.id] ?? "—").font(.callout).foregroundStyle(models[d.id] == nil ? .secondary : .primary).lineLimit(1).frame(width: 138, alignment: .leading)
-                Text(osVersions[d.id] ?? "—").font(.callout).foregroundStyle(osVersions[d.id] == nil ? .secondary : .primary).frame(width: 66, alignment: .leading)
-                fvCell(d).frame(width: 84, alignment: .leading)
-                complianceCell(d).frame(width: 104, alignment: .leading)
+            ForEach(deviceColumns(security: security)) { col in
+                deviceCell(col, d).frame(width: col.width, alignment: .leading)
             }
-            Text(lastSeenText(d)).font(.caption).foregroundStyle(.secondary).lineLimit(1).frame(width: 104, alignment: .leading)
         }
         .padding(.horizontal, 18).padding(.vertical, 5)
         .background(selected ? Color.accentColor.opacity(0.18)
