@@ -131,6 +131,10 @@ struct ContentView: View {
     @State private var showLegacyImport = false
     @State private var legacyImportSummary: String?
 
+    /// Icon for the row's MDM "deploy profile" button (Edict gavel).
+    /// Customizable like the other row icons; defaults to the gavel.
+    @AppStorage("mdmDeployRowIconSymbol") private var mdmDeployIcon = "hammer.fill"
+
     private func computeFilteredAndSorted() -> [BlueSkyHost] {
         var result = hostStore.hosts
         // Merge in Macs that are MDM-enrolled but not in BlueSky, so the
@@ -193,6 +197,23 @@ struct ContentView: View {
         Task {
             _ = try? await NanoMDMService(settings: settings).push(enrollmentIDs: enrollmentID)
             activity.record(.category, title: "MDM check-in pushed", detail: h.displayName)
+        }
+    }
+
+    /// Deploy a saved configuration profile to the Mac via MDM, from the
+    /// gavel row button.
+    private func deployProfileFromRow(_ p: SavedProfile, to h: BlueSkyHost, enrollmentID: String) {
+        Task {
+            do {
+                let nano = NanoMDMService(settings: settings)
+                _ = try await nano.installProfile(enrollmentID: enrollmentID, profile: p.data)
+                _ = try? await nano.push(enrollmentIDs: enrollmentID)
+                DeploymentLog.record(profileData: p.data, name: p.name, to: [enrollmentID],
+                                     nowEpoch: Date().timeIntervalSince1970)
+                activity.record(.category, title: "Deployed \(p.name)", detail: h.displayName)
+            } catch {
+                alert = .result(title: "Deploy failed", message: error.localizedDescription)
+            }
         }
     }
 
@@ -1084,6 +1105,32 @@ struct ContentView: View {
                         enabled: h.active && (hasPackageCatalog || settings.isMunkiRepoConfigured),
                         help: "Install Package"
                     ) { openPackagePicker(for: [h]) }
+                    // MDM deploy-profile button — its own divider-separated
+                    // group, shown only when this Mac is enrolled. The
+                    // gavel menu lists saved profiles to push.
+                    if settings.mdmEnabled, let entry = mdmFleet.entry(forSerial: h.serialnum) {
+                        rowDivider
+                        Menu {
+                            Button("Open MDM Details") { openMDMDetails(h) }
+                            let saved = SavedProfilesStore.load()
+                            if saved.isEmpty {
+                                Text("No saved profiles yet — create them in the Profiles tab")
+                            } else {
+                                Divider()
+                                Section("Deploy profile") {
+                                    ForEach(saved) { p in
+                                        Button(p.name) { deployProfileFromRow(p, to: h, enrollmentID: entry.enrollmentID) }
+                                    }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: mdmDeployIcon).foregroundStyle(.indigo)
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .help("Deploy a configuration profile to this Mac (MDM)")
+                    }
                     // Group 2 → Group 3 boundary: separates file /
                     // install from communication / automation
                     // (Chat / Quick Actions).
