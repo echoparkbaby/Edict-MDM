@@ -8,6 +8,7 @@ struct ContentView: View {
     @Environment(CategoryStore.self) var categories
     @Environment(RecentConnectStore.self) var recents
     @Environment(ActivityLog.self) var activity
+    @Environment(MunkiReportInventoryStore.self) private var mrInventory
     @Environment(TerminalSessionsManager.self) var terminals
     @EnvironmentObject var auth: AuthGate
     @Environment(HostStateNotifier.self) var notifier
@@ -178,6 +179,38 @@ struct ContentView: View {
         Task { await hostStore.refresh(settings: settings); await refreshMDMFleet() }
     }
 
+    // MARK: - MDM context-menu actions
+
+    /// Select the host and flip the inspector to its MDM tab.
+    private func openMDMDetails(_ h: BlueSkyHost) {
+        selection = [h.id]
+        connectPanelVisible = true
+        UserDefaults.standard.set("mdm", forKey: "connectPanelTab")
+    }
+
+    /// Wake the Mac so it checks in (APNs push).
+    private func mdmCheckIn(_ h: BlueSkyHost, enrollmentID: String) {
+        Task {
+            _ = try? await NanoMDMService(settings: settings).push(enrollmentIDs: enrollmentID)
+            activity.record(.category, title: "MDM check-in pushed", detail: h.displayName)
+        }
+    }
+
+    /// Subscribe the Mac to DDM status reporting (fills OS / FileVault).
+    private func mdmEnableReporting(_ h: BlueSkyHost, enrollmentID: String) {
+        Task {
+            let set = "default"
+            let configID = "com.hellocomputer.edict.status-subscriptions"
+            let kmf = KMFDDMService(settings: settings)
+            try? await kmf.deploy(configJSON: DDMDeclarations.statusSubscriptions(identifier: configID),
+                                  configID: configID, toSet: set)
+            try? await kmf.assign(enrollmentID: enrollmentID, toSet: set)
+            _ = try? await NanoMDMService(settings: settings).push(enrollmentIDs: enrollmentID)
+            activity.record(.category, title: "MDM reporting enabled", detail: h.displayName)
+            await refreshMDMFleet()
+        }
+    }
+
     /// Reload the MDM overlay, telling it which serials BlueSky already
     /// covers so it only synthesizes rows for the genuinely MDM-only Macs.
     @MainActor
@@ -230,6 +263,7 @@ struct ContentView: View {
             .onChange(of: hostStore.lastResponse) { _, newValue in
                 handleResponseChange(newValue)
                 Task { await refreshMDMFleet() }   // re-join MDM data when hosts change
+                prefetchMunkiReportOS()             // fill the OS column from MR
             }
             .task { await refreshMDMFleet() }
             .task { if LegacyMigration.isAvailable { showLegacyImport = true } }
@@ -922,8 +956,7 @@ struct ContentView: View {
             .width(min: 56, ideal: 70, max: 110)
             .customizationID("mdm")
         TableColumn("OS") { (h: BlueSkyHost) in
-            Text(mdmFleet.entry(forSerial: h.serialnum)?.os ?? "—")
-                .foregroundStyle(.secondary)
+            Text(osText(h)).foregroundStyle(.secondary)
         }
         .width(min: 50, ideal: 70, max: 110)
         .customizationID("mdm_os")
@@ -949,6 +982,29 @@ struct ContentView: View {
         } else {
             Text("—").foregroundStyle(.secondary)
                 .help(h.isMDMOnly ? "" : "Not enrolled in MDM")
+        }
+    }
+
+    /// macOS version for the OS column — MDM-reported facts first, then
+    /// MunkiReport inventory (whichever has data), so the column fills in
+    /// for any Mac that reports through either system.
+    private func osText(_ h: BlueSkyHost) -> String {
+        if let os = mdmFleet.entry(forSerial: h.serialnum)?.os { return os }
+        if let serial = h.serialnum?.trimmingCharacters(in: .whitespaces), !serial.isEmpty,
+           let mr = mrInventory.bySerial[serial]?.machine?.osVersionString { return mr }
+        return "—"
+    }
+
+    /// Background-fill MunkiReport inventory for every host that has a
+    /// serial, so the OS column (and future MR-sourced columns) populate
+    /// without the operator opening each Inventory tab. loadIfNeeded
+    /// dedupes, so this is cheap on repeat.
+    private func prefetchMunkiReportOS() {
+        guard settings.isMunkiReportAPIConfigured else { return }
+        for h in hostStore.hosts {
+            if let s = h.serialnum?.trimmingCharacters(in: .whitespaces), !s.isEmpty {
+                mrInventory.loadIfNeeded(serial: s, settings: settings)
+            }
         }
     }
 
@@ -982,9 +1038,10 @@ struct ContentView: View {
             .customizationID("active")
             .disabledCustomizationBehavior(.resize)
             TableColumn("ID", value: \BlueSkyHost.blueskyid) { h in
-                Text("\(h.blueskyid)")
+                Text(h.isMDMOnly ? "—" : "\(h.blueskyid)")
+                    .foregroundStyle(h.isMDMOnly ? .secondary : .primary)
             }
-            .width(min: 40, ideal: 50, max: 80)
+            .width(min: 28, ideal: 34, max: 48)
             .customizationID("id")
             TableColumn("Hostname", value: \BlueSkyHost.displayName) { h in
                 HostnameCell(host: h, category: categories.category(for: h),
@@ -1220,6 +1277,21 @@ struct ContentView: View {
                         alert = .singleAction(host: h, action: .block)
                     }
                     .disabled((h.serialnum ?? "").isEmpty)
+                }
+                // MDM features at the very bottom — only when this Mac is
+                // matched to an MDM enrollment (by serial). Navigation +
+                // safe one-shot actions; lock/erase/profile-push live in
+                // the inspector's MDM tab with their confirmation sheets.
+                if settings.mdmEnabled, let e = mdmFleet.entry(forSerial: h.serialnum) {
+                    Divider()
+                    Menu("MDM") {
+                        Button("Open MDM Details") { openMDMDetails(h) }
+                        Divider()
+                        Button("Check In Now") { mdmCheckIn(h, enrollmentID: e.enrollmentID) }
+                        if e.os == nil || e.fileVault == nil {
+                            Button("Enable Reporting") { mdmEnableReporting(h, enrollmentID: e.enrollmentID) }
+                        }
+                    }
                 }
                 // (Quick Actions + Open Chat moved to the top of the
                 // menu per user spec — see the block above the

@@ -9,10 +9,12 @@ struct UserCell: View {
     @State private var hovering = false
 
     var body: some View {
-        let eff = host.effectiveUser(default: defaultUser)
+        // MDM-only rows have no BlueSky user — show a dash rather than the
+        // SSH default. Otherwise show the host's BlueSky user.
+        let eff = host.isMDMOnly ? "—" : host.effectiveUser(default: defaultUser)
         HStack(spacing: 4) {
-            Text(eff)
-            if (host.username ?? "").isEmpty {
+            Text(eff).foregroundStyle(host.isMDMOnly ? .secondary : .primary)
+            if !host.isMDMOnly, (host.username ?? "").isEmpty {
                 Text("(default)").font(.caption2).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
