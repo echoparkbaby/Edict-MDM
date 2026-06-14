@@ -7,6 +7,12 @@ import UniformTypeIdentifiers
 /// form, choose which enrolled Macs to push it to, and Edict builds the
 /// .mobileconfig and sends it via the InstallProfile command. No XML.
 struct ProfilesView: View {
+    /// Apple platforms a template targets — drives the filter toggles.
+    enum Platform: String, CaseIterable, Identifiable {
+        case macOS = "macOS", iOS = "iOS", tvOS = "tvOS"
+        var id: String { rawValue }
+    }
+
     @EnvironmentObject private var settings: SettingsStore
     @Environment(ActivityLog.self) private var activity
 
@@ -47,6 +53,17 @@ struct ProfilesView: View {
             case .associatedDomains: return "macOS · iOS · tvOS"
             case .custom: return "any"
             default: return "macOS"
+            }
+        }
+        /// Structured platforms for the filter toggles. Custom is "any", so
+        /// it matches every filter.
+        var platformSet: Set<Platform> {
+            switch self {
+            case .wifi, .certificate, .dns, .restrictions, .associatedDomains: return [.macOS, .iOS, .tvOS]
+            case .passcode, .notifications, .webFilter, .calDAV, .cardDAV: return [.macOS, .iOS]
+            case .singleApp: return [.iOS, .tvOS]
+            case .custom: return [.macOS, .iOS, .tvOS]
+            default: return [.macOS]
             }
         }
         var icon: String {
@@ -261,9 +278,13 @@ struct ProfilesView: View {
         let deviceCount: Int
     }
 
-    /// Templates alphabetized; Custom pinned last.
+    /// Platform filter toggles — empty = show all.
+    @State private var platformFilter: Set<Platform> = []
+
+    /// Templates alphabetized and platform-filtered; Custom pinned last.
     private var sortedTemplates: [Template] {
         Template.allCases.filter { $0 != .custom }
+            .filter { platformFilter.isEmpty || !$0.platformSet.isDisjoint(with: platformFilter) }
             .sorted { $0.rawValue.localizedCaseInsensitiveCompare($1.rawValue) == .orderedAscending } + [.custom]
     }
     /// Saved profiles: favorites first, then alphabetical.
@@ -319,8 +340,36 @@ struct ProfilesView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private var platformToggles: some View {
+        HStack(spacing: 6) {
+            ForEach(Platform.allCases) { p in
+                let on = platformFilter.contains(p)
+                Button {
+                    if on { platformFilter.remove(p) } else { platformFilter.insert(p) }
+                } label: {
+                    Text(p.rawValue).font(.caption.weight(on ? .semibold : .regular))
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Capsule().fill(on ? Color.accentColor.opacity(0.22) : Color(NSColor.controlBackgroundColor)))
+                        .overlay(Capsule().stroke(on ? Color.accentColor : .clear, lineWidth: 1))
+                        .foregroundStyle(on ? Color.accentColor : .secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+            if !platformFilter.isEmpty {
+                Button { platformFilter.removeAll() } label: {
+                    Image(systemName: "xmark.circle.fill").font(.caption).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain).help("Clear platform filter")
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+    }
+
     private var catalog: some View {
         VStack(spacing: 0) {
+            platformToggles
+            Divider()
             List(selection: $selected) {
                 Section("Templates") {
                     ForEach(sortedTemplates) { t in
