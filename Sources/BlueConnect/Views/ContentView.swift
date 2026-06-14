@@ -1106,30 +1106,36 @@ struct ContentView: View {
                         help: "Install Package"
                     ) { openPackagePicker(for: [h]) }
                     // MDM deploy-profile button — its own divider-separated
-                    // group, shown only when this Mac is enrolled. The
-                    // gavel menu lists saved profiles to push.
-                    if settings.mdmEnabled, let entry = mdmFleet.entry(forSerial: h.serialnum) {
+                    // group, always present so the row stays consistent;
+                    // greyed out (disabled) when this Mac isn't enrolled.
+                    if settings.mdmEnabled {
                         rowDivider
+                        let entry = mdmFleet.entry(forSerial: h.serialnum)
                         Menu {
-                            Button("Open MDM Details") { openMDMDetails(h) }
-                            let saved = SavedProfilesStore.load()
-                            if saved.isEmpty {
-                                Text("No saved profiles yet — create them in the Profiles tab")
-                            } else {
-                                Divider()
-                                Section("Deploy profile") {
-                                    ForEach(saved) { p in
-                                        Button(p.name) { deployProfileFromRow(p, to: h, enrollmentID: entry.enrollmentID) }
+                            if let entry {
+                                Button("Open MDM Details") { openMDMDetails(h) }
+                                let saved = SavedProfilesStore.load()
+                                if saved.isEmpty {
+                                    Text("No saved profiles yet — create them in the Profiles tab")
+                                } else {
+                                    Divider()
+                                    Section("Deploy profile") {
+                                        ForEach(saved) { p in
+                                            Button(p.name) { deployProfileFromRow(p, to: h, enrollmentID: entry.enrollmentID) }
+                                        }
                                     }
                                 }
                             }
                         } label: {
-                            Image(systemName: mdmDeployIcon).foregroundStyle(.indigo)
+                            Image(systemName: mdmDeployIcon)
+                                .foregroundStyle(entry != nil ? Color.indigo : Color.secondary)
                         }
                         .menuStyle(.borderlessButton)
                         .menuIndicator(.hidden)
                         .fixedSize()
-                        .help("Deploy a configuration profile to this Mac (MDM)")
+                        .disabled(entry == nil)
+                        .help(entry != nil ? "Deploy a configuration profile to this Mac (MDM)"
+                                           : "Not enrolled in MDM")
                     }
                     // Group 2 → Group 3 boundary: separates file /
                     // install from communication / automation
