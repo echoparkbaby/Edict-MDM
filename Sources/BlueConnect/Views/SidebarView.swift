@@ -255,11 +255,12 @@ struct SidebarView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Device Management").font(.caption).bold().foregroundStyle(.secondary)
                 .padding(.bottom, 2)
+            // Alphabetical, with Enrollment pinned to the bottom.
             mdmRow(.mdmDashboard, label: "Dashboard", icon: "chart.bar.xaxis")
-            mdmRow(.mdmEnrollment, label: "Enrollment", icon: "qrcode")
-            mdmRow(.mdmProfiles, label: "Profiles", icon: "doc.text.fill")
             mdmRow(.mdmDeclarations, label: "Declarations", icon: "doc.badge.gearshape")
+            mdmRow(.mdmProfiles, label: "Profiles", icon: "doc.text.fill")
             mdmRow(.mdmScheduling, label: "Scheduling", icon: "clock.badge.checkmark")
+            mdmRow(.mdmEnrollment, label: "Enrollment", icon: "qrcode")
         }
     }
 
