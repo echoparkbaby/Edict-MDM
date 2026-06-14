@@ -166,7 +166,6 @@ struct GroupDashboardView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
             groupPicker
-            if category == .summary { savedViewsBar }
             if let err = loadError {
                 Label(err, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
             }
@@ -216,6 +215,7 @@ struct GroupDashboardView: View {
             case .summary:
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
+                        savedViewsBar
                         summaryRow
                         if let drillKey, !drillDevices(drillKey).isEmpty { drillList(drillKey) }
                         prismChart
@@ -255,22 +255,30 @@ struct GroupDashboardView: View {
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.controlBackgroundColor)))
             }
             .padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 8)
-            tableHeader(security: security)
-            Divider()
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(tableRows, id: \.id) { d in
-                        tableRow(d, security: security)
-                        Divider().opacity(0.4)
+            // Fixed-width columns inside a horizontal scroll so a wide
+            // table scrolls instead of forcing the whole window layout to
+            // shift; the column header stays put while rows scroll down.
+            ScrollView(.horizontal, showsIndicators: true) {
+                VStack(spacing: 0) {
+                    tableHeader(security: security)
+                    Divider()
+                    ScrollView(.vertical, showsIndicators: true) {
+                        LazyVStack(spacing: 0) {
+                            ForEach(tableRows, id: \.id) { d in
+                                tableRow(d, security: security)
+                                Divider().opacity(0.4)
+                            }
+                        }
                     }
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private func tableHeader(security: Bool) -> some View {
         HStack(spacing: 12) {
-            sortHeader("Device", .name).frame(maxWidth: .infinity, alignment: .leading)
+            sortHeader("Device", .name).frame(width: 230, alignment: .leading)
             Text("Serial").frame(width: 116, alignment: .leading)
             if security {
                 sortHeader("FileVault", .fileVault).frame(width: 84, alignment: .leading)
@@ -307,9 +315,9 @@ struct GroupDashboardView: View {
         return HStack(spacing: 12) {
             HStack(spacing: 7) {
                 Image(systemName: deviceIcon(d)).font(.caption).foregroundStyle(Color.accentColor).frame(width: 16)
-                Text(label(for: d)).font(.callout.weight(.medium)).lineLimit(1)
+                Text(label(for: d)).font(.callout.weight(.medium)).lineLimit(1).truncationMode(.tail)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(width: 230, alignment: .leading)
             Text(d.serialNumber ?? "—").font(.caption).foregroundStyle(.secondary).lineLimit(1).frame(width: 116, alignment: .leading)
             if security {
                 fvCell(d).frame(width: 84, alignment: .leading)
