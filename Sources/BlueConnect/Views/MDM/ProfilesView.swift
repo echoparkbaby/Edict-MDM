@@ -37,6 +37,7 @@ struct ProfilesView: View {
         case energy = "Energy Saver"
         case safari = "Safari (managed)"
         case chrome = "Chrome (managed)"
+        case screenTime = "Screen Time"
         case munki = "Munki (BlueConnect)"
         case timeMachine = "Time Machine"
         case dns = "Encrypted DNS"
@@ -50,7 +51,7 @@ struct ProfilesView: View {
         /// Which Apple platforms this template applies to (shown as a badge).
         var platforms: String {
             switch self {
-            case .wifi, .certificate, .dns, .restrictions: return "macOS · iOS · tvOS"
+            case .wifi, .certificate, .dns, .restrictions, .screenTime: return "macOS · iOS · tvOS"
             case .passcode: return "macOS · iOS"
             case .singleApp: return "iOS · tvOS"
             case .notifications, .webFilter, .calDAV, .cardDAV, .mail: return "macOS · iOS"
@@ -63,7 +64,7 @@ struct ProfilesView: View {
         /// it matches every filter.
         var platformSet: Set<Platform> {
             switch self {
-            case .wifi, .certificate, .dns, .restrictions, .associatedDomains: return [.macOS, .iOS, .tvOS]
+            case .wifi, .certificate, .dns, .restrictions, .associatedDomains, .screenTime: return [.macOS, .iOS, .tvOS]
             case .passcode, .notifications, .webFilter, .calDAV, .cardDAV, .mail: return [.macOS, .iOS]
             case .singleApp: return [.iOS, .tvOS]
             case .custom: return [.macOS, .iOS, .tvOS]
@@ -92,6 +93,7 @@ struct ProfilesView: View {
             case .energy: return "powersleep"
             case .safari: return "safari"
             case .chrome: return "globe"
+            case .screenTime: return "hourglass"
             case .munki: return "shippingbox"
             case .timeMachine: return "clock.arrow.circlepath"
             case .dns: return "network.badge.shield.half.filled"
@@ -125,6 +127,7 @@ struct ProfilesView: View {
             case .energy: return "Energy Saver — display/system sleep, wake-on-LAN, restart after power failure."
             case .safari: return "Managed Safari — homepage, new-window behavior, private browsing."
             case .chrome: return "Managed Chrome enterprise policy — homepage, startup, incognito."
+            case .screenTime: return "Screen Time content limits — app/movie/TV age ratings + explicit content."
             case .munki: return "Point the Mac at your BlueConnect Munki repo for managed software."
             case .timeMachine: return "Managed Time Machine backup destination and schedule."
             case .dns: return "Encrypted DNS (DoH/DoT) — route lookups through a private resolver."
@@ -253,6 +256,11 @@ struct ProfilesView: View {
     @State private var chromeHome = ""
     @State private var chromeRestore = false
     @State private var chromeNoIncognito = false
+    // Screen Time (US rating thresholds; 1000 = allow all)
+    @State private var stApps = 1000
+    @State private var stMovies = 1000
+    @State private var stTV = 1000
+    @State private var stExplicit = true
     // Drag-drop feedback
     @State private var dropHighlight = false
 
@@ -841,6 +849,26 @@ struct ProfilesView: View {
                     .font(.caption2).foregroundStyle(.secondary)
             }
             .formStyle(.columns)
+        case .screenTime:
+            Form {
+                Picker("Apps", selection: $stApps) {
+                    Text("Allow all").tag(1000); Text("17+").tag(600); Text("12+").tag(300)
+                    Text("9+").tag(200); Text("4+").tag(100); Text("Don't allow").tag(0)
+                }
+                Picker("Movies", selection: $stMovies) {
+                    Text("Allow all").tag(1000); Text("NC-17").tag(500); Text("R").tag(400)
+                    Text("PG-13").tag(300); Text("PG").tag(200); Text("G").tag(100); Text("Don't allow").tag(0)
+                }
+                Picker("TV shows", selection: $stTV) {
+                    Text("Allow all").tag(1000); Text("TV-MA").tag(600); Text("TV-14").tag(500)
+                    Text("TV-PG").tag(400); Text("TV-G").tag(300); Text("TV-Y7").tag(200)
+                    Text("TV-Y").tag(100); Text("Don't allow").tag(0)
+                }
+                Toggle("Allow explicit content (music, podcasts, news)", isOn: $stExplicit)
+                Text("US rating system. Sets Content & Privacy restrictions. Screen Time downtime / app limits aren't profile-deliverable (Family Controls only).")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .formStyle(.columns)
         case .associatedDomains:
             Form {
                 TextField("App bundle ID", text: $assocAppID, prompt: Text("com.example.app"))
@@ -1129,6 +1157,9 @@ struct ProfilesView: View {
             return (ProfilePayloads.chrome(homepage: chromeHome.trimmingCharacters(in: .whitespaces),
                                            restoreLastSession: chromeRestore,
                                            disableIncognito: chromeNoIncognito), "Chrome (managed)")
+        case .screenTime:
+            return (ProfilePayloads.screenTime(ratingApps: stApps, ratingMovies: stMovies,
+                                               ratingTVShows: stTV, allowExplicitContent: stExplicit), "Screen Time")
         case .wifi:
             return (ProfilePayloads.wifi(ssid: ssid, password: wifiPassword,
                                          hidden: wifiHidden, security: wifiSecurity),

@@ -418,6 +418,23 @@ enum ProfilePayloads {
                        identifier: "xyz.hellocomputer.edict.chrome", payloads: [c])
     }
 
+    /// Screen Time content restrictions via `com.apple.applicationaccess`
+    /// — US age-rating thresholds for apps/movies/TV + explicit-content
+    /// blocking. (Downtime / app time-limits aren't a profile payload —
+    /// those are Family Controls only.) Rating ints are Apple's US
+    /// thresholds; 1000 = allow all, 0 = allow none.
+    static func screenTime(ratingApps: Int, ratingMovies: Int, ratingTVShows: Int,
+                           allowExplicitContent: Bool) -> Data {
+        var r: [String: Any] = base("com.apple.applicationaccess", displayName: "Screen Time")
+        r["ratingRegion"] = "us"
+        r["ratingApps"] = ratingApps
+        r["ratingMovies"] = ratingMovies
+        r["ratingTVShows"] = ratingTVShows
+        r["allowExplicitContent"] = allowExplicitContent
+        return profile(displayName: "Screen Time",
+                       identifier: "xyz.hellocomputer.edict.screentime", payloads: [r])
+    }
+
     // MARK: - iMazing-catalog–derived templates
 
     /// `com.apple.MCX.TimeMachine` — managed Time Machine backup.
