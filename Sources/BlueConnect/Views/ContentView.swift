@@ -237,14 +237,29 @@ struct ContentView: View {
                                             adminKeyPath: settings.expandedKeyPath,
                                             serverSshPort: settings.sshTunnelPort,
                                             terminals: terminals)
+                // Figure out who's actually at the Mac. We can only write to
+                // the login user's own Desktop (no sudo), so if the console
+                // user differs we drop it in /Users/Shared, which they can
+                // always reach.
+                let probe = await svc.runCommandCapture(host: host, remoteUser: user,
+                                                        command: "stat -f%Su /dev/console")
+                let console = probe.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+                let remotePath: String, location: String
+                if !console.isEmpty, console == user {
+                    remotePath = "/Users/\(user)/Desktop/Edict-Enroll.mobileconfig"
+                    location = "\(host.displayName)'s Desktop"
+                } else {
+                    remotePath = "/Users/Shared/Edict-Enroll.mobileconfig"
+                    location = console.isEmpty
+                        ? "the Shared folder (Finder → Go → Computer → Macintosh HD → Users → Shared)"
+                        : "the Shared folder (Finder → Go → Computer → … → Users → Shared) — “\(console)” is at the screen but their Desktop isn't writable without sudo"
+                }
                 let (status, stderr) = await svc.pushFileViaSCP(
-                    localPath: tmp.path,
-                    remotePath: "/Users/\(user)/Desktop/Edict-Enroll.mobileconfig",
-                    host: host, remoteUser: user)
+                    localPath: tmp.path, remotePath: remotePath, host: host, remoteUser: user)
                 if status == 0 {
-                    activity.record(.connect, title: "Sent enrollment profile to \(host.displayName)", detail: "via BlueSky tunnel")
+                    activity.record(.connect, title: "Sent enrollment profile to \(host.displayName)", detail: remotePath)
                     alert = .result(title: "Enrollment profile sent",
-                                    message: "Delivered to \(host.displayName)'s Desktop as Edict-Enroll.mobileconfig. Have someone at the Mac open it and approve in System Settings → Device Management — Apple doesn't allow remote auto-install.")
+                                    message: "Delivered to \(location) as Edict-Enroll.mobileconfig. Have someone at the Mac open it and approve in System Settings → Device Management — Apple doesn't allow remote auto-install.")
                 } else {
                     alert = .result(title: "Delivery failed",
                                     message: stderr.isEmpty ? "exit \(status)" : stderr)

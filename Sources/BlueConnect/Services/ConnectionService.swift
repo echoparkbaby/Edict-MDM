@@ -197,6 +197,35 @@ struct ConnectionService {
         }.value
     }
 
+    /// Run a non-interactive shell command on a host over the BSC tunnel,
+    /// capturing stdout/stderr. Used for small probes (e.g. "who's at the
+    /// console").
+    func runCommandCapture(host: BlueSkyHost, remoteUser: String,
+                           command: String) async -> (status: Int32, stdout: String, stderr: String) {
+        let proxy = "ssh -o WarnWeakCrypto=no -o IdentitiesOnly=yes -p \(serverSshPort) -i \(adminKeyPath) admin@\(server) /bin/nc %h %p"
+        let args = [
+            "-o", "ProxyCommand=\(proxy)",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "WarnWeakCrypto=no",
+            "-o", "ConnectTimeout=15",
+            "-p", "\(host.sshPort)",
+            "\(remoteUser)@localhost",
+            command,
+        ]
+        return await Task.detached(priority: .userInitiated) {
+            let proc = Process()
+            proc.launchPath = "/usr/bin/ssh"
+            proc.arguments = args
+            let outPipe = Pipe(); let errPipe = Pipe()
+            proc.standardOutput = outPipe; proc.standardError = errPipe
+            do { try proc.run() } catch { return (-1, "", "ssh launch failed: \(error)") }
+            proc.waitUntilExit()
+            let out = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let err = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            return (proc.terminationStatus, out, err)
+        }.value
+    }
+
     func openRemoteCommand(host: BlueSkyHost, remoteUser: String,
                            command: String, label: String) {
         onConnect?(host)
