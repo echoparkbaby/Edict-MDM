@@ -1150,11 +1150,25 @@ struct ContentView: View {
     /// FileVault chip sourced from MDM-reported facts.
     @ViewBuilder
     private func fileVaultCell(_ h: BlueSkyHost) -> some View {
-        switch mdmFleet.entry(forSerial: h.serialnum)?.fileVault {
+        switch fileVaultState(h) {
         case .some(true): Image(systemName: "lock.fill").foregroundStyle(.green).help("FileVault on")
         case .some(false): Image(systemName: "lock.open").foregroundStyle(.red).help("FileVault off")
         case nil: Text("—").foregroundStyle(.secondary)
         }
+    }
+
+    /// FileVault state — MDM-reported facts first, then MunkiReport
+    /// inventory (so a non-MDM Mac that reports to MR still shows it).
+    private func fileVaultState(_ h: BlueSkyHost) -> Bool? {
+        if let fv = mdmFleet.entry(forSerial: h.serialnum)?.fileVault { return fv }
+        guard let serial = h.serialnum?.trimmingCharacters(in: .whitespaces), !serial.isEmpty,
+              let inv = mrInventory.bySerial[serial] else { return nil }
+        if let s = inv.filevault?.filevault_status?.lowercased(), !s.isEmpty {
+            if s.contains("decrypt") || s.contains("not") || s.contains("off") { return false }
+            if s.contains("encrypt") || s.contains("on") { return true }
+        }
+        if let enc = inv.disk_report?.encrypted { return enc == 1 }
+        return nil
     }
 
     private var hostsTable: some View {
