@@ -16,6 +16,7 @@ struct RowIconPicker: View {
     @AppStorage("installRowIconSymbol")      private var installIcon: String = "shippingbox.fill"
     @AppStorage("quickActionsRowIconSymbol") private var qaIcon: String      = "bolt.fill"
     @AppStorage("chatRowIconSymbol")         private var chatIcon: String    = "bubble.left.and.bubble.right.fill"
+    @AppStorage("mdmDeployRowIconSymbol")    private var mdmDeployIcon: String = "hammer.fill"
     /// Scan table → Type column. Wired vs wireless icons each get
     /// their own keys + 5 candidates so the operator can pick visuals
     /// that match their UniFi-style mental model.
@@ -54,6 +55,13 @@ struct RowIconPicker: View {
                             "shippingbox.fill", "shippingbox",
                             "archivebox.fill", "cube.box.fill",
                             "app.badge.fill",
+                         ])
+                    slot(title: "Deploy Profile (MDM)", color: .indigo,
+                         selection: $mdmDeployIcon, defaultValue: "hammer.fill",
+                         candidates: [
+                            "hammer.fill", "building.columns.fill",
+                            "scroll.fill", "checkmark.seal.fill",
+                            "doc.badge.plus",
                          ])
                     slot(title: "Quick Actions", color: .pink,
                          selection: $qaIcon, defaultValue: "bolt.fill",

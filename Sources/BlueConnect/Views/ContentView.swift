@@ -1114,6 +1114,7 @@ struct ContentView: View {
                         Menu {
                             if let entry {
                                 Button("Open MDM Details") { openMDMDetails(h) }
+                                Button("Open Profiles Tab") { sidebarFilter = .mdmProfiles }
                                 let saved = SavedProfilesStore.load()
                                 if saved.isEmpty {
                                     Text("No saved profiles yet — create them in the Profiles tab")
