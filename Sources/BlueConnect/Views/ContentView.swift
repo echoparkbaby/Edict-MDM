@@ -777,7 +777,7 @@ struct ContentView: View {
                 case .mdmScheduling:
                     SchedulingView()
                 case .mdmDashboard:
-                    GroupDashboardView()
+                    GroupDashboardView(selection: $selection)
                 default:
                     topBar
                     Divider()

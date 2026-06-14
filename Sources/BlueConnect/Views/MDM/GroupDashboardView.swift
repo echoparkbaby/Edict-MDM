@@ -6,6 +6,10 @@ import SwiftUI
 /// model mix, and managed-profile drift. Read-only; deeper actions live
 /// in Devices.
 struct GroupDashboardView: View {
+    /// The main window's host selection — clicking a row in the Prism
+    /// table selects that Mac so the right-hand inspector opens on it.
+    @Binding var selection: Set<Int>
+
     @EnvironmentObject private var settings: SettingsStore
     @Environment(BlueSkyHostListStore.self) private var hostStore
 
@@ -310,8 +314,16 @@ struct GroupDashboardView: View {
         .buttonStyle(.plain)
     }
 
+    /// The fleet-table row id this device maps to: its BlueSky host if
+    /// matched by serial, else the synthetic MDM-only row's negative id.
+    private func hostID(for d: MDMEnrollment) -> Int {
+        if let h = bscHost(for: d) { return h.blueskyid }
+        return -abs(BlueSkyHost.stableHash(d.id))
+    }
+
     private func tableRow(_ d: MDMEnrollment, security: Bool) -> some View {
         let hovered = hoveredRow == d.id
+        let selected = selection.contains(hostID(for: d))
         return HStack(spacing: 12) {
             HStack(spacing: 7) {
                 Image(systemName: deviceIcon(d)).font(.caption).foregroundStyle(Color.accentColor).frame(width: 16)
@@ -332,7 +344,10 @@ struct GroupDashboardView: View {
             Text(lastSeenText(d)).font(.caption).foregroundStyle(.secondary).lineLimit(1).frame(width: 104, alignment: .leading)
         }
         .padding(.horizontal, 18).padding(.vertical, 5)
-        .background(hovered ? Color.accentColor.opacity(0.06) : .clear)
+        .background(selected ? Color.accentColor.opacity(0.18)
+                    : (hovered ? Color.accentColor.opacity(0.06) : .clear))
+        .contentShape(Rectangle())
+        .onTapGesture { selection = [hostID(for: d)] }
         .onHover { hoveredRow = $0 ? d.id : (hoveredRow == d.id ? nil : hoveredRow) }
     }
 
