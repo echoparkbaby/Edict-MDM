@@ -39,6 +39,28 @@ struct GroupDashboardView: View {
     @State private var showSaveView = false
     @State private var saveViewName = ""
 
+    // Prism explorer: category rail + sortable device table.
+    enum Category: String, CaseIterable, Identifiable {
+        case devices = "Devices", summary = "Summary", security = "Security"
+        case profiles = "Profiles", drift = "Drift"
+        var id: String { rawValue }
+        var icon: String {
+            switch self {
+            case .devices: return "laptopcomputer"
+            case .summary: return "chart.bar.xaxis"
+            case .security: return "lock.shield"
+            case .profiles: return "doc.on.doc"
+            case .drift: return "arrow.triangle.2.circlepath"
+            }
+        }
+    }
+    @State private var category: Category = .devices
+    enum SortKey { case name, model, os, fileVault, compliance, lastSeen }
+    @State private var sortKey: SortKey = .name
+    @State private var sortAsc = true
+    @State private var tableSearch = ""
+    @State private var hoveredRow: String?
+
     var body: some View {
         Group {
             if !settings.mdmEnabled || !settings.mdmConfigured {
@@ -124,33 +146,259 @@ struct GroupDashboardView: View {
     // MARK: - Content
 
     private var content: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                groupPicker
-                savedViewsBar
-                if let err = loadError {
-                    Label(err, systemImage: "exclamationmark.triangle")
-                        .font(.caption).foregroundStyle(.orange)
-                }
-                if loading && enrollments.isEmpty {
-                    HStack { ProgressView().controlSize(.small); Text("Loading fleet…").foregroundStyle(.secondary) }
-                } else if scoped.isEmpty {
-                    emptyScope
-                } else {
-                    summaryRow
-                    if let drillKey, !drillDevices(drillKey).isEmpty {
-                        drillList(drillKey)
+        VStack(spacing: 0) {
+            header
+            Divider()
+            HStack(spacing: 0) {
+                categoryRail
+                Divider()
+                categoryPanel
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .sheet(isPresented: $showSaveView) { saveViewSheet }
+    }
+
+    // MARK: - Header
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            groupPicker
+            if category == .summary { savedViewsBar }
+            if let err = loadError {
+                Label(err, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+            }
+        }
+        .padding(.horizontal, 18).padding(.vertical, 12)
+    }
+
+    // MARK: - Category rail (the Prism left list)
+
+    private var categoryRail: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Category.allCases) { c in
+                let on = category == c
+                Button { category = c } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: c.icon).frame(width: 16)
+                            .foregroundStyle(on ? Color.accentColor : .secondary)
+                        Text(c.rawValue).font(.callout).fontWeight(on ? .semibold : .regular)
+                        Spacer(minLength: 0)
                     }
-                    prismChart
-                    breakdownRow
-                    assignmentsCard
-                    driftCard
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(on ? Color.accentColor.opacity(0.14) : .clear))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+        .padding(10)
+        .frame(width: 178, alignment: .top)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+    }
+
+    // MARK: - Category panel
+
+    @ViewBuilder
+    private var categoryPanel: some View {
+        if loading && enrollments.isEmpty {
+            VStack { Spacer(); HStack { ProgressView().controlSize(.small); Text("Loading fleet…").foregroundStyle(.secondary) }; Spacer() }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if scoped.isEmpty {
+            emptyScope
+        } else {
+            switch category {
+            case .devices, .security:
+                deviceTable(security: category == .security)
+            case .summary:
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        summaryRow
+                        if let drillKey, !drillDevices(drillKey).isEmpty { drillList(drillKey) }
+                        prismChart
+                        breakdownRow
+                    }
+                    .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                }
+            case .profiles:
+                ScrollView { assignmentsCard.padding(18) }
+            case .drift:
+                ScrollView { driftCard.padding(18) }
+            }
+        }
+    }
+
+    // MARK: - Prism device table
+
+    private func deviceTable(security: Bool) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text(category.rawValue).font(.title3.bold())
+                Text("\(tableRows.count)").font(.callout).foregroundStyle(.secondary)
+                Spacer()
+                HStack(spacing: 5) {
+                    Image(systemName: "magnifyingglass").font(.caption).foregroundStyle(.secondary)
+                    TextField("Filter", text: $tableSearch).textFieldStyle(.plain).frame(width: 150)
+                }
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.controlBackgroundColor)))
+            }
+            .padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 8)
+            tableHeader(security: security)
+            Divider()
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(tableRows, id: \.id) { d in
+                        tableRow(d, security: security)
+                        Divider().opacity(0.4)
+                    }
                 }
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .sheet(isPresented: $showSaveView) { saveViewSheet }
+    }
+
+    private func tableHeader(security: Bool) -> some View {
+        HStack(spacing: 0) {
+            sortHeader("Device", .name).frame(maxWidth: .infinity, alignment: .leading)
+            if security {
+                sortHeader("FileVault", .fileVault).frame(width: 96, alignment: .leading)
+                sortHeader("Compliance", .compliance).frame(width: 120, alignment: .leading)
+                sortHeader("macOS", .os).frame(width: 84, alignment: .leading)
+            } else {
+                sortHeader("Model", .model).frame(width: 150, alignment: .leading)
+                sortHeader("macOS", .os).frame(width: 84, alignment: .leading)
+                sortHeader("FileVault", .fileVault).frame(width: 96, alignment: .leading)
+                sortHeader("Compliance", .compliance).frame(width: 120, alignment: .leading)
+            }
+            sortHeader("Last check-in", .lastSeen).frame(width: 120, alignment: .leading)
+        }
+        .padding(.horizontal, 18).padding(.vertical, 6)
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+    }
+
+    private func sortHeader(_ title: String, _ key: SortKey) -> some View {
+        Button {
+            if sortKey == key { sortAsc.toggle() } else { sortKey = key; sortAsc = true }
+        } label: {
+            HStack(spacing: 3) {
+                Text(title)
+                if sortKey == key { Image(systemName: sortAsc ? "chevron.up" : "chevron.down").font(.system(size: 8)) }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func tableRow(_ d: MDMEnrollment, security: Bool) -> some View {
+        let hovered = hoveredRow == d.id
+        return HStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: deviceIcon(d)).foregroundStyle(Color.accentColor).frame(width: 18)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(label(for: d)).font(.callout.weight(.medium)).lineLimit(1)
+                    if let s = d.serialNumber, !s.isEmpty {
+                        Text(s).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if security {
+                fvCell(d).frame(width: 96, alignment: .leading)
+                complianceCell(d).frame(width: 120, alignment: .leading)
+                Text(osVersions[d.id] ?? "—").font(.callout).foregroundStyle(osVersions[d.id] == nil ? .secondary : .primary).frame(width: 84, alignment: .leading)
+            } else {
+                Text(models[d.id] ?? "—").font(.callout).foregroundStyle(models[d.id] == nil ? .secondary : .primary).lineLimit(1).frame(width: 150, alignment: .leading)
+                Text(osVersions[d.id] ?? "—").font(.callout).foregroundStyle(osVersions[d.id] == nil ? .secondary : .primary).frame(width: 84, alignment: .leading)
+                fvCell(d).frame(width: 96, alignment: .leading)
+                complianceCell(d).frame(width: 120, alignment: .leading)
+            }
+            Text(lastSeenText(d)).font(.callout).foregroundStyle(.secondary).frame(width: 120, alignment: .leading)
+        }
+        .padding(.horizontal, 18).padding(.vertical, 7)
+        .background(hovered ? Color.accentColor.opacity(0.06) : .clear)
+        .onHover { hoveredRow = $0 ? d.id : (hoveredRow == d.id ? nil : hoveredRow) }
+    }
+
+    // MARK: - Table cells
+
+    @ViewBuilder private func fvCell(_ d: MDMEnrollment) -> some View {
+        switch facts(for: d).fileVaultOn {
+        case .some(true): pill("On", .green)
+        case .some(false): pill("Off", .red)
+        case nil: Text("—").font(.callout).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private func complianceCell(_ d: MDMEnrollment) -> some View {
+        switch SmartGroup.compliant(facts(for: d), requireFileVault: settings.mdmRequireFileVault, minOS: settings.mdmMinOSVersion) {
+        case .some(true): pill("Compliant", .green)
+        case .some(false): pill("Out", .orange)
+        case nil: pill("Unknown", .gray)
+        }
+    }
+
+    private func pill(_ text: String, _ color: Color) -> some View {
+        Text(text).font(.caption2.weight(.medium))
+            .padding(.horizontal, 8).padding(.vertical, 2)
+            .background(Capsule().fill(color.opacity(0.18)))
+            .foregroundStyle(color)
+    }
+
+    private func deviceIcon(_ d: MDMEnrollment) -> String {
+        let m = (models[d.id] ?? "").lowercased()
+        if m.contains("iphone") { return "iphone" }
+        if m.contains("ipad") { return "ipad" }
+        if m.contains("apple tv") || m.contains("appletv") { return "appletv" }
+        return "laptopcomputer"
+    }
+
+    private func lastSeenText(_ d: MDMEnrollment) -> String {
+        guard let date = d.lastSeenDate else { return "—" }
+        return date.formatted(.relative(presentation: .named))
+    }
+
+    private func osRank(_ s: String?) -> Int {
+        let p = (s ?? "").split(separator: ".").map { Int($0) ?? 0 }
+        return (p.count > 0 ? p[0] : 0) * 10000 + (p.count > 1 ? p[1] : 0) * 100 + (p.count > 2 ? p[2] : 0)
+    }
+
+    /// Scoped devices, filtered by the table search and sorted by the
+    /// active column.
+    private var tableRows: [MDMEnrollment] {
+        var rows = scoped
+        let q = tableSearch.trimmingCharacters(in: .whitespaces)
+        if !q.isEmpty {
+            rows = rows.filter {
+                label(for: $0).localizedCaseInsensitiveContains(q)
+                    || ($0.serialNumber ?? "").localizedCaseInsensitiveContains(q)
+                    || (osVersions[$0.id] ?? "").contains(q)
+                    || (models[$0.id] ?? "").localizedCaseInsensitiveContains(q)
+            }
+        }
+        func rank(_ d: MDMEnrollment) -> Int {
+            switch SmartGroup.compliant(facts(for: d), requireFileVault: settings.mdmRequireFileVault, minOS: settings.mdmMinOSVersion) {
+            case .some(true): return 0; case .some(false): return 1; case nil: return 2
+            }
+        }
+        func fvRank(_ d: MDMEnrollment) -> Int {
+            switch facts(for: d).fileVaultOn { case .some(true): return 0; case .some(false): return 1; case nil: return 2 }
+        }
+        rows.sort { a, b in
+            let asc: Bool
+            switch sortKey {
+            case .name: asc = label(for: a).localizedCaseInsensitiveCompare(label(for: b)) == .orderedAscending
+            case .model: asc = (models[a.id] ?? "~").localizedCaseInsensitiveCompare(models[b.id] ?? "~") == .orderedAscending
+            case .os: asc = osRank(osVersions[a.id]) < osRank(osVersions[b.id])
+            case .fileVault: asc = fvRank(a) < fvRank(b)
+            case .compliance: asc = rank(a) < rank(b)
+            case .lastSeen: asc = (a.lastSeenDate ?? .distantPast) < (b.lastSeenDate ?? .distantPast)
+            }
+            return sortAsc ? asc : !asc
+        }
+        return rows
     }
 
     // MARK: - Prism (saved, configurable views)
