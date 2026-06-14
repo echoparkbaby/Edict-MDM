@@ -1,4 +1,6 @@
 import SwiftUI
+import UniformTypeIdentifiers
+import AppKit
 
 /// A fleet-health rollup for a chosen smart group (or the whole fleet).
 /// Where the Devices view is per-machine, this answers "how is this slice
@@ -51,6 +53,7 @@ struct GroupDashboardView: View {
     // into the blueconnect_api.php endpoint.
     enum Category: String, CaseIterable, Identifiable {
         case summary = "Summary"
+        case attention = "Needs Attention"
         case devices = "Devices"
         case security = "Security"
         case apps = "Apps"
@@ -70,6 +73,7 @@ struct GroupDashboardView: View {
         var icon: String {
             switch self {
             case .summary: return "chart.bar.xaxis"
+            case .attention: return "exclamationmark.triangle"
             case .devices: return "laptopcomputer"
             case .security: return "lock.shield"
             case .apps: return "app.badge"
@@ -280,6 +284,8 @@ struct GroupDashboardView: View {
                 inventoryTable(columns: [("Device", 230), ("Free", 110), ("Total", 110), ("Encrypted", 100), ("SMART", 90)], rows: storageRows)
             case .updates:
                 inventoryTable(columns: [("Device", 230), ("Pending", 90), ("Last check", 170)], rows: updateRows)
+            case .attention:
+                inventoryTable(columns: [("Device", 230), ("Issues", 0), ("Score", 64)], rows: attentionRows)
             case .activationLock, .appFirewall, .gatekeeper, .certificates, .kernelExtensions:
                 notCollected(category)
             }
@@ -287,6 +293,105 @@ struct GroupDashboardView: View {
     }
 
     // MARK: - MunkiReport-backed category tables (Kandji Prism style)
+
+    /// Heuristic risk score + the reasons, for the "Needs Attention" lens.
+    private func attentionScore(_ d: MDMEnrollment) -> (score: Int, issues: [String]) {
+        var score = 0; var issues: [String] = []
+        let f = facts(for: d)
+        if f.fileVaultOn == false { score += 3; issues.append("FileVault off") }
+        if !d.isEnabled { score += 3; issues.append("Checked out of MDM") }
+        let minOS = settings.mdmMinOSVersion.trimmingCharacters(in: .whitespaces)
+        if let os = f.osVersion, !minOS.isEmpty, !SmartGroup.atLeast(os, minOS) {
+            score += 2; issues.append("macOS \(os) < \(minOS)")
+        }
+        if f.osVersion == nil { score += 1; issues.append("Not reporting facts") }
+        if let seen = d.lastSeenDate {
+            let days = Int(Date().timeIntervalSince(seen) / 86400)
+            if days >= 7 { score += 2; issues.append("No check-in \(days)d") }
+        }
+        if let missing = driftMissing[d.id], !missing.isEmpty {
+            score += 2; issues.append("\(missing.count) profile(s) drifted")
+        }
+        return (score, issues)
+    }
+
+    private var attentionRows: [(id: String, cells: [String])] {
+        scoped.compactMap { d -> (id: String, cells: [String])? in
+            let r = attentionScore(d)
+            guard r.score > 0 else { return nil }
+            return (id: d.id, cells: [label(for: d), r.issues.joined(separator: " · "), "\(r.score)"])
+        }
+        .sorted { (Int($0.cells[2]) ?? 0) > (Int($1.cells[2]) ?? 0) }
+    }
+
+    /// Lightweight natural-language matcher for the Devices table filter.
+    /// Understands clauses like "filevault off", "not enrolled", "out of
+    /// compliance", OS marketing names ("sonoma"), and bare versions; ANDs
+    /// recognized clauses, falls back to substring for anything else.
+    private func matchesQuery(_ d: MDMEnrollment, _ q: String) -> Bool {
+        let lower = q.lowercased()
+        let f = facts(for: d)
+        var matched = true, recognized = false
+        func clause(_ ok: Bool) { recognized = true; matched = matched && ok }
+        func compliant() -> Bool? {
+            SmartGroup.compliant(f, requireFileVault: settings.mdmRequireFileVault, minOS: settings.mdmMinOSVersion)
+        }
+        if lower.contains("filevault off") || lower.contains("fv off") || lower.contains("no filevault") { clause(f.fileVaultOn == false) }
+        if lower.contains("filevault on") || lower.contains("fv on") { clause(f.fileVaultOn == true) }
+        if lower.contains("not enrolled") || lower.contains("checked out") || lower.contains("unenrolled") { clause(!d.isEnabled) }
+        else if lower.contains("enrolled") { clause(d.isEnabled) }
+        if lower.contains("out of compliance") || lower.contains("non-compliant") || lower.contains("noncompliant") { clause(compliant() == false) }
+        else if lower.contains("compliant") { clause(compliant() == true) }
+        if lower.contains("needs attention") || lower.contains("at risk") { clause(attentionScore(d).score > 0) }
+        let osNames: [(String, Int)] = [("ventura", 13), ("sonoma", 14), ("sequoia", 15), ("tahoe", 26)]
+        for (name, major) in osNames where lower.contains(name) {
+            let dMajor = (f.osVersion?.split(separator: ".").first).flatMap { Int($0) } ?? -1
+            clause(dMajor == major)
+        }
+        if recognized { return matched }
+        // Fallback: substring across the visible facts.
+        return label(for: d).localizedCaseInsensitiveContains(q)
+            || (d.serialNumber ?? "").localizedCaseInsensitiveContains(q)
+            || (osVersions[d.id] ?? "").contains(q)
+            || (models[d.id] ?? "").localizedCaseInsensitiveContains(q)
+    }
+
+    // MARK: - CSV export
+
+    private func csvEscape(_ s: String) -> String {
+        (s.contains(",") || s.contains("\"") || s.contains("\n"))
+            ? "\"" + s.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+            : s
+    }
+
+    private func exportCSV(filename: String, columns: [String], rows: [[String]]) {
+        var csv = columns.map(csvEscape).joined(separator: ",") + "\n"
+        for r in rows { csv += r.map(csvEscape).joined(separator: ",") + "\n" }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = filename
+        panel.allowedContentTypes = [.commaSeparatedText]
+        if panel.runModal() == .OK, let url = panel.url {
+            try? csv.data(using: .utf8)?.write(to: url)
+        }
+    }
+
+    /// Export whatever the current Devices/Security table shows.
+    private func exportDeviceTableCSV(security: Bool) {
+        let cols = security
+            ? ["Device", "Serial", "FileVault", "Compliance", "macOS", "Last check-in"]
+            : ["Device", "Serial", "Model", "macOS", "FileVault", "Compliance", "Last check-in"]
+        func fv(_ d: MDMEnrollment) -> String {
+            switch facts(for: d).fileVaultOn { case .some(true): return "On"; case .some(false): return "Off"; case nil: return "" } }
+        func comp(_ d: MDMEnrollment) -> String {
+            switch SmartGroup.compliant(facts(for: d), requireFileVault: settings.mdmRequireFileVault, minOS: settings.mdmMinOSVersion) {
+            case .some(true): return "Compliant"; case .some(false): return "Out"; case nil: return "Unknown" } }
+        let rows = tableRows.map { d -> [String] in
+            security
+                ? [label(for: d), d.serialNumber ?? "", fv(d), comp(d), osVersions[d.id] ?? "", lastSeenText(d)]
+                : [label(for: d), d.serialNumber ?? "", models[d.id] ?? "", osVersions[d.id] ?? "", fv(d), comp(d), lastSeenText(d)]
+        }
+        exportCSV(filename: "\(category.rawValue).csv", columns: cols, rows: rows)
+    }
 
     private func mr(for d: MDMEnrollment) -> MRHostInventory? {
         guard let s = d.serialNumber?.trimmingCharacters(in: .whitespaces), !s.isEmpty else { return nil }
@@ -355,6 +460,10 @@ struct GroupDashboardView: View {
                 Text(category.rawValue).font(.title3.bold())
                 Text("\(filtered.count)").font(.callout).foregroundStyle(.secondary)
                 Spacer()
+                Button {
+                    exportCSV(filename: "\(category.rawValue).csv", columns: columns.map(\.0), rows: filtered.map(\.cells))
+                } label: { Image(systemName: "square.and.arrow.up") }
+                .help("Export this view as CSV").disabled(filtered.isEmpty)
                 HStack(spacing: 5) {
                     Image(systemName: "magnifyingglass").font(.caption).foregroundStyle(.secondary)
                     TextField("Filter", text: $tableSearch).textFieldStyle(.plain).frame(width: 150)
@@ -435,9 +544,11 @@ struct GroupDashboardView: View {
                     .controlSize(.small)
                     .help("Subscribe every device in scope to report OS, model, and FileVault so these columns fill in.")
                 }
+                Button { exportDeviceTableCSV(security: security) } label: { Image(systemName: "square.and.arrow.up") }
+                    .help("Export this view as CSV")
                 HStack(spacing: 5) {
-                    Image(systemName: "magnifyingglass").font(.caption).foregroundStyle(.secondary)
-                    TextField("Filter", text: $tableSearch).textFieldStyle(.plain).frame(width: 150)
+                    Image(systemName: "sparkle.magnifyingglass").font(.caption).foregroundStyle(.secondary)
+                    TextField("Search — e.g. “Sonoma FileVault off”", text: $tableSearch).textFieldStyle(.plain).frame(width: 230)
                 }
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.controlBackgroundColor)))
@@ -583,14 +694,7 @@ struct GroupDashboardView: View {
     private var tableRows: [MDMEnrollment] {
         var rows = scoped
         let q = tableSearch.trimmingCharacters(in: .whitespaces)
-        if !q.isEmpty {
-            rows = rows.filter {
-                label(for: $0).localizedCaseInsensitiveContains(q)
-                    || ($0.serialNumber ?? "").localizedCaseInsensitiveContains(q)
-                    || (osVersions[$0.id] ?? "").contains(q)
-                    || (models[$0.id] ?? "").localizedCaseInsensitiveContains(q)
-            }
-        }
+        if !q.isEmpty { rows = rows.filter { matchesQuery($0, q) } }
         func rank(_ d: MDMEnrollment) -> Int {
             switch SmartGroup.compliant(facts(for: d), requireFileVault: settings.mdmRequireFileVault, minOS: settings.mdmMinOSVersion) {
             case .some(true): return 0; case .some(false): return 1; case nil: return 2
