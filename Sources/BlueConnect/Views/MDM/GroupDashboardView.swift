@@ -569,8 +569,9 @@ struct GroupDashboardView: View {
                 if loading { ProgressView().controlSize(.small) }
                 else { Image(systemName: "arrow.clockwise") }
             }
-            .help("Refresh")
+            .help("Refresh (⌘R)")
             .accessibilityLabel("Refresh")
+            .keyboardShortcut("r")
             .disabled(loading)
         }
         .sheet(item: $editingGroup) { g in
