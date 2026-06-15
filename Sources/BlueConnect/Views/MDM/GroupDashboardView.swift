@@ -119,20 +119,26 @@ struct GroupDashboardView: View {
             }
         }
         .task { await refresh() }
+        .onChange(of: settings.mdmRequireFileVault) { _, _ in rebuildFacts() }
+        .onChange(of: settings.mdmMinOSVersion) { _, _ in rebuildFacts() }
     }
 
     // MARK: - Membership / facts
 
     private var allDevices: [MDMEnrollment] { enrollments.filter(\.isDevice) }
 
-    /// Render-time bundle of per-device derivations, shared with the
-    /// extracted device table + breakdown chart. Cheap to build (dicts are
-    /// copy-on-write); the parent's helpers below delegate to it.
-    private var df: DashboardFacts {
-        DashboardFacts(osVersions: osVersions, fileVault: fileVault, models: models,
-                       hosts: hostStore.hosts, deviceLabels: deviceLabels,
-                       requireFileVault: settings.mdmRequireFileVault, minOS: settings.mdmMinOSVersion,
-                       driftMissing: driftMissing, deploymentCounts: deploymentCounts)
+    /// Cached per-device facts the device table + chart read. Rebuilt when
+    /// the fleet reloads, a drift check finishes, or the compliance
+    /// baseline changes — not on every render — so the dashboard isn't
+    /// re-deriving compliance, labels, and buckets for the whole fleet on
+    /// each redraw.
+    @State private var df: DashboardFacts = .empty
+
+    private func rebuildFacts() {
+        df = DashboardFacts(osVersions: osVersions, fileVault: fileVault, models: models,
+                            hosts: hostStore.hosts, deviceLabels: deviceLabels,
+                            requireFileVault: settings.mdmRequireFileVault, minOS: settings.mdmMinOSVersion,
+                            driftMissing: driftMissing, deploymentCounts: deploymentCounts)
     }
     private var deviceLabels: [String: String] {
         var m: [String: String] = [:]
@@ -280,15 +286,15 @@ struct GroupDashboardView: View {
             case .drift:
                 ScrollView { driftCard.padding(18) }
             case .apps:
-                inventoryTable(columns: [("Device", 230), ("Application", 0), ("Version", 120), ("Status", 110)], rows: appRows)
+                inventoryTable(columns: [("Device", 180), ("Application", 320), ("Version", 110), ("Status", 110)], rows: appRows)
             case .users:
-                inventoryTable(columns: [("Device", 230), ("User", 0), ("Admin", 80), ("Last login", 150)], rows: userRows)
+                inventoryTable(columns: [("Device", 180), ("User", 150), ("Admin", 70), ("Last login", 140)], rows: userRows)
             case .storage:
-                inventoryTable(columns: [("Device", 230), ("Free", 110), ("Total", 110), ("Encrypted", 100), ("SMART", 90)], rows: storageRows)
+                inventoryTable(columns: [("Device", 180), ("Free", 100), ("Total", 100), ("Encrypted", 100), ("SMART", 90)], rows: storageRows)
             case .updates:
-                inventoryTable(columns: [("Device", 230), ("Pending", 90), ("Last check", 170)], rows: updateRows)
+                inventoryTable(columns: [("Device", 180), ("Pending", 90), ("Last check", 170)], rows: updateRows)
             case .attention:
-                inventoryTable(columns: [("Device", 230), ("Issues", 0), ("Score", 64)], rows: attentionRows)
+                inventoryTable(columns: [("Device", 180), ("Issues", 400), ("Score", 64)], rows: attentionRows)
             case .activationLock, .appFirewall, .gatekeeper, .certificates, .kernelExtensions:
                 notCollected(category)
             }
@@ -395,25 +401,28 @@ struct GroupDashboardView: View {
                 }
                 .frame(maxWidth: .infinity, minHeight: 160)
             } else {
-                ScrollView(.horizontal, showsIndicators: true) {
-                    VStack(spacing: 0) {
-                        HStack(spacing: 12) {
-                            ForEach(columns.indices, id: \.self) { i in invCell(columns[i].0, columns[i].1, header: true) }
-                        }
-                        .padding(.horizontal, 18).padding(.vertical, 5)
-                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                        Divider()
-                        ScrollView(.vertical, showsIndicators: true) {
-                            LazyVStack(spacing: 0) {
-                                ForEach(filtered, id: \.id) { row in
-                                    HStack(spacing: 12) {
-                                        ForEach(columns.indices, id: \.self) { i in
-                                            invCell(i < row.cells.count ? row.cells[i] : "", columns[i].1, header: false, first: i == 0)
-                                        }
+                // Fixed-width columns, left-packed with a trailing spacer so
+                // the slack lands on the right edge (a clean Mac list look)
+                // instead of inflating one column and leaving an interior gap.
+                VStack(spacing: 0) {
+                    HStack(spacing: 12) {
+                        ForEach(columns.indices, id: \.self) { i in invCell(columns[i].0, columns[i].1, header: true) }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 18).padding(.vertical, 5)
+                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Divider()
+                    ScrollView(.vertical, showsIndicators: true) {
+                        LazyVStack(spacing: 0) {
+                            ForEach(filtered, id: \.id) { row in
+                                HStack(spacing: 12) {
+                                    ForEach(columns.indices, id: \.self) { i in
+                                        invCell(i < row.cells.count ? row.cells[i] : "", columns[i].1, header: false, first: i == 0)
                                     }
-                                    .padding(.horizontal, 18).padding(.vertical, 5)
-                                    Divider().opacity(0.4)
+                                    Spacer(minLength: 0)
                                 }
+                                .padding(.horizontal, 18).padding(.vertical, 5)
+                                Divider().opacity(0.4)
                             }
                         }
                     }
@@ -907,6 +916,7 @@ struct GroupDashboardView: View {
                 if let v = f.fileVault { fv[d.id] = v ? "true" : "false" }
             }
             osVersions = os; fileVault = fv; models = mdl
+            rebuildFacts()
             // Pull MunkiReport inventory for the category tables (Apps,
             // Users, Storage, Updates). loadIfNeeded dedupes.
             if settings.isMunkiReportAPIConfigured {
@@ -950,5 +960,6 @@ struct GroupDashboardView: View {
         }
         driftMissing = result
         driftCheckedAt = Date()
+        rebuildFacts()
     }
 }

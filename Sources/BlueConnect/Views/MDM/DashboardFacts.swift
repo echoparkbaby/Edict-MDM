@@ -19,6 +19,12 @@ struct DashboardFacts {
     var driftMissing: [String: [DeploymentLog.Entry]]
     var deploymentCounts: [String: Int]
 
+    /// An all-empty snapshot, used as the dashboard's initial cached value
+    /// before the first load.
+    static let empty = DashboardFacts(osVersions: [:], fileVault: [:], models: [:], hosts: [],
+                                      deviceLabels: [:], requireFileVault: false, minOS: "",
+                                      driftMissing: [:], deploymentCounts: [:])
+
     func facts(for enr: MDMEnrollment) -> SmartGroup.DeviceFacts {
         SmartGroup.DeviceFacts(
             osVersion: osVersions[enr.id],
