@@ -168,42 +168,50 @@ struct MRHostInventory: Codable, Hashable {
     let profiles: [MRProfile]?
     let timemachine: MRTimeMachine?
     let firewall: MRFirewall?
-    let gatekeeper: MRGatekeeper?
+    let security: MRSecurity?
 }
 
-/// `firewall` module — the macOS Application Layer Firewall state. All
-/// fields optional so a host that hasn't reported (or an MR without the
-/// firewall module) decodes cleanly to nil.
+/// `firewall` module — the macOS Application Layer Firewall. Column names
+/// match MunkiReport's firewall migration exactly (no underscores:
+/// `globalstate`, `stealthenabled`, `loggingenabled`). All optional so a
+/// host that hasn't reported (or an MR without the module) decodes to nil.
 struct MRFirewall: Codable, Hashable {
-    let global_state: Int?       // 0 off, 1 on, 2 block all incoming
-    let stealth_enabled: Int?
-    let logging_enabled: Int?
+    let globalstate: Int?        // 0 off, 1 on, 2 block all incoming
+    let stealthenabled: Int?     // boolean stored as 0/1
+    let loggingenabled: Int?
 
     var stateText: String {
-        switch global_state {
+        switch globalstate {
         case 0: return "Off"
         case 1: return "On"
         case 2: return "Block all incoming"
         default: return "—"
         }
     }
-    var stealthText: String { Self.onOff(stealth_enabled) }
-    var loggingText: String { Self.onOff(logging_enabled) }
+    var stealthText: String { Self.onOff(stealthenabled) }
+    var loggingText: String { Self.onOff(loggingenabled) }
     private static func onOff(_ v: Int?) -> String {
         switch v { case 1: return "On"; case 0: return "Off"; default: return "—" }
     }
 }
 
-/// `gatekeeper` module — Gatekeeper assessment state + version.
-struct MRGatekeeper: Codable, Hashable {
-    let gatekeeper: Int?         // 1 = enabled
-    let assessments: Int?        // 1 = assessments enabled
-    let version: String?
+/// `security` module — Gatekeeper, SIP, and Activation Lock posture. The
+/// collector stores these as strings ("Active" / "Disabled" /
+/// "Not Supported"); activation_lock is "Enabled" / "Disabled" /
+/// "not_supported". All optional.
+struct MRSecurity: Codable, Hashable {
+    let gatekeeper: String?
+    let sip: String?
+    let activation_lock: String?
+    let firewall_state: Int?
 
-    var enabledText: String { Self.onOff(gatekeeper) }
-    var assessmentsText: String { Self.onOff(assessments) }
-    private static func onOff(_ v: Int?) -> String {
-        switch v { case 1: return "On"; case 0: return "Off"; default: return "—" }
+    var gatekeeperText: String { Self.clean(gatekeeper) }
+    var sipText: String { Self.clean(sip) }
+    var activationLockText: String { Self.clean(activation_lock) }
+    private static func clean(_ s: String?) -> String {
+        guard let s, !s.isEmpty else { return "—" }
+        if s.lowercased() == "not_supported" { return "Not supported" }
+        return s
     }
 }
 

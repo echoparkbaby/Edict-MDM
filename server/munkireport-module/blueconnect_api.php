@@ -328,12 +328,14 @@ if ($action === 'host') {
         // Gatekeeper categories. SELECT * (like wifi/munkireport above) so
         // column-set drift between MR versions, or a module that isn't
         // installed, degrades to null instead of erroring — the Swift
-        // models read only the columns they know (global_state /
-        // stealth_enabled / logging_enabled; gatekeeper / assessments /
-        // version) and ignore the rest.
+        // models read only the columns they know and ignore the rest.
+        //   firewall  module → globalstate / stealthenabled / loggingenabled
+        //   security  module → gatekeeper / sip / activation_lock (strings)
+        // Gatekeeper has no table of its own; it lives in the security
+        // module alongside SIP + Activation Lock.
         'firewall'         => safe_fetch_one($pdo, "SELECT * FROM firewall WHERE serial_number = :s",
                                              [':s' => $serial]),
-        'gatekeeper'       => safe_fetch_one($pdo, "SELECT * FROM gatekeeper WHERE serial_number = :s",
+        'security'         => safe_fetch_one($pdo, "SELECT * FROM security WHERE serial_number = :s",
                                              [':s' => $serial]),
     ];
     echo json_encode($out, JSON_UNESCAPED_SLASHES);

@@ -62,7 +62,7 @@ struct GroupDashboardView: View {
         case updates = "Software Updates"
         case drift = "Drift"
         case appFirewall = "Application Firewall"
-        case gatekeeper = "Gatekeeper & XProtect"
+        case gatekeeper = "Gatekeeper & SIP"
 
         var id: String { rawValue }
         var icon: String {
@@ -288,7 +288,7 @@ struct GroupDashboardView: View {
             case .appFirewall:
                 inventoryTable(columns: [("Device", 180), ("State", 150), ("Stealth", 90), ("Logging", 90)], rows: firewallRows)
             case .gatekeeper:
-                inventoryTable(columns: [("Device", 180), ("Gatekeeper", 110), ("Assessments", 120), ("Version", 110)], rows: gatekeeperRows)
+                inventoryTable(columns: [("Device", 180), ("Gatekeeper", 130), ("SIP", 130), ("Activation Lock", 140)], rows: gatekeeperRows)
             }
         }
     }
@@ -431,8 +431,8 @@ struct GroupDashboardView: View {
 
     private var gatekeeperRows: [(id: String, cells: [String])] {
         inventoryScope.compactMap { d in
-            guard let gk = mr(for: d)?.gatekeeper else { return nil }
-            return (id: d.id, cells: [label(for: d), gk.enabledText, gk.assessmentsText, gk.version ?? "—"])
+            guard let s = mr(for: d)?.security else { return nil }
+            return (id: d.id, cells: [label(for: d), s.gatekeeperText, s.sipText, s.activationLockText])
         }
     }
 
