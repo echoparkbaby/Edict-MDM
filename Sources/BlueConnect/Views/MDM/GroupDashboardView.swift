@@ -38,8 +38,6 @@ struct GroupDashboardView: View {
     @State private var attribute: PrismView.Attribute = .osVersion
     @State private var savedViews: [PrismView] = []
     @State private var activeViewID: UUID?
-    /// Which prism-chart bar is expanded to its device list.
-    @State private var prismBucket: String?
     /// enrollmentID → count of profiles Edict deployed (for the profile
     /// attribute), loaded alongside the facts.
     @State private var deploymentCounts: [String: Int] = [:]
@@ -105,11 +103,7 @@ struct GroupDashboardView: View {
         }
     }
     @State private var category: Category = .devices
-    enum SortKey { case name, model, os, fileVault, compliance, lastSeen }
-    @State private var sortKey: SortKey = .name
-    @State private var sortAsc = true
     @State private var tableSearch = ""
-    @State private var hoveredRow: String?
     @State private var enablingAll = false
     @State private var editingGroup: SmartGroup?
     @State private var pushCert: PushCertInfo?
@@ -131,15 +125,22 @@ struct GroupDashboardView: View {
 
     private var allDevices: [MDMEnrollment] { enrollments.filter(\.isDevice) }
 
-    private func facts(for enr: MDMEnrollment) -> SmartGroup.DeviceFacts {
-        SmartGroup.DeviceFacts(
-            osVersion: osVersions[enr.id],
-            fileVaultOn: fileVault[enr.id].map { $0 == "true" || $0 == "1" },
-            model: models[enr.id],
-            matchedBlueSky: bscHost(for: enr) != nil,
-            enrolled: enr.isEnabled
-        )
+    /// Render-time bundle of per-device derivations, shared with the
+    /// extracted device table + breakdown chart. Cheap to build (dicts are
+    /// copy-on-write); the parent's helpers below delegate to it.
+    private var df: DashboardFacts {
+        DashboardFacts(osVersions: osVersions, fileVault: fileVault, models: models,
+                       hosts: hostStore.hosts, deviceLabels: deviceLabels,
+                       requireFileVault: settings.mdmRequireFileVault, minOS: settings.mdmMinOSVersion,
+                       driftMissing: driftMissing, deploymentCounts: deploymentCounts)
     }
+    private var deviceLabels: [String: String] {
+        var m: [String: String] = [:]
+        for dev in settings.mdmDevices where !dev.label.isEmpty { m[dev.id] = dev.label }
+        return m
+    }
+
+    private func facts(for enr: MDMEnrollment) -> SmartGroup.DeviceFacts { df.facts(for: enr) }
 
     private var selectedGroup: SmartGroup? {
         guard let gid = selectedGroupID else { return nil }
@@ -156,12 +157,7 @@ struct GroupDashboardView: View {
         }
     }
 
-    private func bscHost(for enr: MDMEnrollment) -> BlueSkyHost? {
-        guard let serial = enr.serialNumber, !serial.isEmpty else { return nil }
-        return hostStore.hosts.first {
-            ($0.serialnum ?? "").caseInsensitiveCompare(serial) == .orderedSame
-        }
-    }
+    private func bscHost(for enr: MDMEnrollment) -> BlueSkyHost? { df.bscHost(for: enr) }
 
     // MARK: - Rollups
 
@@ -263,14 +259,18 @@ struct GroupDashboardView: View {
         } else {
             switch category {
             case .devices, .security:
-                deviceTable(security: category == .security)
+                PrismDeviceTable(title: category.rawValue, security: category == .security,
+                                 devices: scoped, facts: df, selection: $selection,
+                                 enablingAll: enablingAll,
+                                 onEnableReporting: { Task { await enableReportingAll() } })
             case .summary:
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         savedViewsBar
                         summaryRow
                         if let drillKey, !drillDevices(drillKey).isEmpty { drillList(drillKey) }
-                        prismChart
+                        PrismChart(devices: scoped, facts: df, attribute: $attribute,
+                                   onAttributeChange: { activeViewID = nil })
                         breakdownRow
                     }
                     .padding(18).frame(maxWidth: .infinity, alignment: .leading)
@@ -297,26 +297,7 @@ struct GroupDashboardView: View {
 
     // MARK: - MunkiReport-backed category tables (Kandji Prism style)
 
-    /// Heuristic risk score + the reasons, for the "Needs Attention" lens.
-    private func attentionScore(_ d: MDMEnrollment) -> (score: Int, issues: [String]) {
-        var score = 0; var issues: [String] = []
-        let f = facts(for: d)
-        if f.fileVaultOn == false { score += 3; issues.append("FileVault off") }
-        if !d.isEnabled { score += 3; issues.append("Checked out of MDM") }
-        let minOS = settings.mdmMinOSVersion.trimmingCharacters(in: .whitespaces)
-        if let os = f.osVersion, !minOS.isEmpty, !SmartGroup.atLeast(os, minOS) {
-            score += 2; issues.append("macOS \(os) < \(minOS)")
-        }
-        if f.osVersion == nil { score += 1; issues.append("Not reporting facts") }
-        if let seen = d.lastSeenDate {
-            let days = Int(Date().timeIntervalSince(seen) / 86400)
-            if days >= 7 { score += 2; issues.append("No check-in \(days)d") }
-        }
-        if let missing = driftMissing[d.id], !missing.isEmpty {
-            score += 2; issues.append("\(missing.count) profile(s) drifted")
-        }
-        return (score, issues)
-    }
+    private func attentionScore(_ d: MDMEnrollment) -> (score: Int, issues: [String]) { df.attentionScore(d) }
 
     private var attentionRows: [(id: String, cells: [String])] {
         scoped.compactMap { d -> (id: String, cells: [String])? in
@@ -325,86 +306,6 @@ struct GroupDashboardView: View {
             return (id: d.id, cells: [label(for: d), r.issues.joined(separator: " · "), "\(r.score)"])
         }
         .sorted { (Int($0.cells[2]) ?? 0) > (Int($1.cells[2]) ?? 0) }
-    }
-
-    /// Lightweight natural-language matcher for the Devices table filter.
-    /// Understands clauses like "filevault off", "not enrolled", "out of
-    /// compliance", OS marketing names ("sonoma"), and bare versions; ANDs
-    /// recognized clauses, falls back to substring for anything else.
-    private func matchesQuery(_ d: MDMEnrollment, _ q: String) -> Bool {
-        var rest = q.lowercased()
-        let f = facts(for: d)
-        var matched = true
-        func compliant() -> Bool? {
-            SmartGroup.compliant(f, requireFileVault: settings.mdmRequireFileVault, minOS: settings.mdmMinOSVersion)
-        }
-        // Consume the first matching phrase, AND its predicate, and strip it
-        // so leftover words fall through to free-text matching.
-        func clause(_ phrases: [String], _ ok: @autoclosure () -> Bool) {
-            for p in phrases where rest.contains(p) {
-                matched = matched && ok()
-                rest = rest.replacingOccurrences(of: p, with: " ")
-                return
-            }
-        }
-        // Negations before positives so "not compliant" doesn't read as compliant.
-        clause(["filevault off", "fv off", "no filevault"], f.fileVaultOn == false)
-        clause(["filevault on", "fv on"], f.fileVaultOn == true)
-        clause(["not enrolled", "checked out", "unenrolled"], !d.isEnabled)
-        clause(["enrolled"], d.isEnabled)
-        clause(["out of compliance", "non-compliant", "noncompliant", "not compliant"], compliant() == false)
-        clause(["compliant"], compliant() == true)
-        clause(["needs attention", "at risk"], attentionScore(d).score > 0)
-        for (name, major) in [("ventura", 13), ("sonoma", 14), ("sequoia", 15), ("tahoe", 26)] {
-            clause([name], (f.osVersion?.split(separator: ".").first).flatMap { Int($0) } == major)
-        }
-        guard matched else { return false }
-        // AND any leftover free text against the visible fields.
-        for token in rest.split(separator: " ").map(String.init) where !token.isEmpty {
-            let hit = label(for: d).localizedCaseInsensitiveContains(token)
-                || (d.serialNumber ?? "").localizedCaseInsensitiveContains(token)
-                || (osVersions[d.id] ?? "").contains(token)
-                || (models[d.id] ?? "").localizedCaseInsensitiveContains(token)
-            if !hit { return false }
-        }
-        return true
-    }
-
-    // MARK: - CSV export
-
-    private func csvEscape(_ s: String) -> String {
-        (s.contains(",") || s.contains("\"") || s.contains("\n"))
-            ? "\"" + s.replacingOccurrences(of: "\"", with: "\"\"") + "\""
-            : s
-    }
-
-    private func exportCSV(filename: String, columns: [String], rows: [[String]]) {
-        var csv = columns.map(csvEscape).joined(separator: ",") + "\n"
-        for r in rows { csv += r.map(csvEscape).joined(separator: ",") + "\n" }
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = filename
-        panel.allowedContentTypes = [.commaSeparatedText]
-        if panel.runModal() == .OK, let url = panel.url {
-            try? csv.data(using: .utf8)?.write(to: url)
-        }
-    }
-
-    /// Export whatever the current Devices/Security table shows.
-    private func exportDeviceTableCSV(security: Bool) {
-        let cols = security
-            ? ["Device", "Serial", "FileVault", "Compliance", "macOS", "Last check-in"]
-            : ["Device", "Serial", "Model", "macOS", "FileVault", "Compliance", "Last check-in"]
-        func fv(_ d: MDMEnrollment) -> String {
-            switch facts(for: d).fileVaultOn { case .some(true): return "On"; case .some(false): return "Off"; case nil: return "" } }
-        func comp(_ d: MDMEnrollment) -> String {
-            switch SmartGroup.compliant(facts(for: d), requireFileVault: settings.mdmRequireFileVault, minOS: settings.mdmMinOSVersion) {
-            case .some(true): return "Compliant"; case .some(false): return "Out"; case nil: return "Unknown" } }
-        let rows = tableRows.map { d -> [String] in
-            security
-                ? [label(for: d), d.serialNumber ?? "", fv(d), comp(d), osVersions[d.id] ?? "", lastSeenText(d)]
-                : [label(for: d), d.serialNumber ?? "", models[d.id] ?? "", osVersions[d.id] ?? "", fv(d), comp(d), lastSeenText(d)]
-        }
-        exportCSV(filename: "\(category.rawValue).csv", columns: cols, rows: rows)
     }
 
     private func mr(for d: MDMEnrollment) -> MRHostInventory? {
@@ -474,7 +375,7 @@ struct GroupDashboardView: View {
                 Text("\(filtered.count)").font(.callout).foregroundStyle(.secondary)
                 Spacer()
                 Button {
-                    exportCSV(filename: "\(category.rawValue).csv", columns: columns.map(\.0), rows: filtered.map(\.cells))
+                    TableCSVExport.save(filename: "\(category.rawValue).csv", columns: columns.map(\.0), rows: filtered.map(\.cells))
                 } label: { Image(systemName: "square.and.arrow.up") }
                 .help("Export this view as CSV").disabled(filtered.isEmpty)
                 .accessibilityLabel("Export this view as CSV")
@@ -542,234 +443,6 @@ struct GroupDashboardView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Prism device table
-
-    private func deviceTable(security: Bool) -> some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text(category.rawValue).font(.title3.bold())
-                Text("\(tableRows.count)").font(.callout).foregroundStyle(.secondary)
-                Spacer()
-                if scoped.contains(where: { osVersions[$0.id] == nil }) {
-                    Button { Task { await enableReportingAll() } } label: {
-                        if enablingAll { ProgressView().controlSize(.small) }
-                        else { Label("Enable reporting", systemImage: "antenna.radiowaves.left.and.right") }
-                    }
-                    .controlSize(.small)
-                    .help("Subscribe every device in scope to report OS, model, and FileVault so these columns fill in.")
-                }
-                Menu {
-                    ForEach(allDeviceColumns) { col in
-                        Toggle(col.title, isOn: Binding(
-                            get: { !hiddenColumns.contains(col.key) },
-                            set: { _ in toggleColumn(col.key) }))
-                    }
-                } label: { Image(systemName: "slider.horizontal.3") }
-                .menuStyle(.borderlessButton).fixedSize()
-                .help("Show / hide columns")
-                .accessibilityLabel("Show or hide columns")
-                Button { exportDeviceTableCSV(security: security) } label: { Image(systemName: "square.and.arrow.up") }
-                    .help("Export this view as CSV")
-                    .accessibilityLabel("Export this view as CSV")
-                HStack(spacing: 5) {
-                    Image(systemName: "sparkle.magnifyingglass").font(.caption).foregroundStyle(.secondary)
-                    TextField("Search — e.g. “Sonoma FileVault off”", text: $tableSearch).textFieldStyle(.plain).frame(width: 230)
-                }
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.controlBackgroundColor)))
-            }
-            .padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 8)
-            // Fixed-width columns inside a horizontal scroll so a wide
-            // table scrolls instead of forcing the whole window layout to
-            // shift; the column header stays put while rows scroll down.
-            ScrollView(.horizontal, showsIndicators: true) {
-                VStack(spacing: 0) {
-                    tableHeader(security: security)
-                    Divider()
-                    ScrollView(.vertical, showsIndicators: true) {
-                        LazyVStack(spacing: 0) {
-                            ForEach(tableRows, id: \.id) { d in
-                                tableRow(d, security: security)
-                                Divider().opacity(0.4)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    // Column show/hide for the device table (persisted).
-    struct DevColumn: Identifiable { let key: String; let title: String; let width: CGFloat; let sort: SortKey?; var id: String { key } }
-    @AppStorage("prismHiddenColumns") private var hiddenColumnsRaw = ""
-    private var hiddenColumns: Set<String> { Set(hiddenColumnsRaw.split(separator: ",").map(String.init)) }
-    private func toggleColumn(_ key: String) {
-        var set = hiddenColumns
-        if set.contains(key) { set.remove(key) } else { set.insert(key) }
-        hiddenColumnsRaw = set.sorted().joined(separator: ",")
-    }
-    /// Every toggleable device column (Device is always shown).
-    private var allDeviceColumns: [DevColumn] {
-        [DevColumn(key: "serial", title: "Serial", width: 116, sort: nil),
-         DevColumn(key: "model", title: "Model", width: 138, sort: .model),
-         DevColumn(key: "os", title: "macOS", width: 66, sort: .os),
-         DevColumn(key: "fv", title: "FileVault", width: 84, sort: .fileVault),
-         DevColumn(key: "compliance", title: "Compliance", width: 104, sort: .compliance),
-         DevColumn(key: "lastSeen", title: "Last check-in", width: 104, sort: .lastSeen)]
-    }
-    /// Ordered, visible columns for the current layout.
-    private func deviceColumns(security: Bool) -> [DevColumn] {
-        let order = security
-            ? ["serial", "fv", "compliance", "os", "lastSeen"]
-            : ["serial", "model", "os", "fv", "compliance", "lastSeen"]
-        return order.compactMap { key in allDeviceColumns.first { $0.key == key } }
-            .filter { !hiddenColumns.contains($0.key) }
-    }
-
-    private func tableHeader(security: Bool) -> some View {
-        HStack(spacing: 12) {
-            sortHeader("Device", .name).frame(width: 230, alignment: .leading)
-            ForEach(deviceColumns(security: security)) { col in
-                Group {
-                    if let s = col.sort { sortHeader(col.title, s) } else { Text(col.title) }
-                }.frame(width: col.width, alignment: .leading)
-            }
-        }
-        .padding(.horizontal, 18).padding(.vertical, 5)
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.secondary)
-    }
-
-    @ViewBuilder
-    private func deviceCell(_ col: DevColumn, _ d: MDMEnrollment) -> some View {
-        switch col.key {
-        case "serial": Text(d.serialNumber ?? "—").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-        case "model": Text(models[d.id] ?? "—").font(.callout).foregroundStyle(models[d.id] == nil ? .secondary : .primary).lineLimit(1)
-        case "os": Text(osVersions[d.id] ?? "—").font(.callout).foregroundStyle(osVersions[d.id] == nil ? .secondary : .primary)
-        case "fv": fvCell(d)
-        case "compliance": complianceCell(d)
-        case "lastSeen": Text(lastSeenText(d)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-        default: EmptyView()
-        }
-    }
-
-    private func sortHeader(_ title: String, _ key: SortKey) -> some View {
-        Button {
-            if sortKey == key { sortAsc.toggle() } else { sortKey = key; sortAsc = true }
-        } label: {
-            HStack(spacing: 3) {
-                Text(title)
-                if sortKey == key { Image(systemName: sortAsc ? "chevron.up" : "chevron.down").font(.system(size: 8)) }
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// The fleet-table row id this device maps to: its BlueSky host if
-    /// matched by serial, else the synthetic MDM-only row's negative id.
-    private func hostID(for d: MDMEnrollment) -> Int {
-        if let h = bscHost(for: d) { return h.blueskyid }
-        return -abs(BlueSkyHost.stableHash(d.id))
-    }
-
-    private func tableRow(_ d: MDMEnrollment, security: Bool) -> some View {
-        let hovered = hoveredRow == d.id
-        let selected = selection.contains(hostID(for: d))
-        return HStack(spacing: 12) {
-            HStack(spacing: 7) {
-                Image(systemName: deviceIcon(d)).font(.caption).foregroundStyle(Color.accentColor).frame(width: 16)
-                Text(label(for: d)).font(.callout.weight(.medium)).lineLimit(1).truncationMode(.tail)
-            }
-            .frame(width: 230, alignment: .leading)
-            ForEach(deviceColumns(security: security)) { col in
-                deviceCell(col, d).frame(width: col.width, alignment: .leading)
-            }
-        }
-        .padding(.horizontal, 18).padding(.vertical, 5)
-        .background(selected ? Color.accentColor.opacity(0.18)
-                    : (hovered ? Color.accentColor.opacity(0.06) : .clear))
-        .contentShape(Rectangle())
-        .onTapGesture { selection = [hostID(for: d)] }
-        .onHover { hoveredRow = $0 ? d.id : (hoveredRow == d.id ? nil : hoveredRow) }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityLabel(label(for: d))
-    }
-
-    // MARK: - Table cells
-
-    @ViewBuilder private func fvCell(_ d: MDMEnrollment) -> some View {
-        switch facts(for: d).fileVaultOn {
-        case .some(true): pill("On", .green)
-        case .some(false): pill("Off", .red)
-        case nil: Text("—").font(.callout).foregroundStyle(.secondary)
-        }
-    }
-
-    @ViewBuilder private func complianceCell(_ d: MDMEnrollment) -> some View {
-        switch SmartGroup.compliant(facts(for: d), requireFileVault: settings.mdmRequireFileVault, minOS: settings.mdmMinOSVersion) {
-        case .some(true): pill("Compliant", .green)
-        case .some(false): pill("Out", .orange)
-        case nil: pill("Unknown", .gray)
-        }
-    }
-
-    private func pill(_ text: String, _ color: Color) -> some View {
-        Text(text).font(.caption2.weight(.medium))
-            .padding(.horizontal, 8).padding(.vertical, 2)
-            .background(Capsule().fill(color.opacity(0.18)))
-            .foregroundStyle(color)
-    }
-
-    private func deviceIcon(_ d: MDMEnrollment) -> String {
-        let m = (models[d.id] ?? "").lowercased()
-        if m.contains("iphone") { return "iphone" }
-        if m.contains("ipad") { return "ipad" }
-        if m.contains("apple tv") || m.contains("appletv") { return "appletv" }
-        return "laptopcomputer"
-    }
-
-    private func lastSeenText(_ d: MDMEnrollment) -> String {
-        guard let date = d.lastSeenDate else { return "—" }
-        return date.formatted(.relative(presentation: .named))
-    }
-
-    private func osRank(_ s: String?) -> Int {
-        let p = (s ?? "").split(separator: ".").map { Int($0) ?? 0 }
-        return (p.count > 0 ? p[0] : 0) * 10000 + (p.count > 1 ? p[1] : 0) * 100 + (p.count > 2 ? p[2] : 0)
-    }
-
-    /// Scoped devices, filtered by the table search and sorted by the
-    /// active column.
-    private var tableRows: [MDMEnrollment] {
-        var rows = scoped
-        let q = tableSearch.trimmingCharacters(in: .whitespaces)
-        if !q.isEmpty { rows = rows.filter { matchesQuery($0, q) } }
-        func rank(_ d: MDMEnrollment) -> Int {
-            switch SmartGroup.compliant(facts(for: d), requireFileVault: settings.mdmRequireFileVault, minOS: settings.mdmMinOSVersion) {
-            case .some(true): return 0; case .some(false): return 1; case nil: return 2
-            }
-        }
-        func fvRank(_ d: MDMEnrollment) -> Int {
-            switch facts(for: d).fileVaultOn { case .some(true): return 0; case .some(false): return 1; case nil: return 2 }
-        }
-        rows.sort { a, b in
-            let asc: Bool
-            switch sortKey {
-            case .name: asc = label(for: a).localizedCaseInsensitiveCompare(label(for: b)) == .orderedAscending
-            case .model: asc = (models[a.id] ?? "~").localizedCaseInsensitiveCompare(models[b.id] ?? "~") == .orderedAscending
-            case .os: asc = osRank(osVersions[a.id]) < osRank(osVersions[b.id])
-            case .fileVault: asc = fvRank(a) < fvRank(b)
-            case .compliance: asc = rank(a) < rank(b)
-            case .lastSeen: asc = (a.lastSeenDate ?? .distantPast) < (b.lastSeenDate ?? .distantPast)
-            }
-            return sortAsc ? asc : !asc
-        }
-        return rows
-    }
-
     // MARK: - Prism (saved, configurable views)
 
     private var savedViewsBar: some View {
@@ -810,7 +483,6 @@ struct GroupDashboardView: View {
         activeViewID = v.id
         selectedGroupID = v.groupID
         attribute = v.attribute
-        prismBucket = nil
     }
 
     private func deleteView(_ v: PrismView) {
@@ -845,105 +517,6 @@ struct GroupDashboardView: View {
         .padding(20).frame(width: 380)
     }
 
-    /// The configurable Prism chart: break the scoped fleet down by the
-    /// chosen attribute, each bar drillable to its devices.
-    private var prismChart: some View {
-        let buckets = prismBuckets()
-        let maxCount = max(1, buckets.map(\.count).max() ?? 1)
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("Breakdown", systemImage: attribute.icon).font(.headline)
-                Spacer()
-                Picker("", selection: $attribute) {
-                    ForEach(PrismView.Attribute.allCases) { a in
-                        Label(a.rawValue, systemImage: a.icon).tag(a)
-                    }
-                }
-                .labelsHidden().frame(maxWidth: 200)
-                .onChange(of: attribute) { _, _ in prismBucket = nil; activeViewID = nil }
-            }
-            ForEach(buckets, id: \.label) { row in
-                Button { prismBucket = (prismBucket == row.label) ? nil : row.label } label: {
-                    HStack(spacing: 8) {
-                        Text(row.label).font(.caption).frame(width: 150, alignment: .leading)
-                            .lineLimit(1).truncationMode(.middle)
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(Color.accentColor.opacity(0.15))
-                                Capsule().fill(Color.accentColor.opacity(prismBucket == row.label ? 0.95 : 0.7))
-                                    .frame(width: max(6, geo.size.width * CGFloat(row.count) / CGFloat(maxCount)))
-                            }
-                        }
-                        .frame(height: 16)
-                        Text("\(row.count)").font(.caption.monospacedDigit()).frame(width: 32, alignment: .trailing)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-            if let b = prismBucket {
-                let matches = devicesInBucket(b)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("\(b) — \(matches.count) device\(matches.count == 1 ? "" : "s")")
-                        .font(.caption.bold())
-                    ForEach(matches, id: \.id) { d in
-                        HStack(spacing: 6) {
-                            Image(systemName: "laptopcomputer").foregroundStyle(.secondary)
-                            Text(label(for: d)).font(.caption)
-                            Spacer()
-                            if let os = osVersions[d.id] { Text("macOS \(os)").font(.caption2).foregroundStyle(.secondary) }
-                        }
-                    }
-                }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.06)))
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(NSColor.controlBackgroundColor)))
-    }
-
-    /// The bucket label a device falls into for the current attribute.
-    private func bucket(for d: MDMEnrollment) -> String {
-        switch attribute {
-        case .osVersion: return osVersions[d.id] ?? "Not reported"
-        case .model: return models[d.id] ?? "Not reported"
-        case .fileVault:
-            switch facts(for: d).fileVaultOn {
-            case .some(true): return "On"
-            case .some(false): return "Off"
-            case nil: return "Not reported"
-            }
-        case .compliance:
-            switch SmartGroup.compliant(facts(for: d), requireFileVault: settings.mdmRequireFileVault,
-                                        minOS: settings.mdmMinOSVersion) {
-            case .some(true): return "Compliant"
-            case .some(false): return "Out of compliance"
-            case nil: return "Unknown"
-            }
-        case .enrollment: return d.isEnabled ? "Enrolled" : "Checked out"
-        case .blueSky: return bscHost(for: d) != nil ? "Linked to BlueSky" : "MDM-only"
-        case .profileCount:
-            switch deploymentCounts[d.id] ?? 0 {
-            case 0: return "No profiles"
-            case 1...2: return "1–2 profiles"
-            default: return "3+ profiles"
-            }
-        }
-    }
-
-    private func prismBuckets() -> [(label: String, count: Int)] {
-        var counts: [String: Int] = [:]
-        for d in scoped { counts[bucket(for: d), default: 0] += 1 }
-        return counts.sorted { $0.value > $1.value || ($0.value == $1.value && $0.key < $1.key) }
-            .map { (label: $0.key, count: $0.value) }
-    }
-
-    private func devicesInBucket(_ b: String) -> [MDMEnrollment] {
-        scoped.filter { bucket(for: $0) == b }
-    }
 
     private var groupPicker: some View {
         HStack(spacing: 12) {
@@ -1255,12 +828,7 @@ struct GroupDashboardView: View {
         }
     }
 
-    private func label(for enr: MDMEnrollment) -> String {
-        if let stored = settings.mdmDevices.first(where: { $0.id == enr.id })?.label,
-           !stored.isEmpty { return stored }
-        if let host = bscHost(for: enr) { return host.displayName }
-        return enr.serialNumber ?? String(enr.id.prefix(8))
-    }
+    private func label(for enr: MDMEnrollment) -> String { df.label(for: enr) }
 
     private var emptyScope: some View {
         VStack(spacing: 8) {
