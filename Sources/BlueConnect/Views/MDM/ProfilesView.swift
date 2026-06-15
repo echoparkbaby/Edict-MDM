@@ -7,276 +7,16 @@ import UniformTypeIdentifiers
 /// form, choose which enrolled Macs to push it to, and Edict builds the
 /// .mobileconfig and sends it via the InstallProfile command. No XML.
 struct ProfilesView: View {
-    /// Apple platforms a template targets — drives the filter toggles.
-    enum Platform: String, CaseIterable, Identifiable {
-        case macOS = "macOS", iOS = "iOS", tvOS = "tvOS"
-        var id: String { rawValue }
-    }
 
     @EnvironmentObject private var settings: SettingsStore
     @Environment(ActivityLog.self) private var activity
 
-    enum Template: String, CaseIterable, Identifiable {
-        case fileVault = "FileVault Encryption"
-        case firewall = "Firewall"
-        case softwareUpdate = "Software Update"
-        case screenLock = "Screen Lock"
-        case restrictions = "Restrictions"
-        case gatekeeper = "Gatekeeper"
-        case loginWindow = "Login Window"
-        case certificate = "Root Certificate"
-        case pppc = "Privacy (PPPC)"
-        case singleApp = "Single App Mode"
-        case notifications = "Notifications"
-        case webFilter = "Web Content Filter"
-        case calDAV = "Calendar (CalDAV)"
-        case cardDAV = "Contacts (CardDAV)"
-        case associatedDomains = "Associated Domains"
-        case platformSSO = "Platform SSO"
-        case mail = "Mail"
-        case energy = "Energy Saver"
-        case safari = "Safari (managed)"
-        case chrome = "Chrome (managed)"
-        case screenTime = "Screen Time"
-        case munki = "Munki (BlueConnect)"
-        case timeMachine = "Time Machine"
-        case dns = "Encrypted DNS"
-        case dock = "Dock"
-        case finder = "Finder"
-        case kext = "Kernel Extensions"
-        case wifi = "Wi-Fi Network"
-        case passcode = "Password Policy"
-        case custom = "Custom Profile"
-        var id: String { rawValue }
-        /// Which Apple platforms this template applies to (shown as a badge).
-        var platforms: String {
-            switch self {
-            case .wifi, .certificate, .dns, .restrictions, .screenTime: return "macOS · iOS · tvOS"
-            case .passcode: return "macOS · iOS"
-            case .singleApp: return "iOS · tvOS"
-            case .notifications, .webFilter, .calDAV, .cardDAV, .mail: return "macOS · iOS"
-            case .associatedDomains: return "macOS · iOS · tvOS"
-            case .custom: return "any"
-            default: return "macOS"
-            }
-        }
-        /// Structured platforms for the filter toggles. Custom is "any", so
-        /// it matches every filter.
-        var platformSet: Set<Platform> {
-            switch self {
-            case .wifi, .certificate, .dns, .restrictions, .associatedDomains, .screenTime: return [.macOS, .iOS, .tvOS]
-            case .passcode, .notifications, .webFilter, .calDAV, .cardDAV, .mail: return [.macOS, .iOS]
-            case .singleApp: return [.iOS, .tvOS]
-            case .custom: return [.macOS, .iOS, .tvOS]
-            default: return [.macOS]
-            }
-        }
-        var icon: String {
-            switch self {
-            case .fileVault: return "lock.shield"
-            case .firewall: return "firewall"
-            case .softwareUpdate: return "arrow.triangle.2.circlepath"
-            case .screenLock: return "lock.display"
-            case .restrictions: return "hand.raised"
-            case .gatekeeper: return "checkmark.shield"
-            case .loginWindow: return "person.crop.rectangle"
-            case .certificate: return "seal"
-            case .pppc: return "hand.raised.circle"
-            case .singleApp: return "apps.iphone"
-            case .notifications: return "bell.badge"
-            case .webFilter: return "globe.badge.chevron.backward"
-            case .calDAV: return "calendar"
-            case .cardDAV: return "person.crop.square.filled.and.at.rectangle"
-            case .associatedDomains: return "link.circle"
-            case .platformSSO: return "person.badge.key.fill"
-            case .mail: return "envelope.fill"
-            case .energy: return "powersleep"
-            case .safari: return "safari"
-            case .chrome: return "globe"
-            case .screenTime: return "hourglass"
-            case .munki: return "shippingbox"
-            case .timeMachine: return "clock.arrow.circlepath"
-            case .dns: return "network.badge.shield.half.filled"
-            case .dock: return "dock.rectangle"
-            case .finder: return "macwindow"
-            case .kext: return "puzzlepiece.extension"
-            case .wifi: return "wifi"
-            case .passcode: return "lock.rectangle"
-            case .custom: return "doc.text"
-            }
-        }
-        var blurb: String {
-            switch self {
-            case .fileVault: return "Force-enable disk encryption and escrow the recovery key."
-            case .firewall: return "Turn on the application firewall, with stealth mode."
-            case .softwareUpdate: return "Automatic update checks, downloads, and installs."
-            case .screenLock: return "Require the password after the screen saver or sleep."
-            case .restrictions: return "Disable AirDrop, Erase All Content, Game Center, App installs."
-            case .gatekeeper: return "Only allow signed apps to run; App Store + identified developers."
-            case .loginWindow: return "Harden the login window — disable guest, hide admin users."
-            case .certificate: return "Install and trust a root CA from a pasted PEM certificate."
-            case .pppc: return "Pre-grant an app Full Disk Access, Accessibility, Screen Recording, etc."
-            case .singleApp: return "Lock a device to one app — kiosk mode for Apple TV / iPad."
-            case .notifications: return "Control an app's notification behavior — alerts, sounds, lock screen."
-            case .webFilter: return "Built-in web content filter with allow / block URL lists."
-            case .calDAV: return "Calendar account (CalDAV) pushed to the device."
-            case .cardDAV: return "Contacts account (CardDAV) pushed to the device."
-            case .associatedDomains: return "Associate an app with web domains (universal links)."
-            case .platformSSO: return "Tie macOS login to Entra ID or Okta (Platform Single Sign-On)."
-            case .mail: return "Mail account (IMAP/POP) pushed to the device."
-            case .energy: return "Energy Saver — display/system sleep, wake-on-LAN, restart after power failure."
-            case .safari: return "Managed Safari — homepage, new-window behavior, private browsing."
-            case .chrome: return "Managed Chrome enterprise policy — homepage, startup, incognito."
-            case .screenTime: return "Screen Time content limits — app/movie/TV age ratings + explicit content."
-            case .munki: return "Point the Mac at your BlueConnect Munki repo for managed software."
-            case .timeMachine: return "Managed Time Machine backup destination and schedule."
-            case .dns: return "Encrypted DNS (DoH/DoT) — route lookups through a private resolver."
-            case .dock: return "Dock position, size, auto-hide, recents."
-            case .finder: return "Show drives on the desktop, reveal hidden files, trash warnings."
-            case .kext: return "Allow third-party kernel extensions by developer Team ID."
-            case .wifi: return "Auto-join Wi-Fi network pushed to the Mac's system store."
-            case .passcode: return "Login password requirements (length, complexity, lock timeout)."
-            case .custom: return "Paste or drag in any .mobileconfig — covers every payload type."
-            }
-        }
-    }
-
-    @State private var template: Template = .fileVault
-
-    // FileVault
-    @State private var fvDefer = true
-    // Firewall
-    @State private var fwBlockAll = false
-    @State private var fwStealth = true
-    // Software Update
-    @State private var suAutoDownload = true
-    @State private var suAutoInstallOS = false
-    @State private var suAutoSecurity = true
-    // Screen lock
-    @State private var slIdleMinutes = 5
-    @State private var slDelaySeconds = 0
-    // Restrictions
-    @State private var rAllowErase = true
-    @State private var rAllowAirDrop = true
-    @State private var rAllowGameCenter = true
-    @State private var rAllowAppStore = true
-    // Gatekeeper
-    @State private var gkAllowDevelopers = true
-    // Login Window
-    @State private var lwDisableGuest = true
-    @State private var lwHideAdmins = false
-    @State private var lwNamePasswordFields = true
-    // Certificate
-    @State private var certPEM = ""
-    @State private var certName = ""
-    // Munki
-    @State private var munkiRepoURL = ""
-    @State private var munkiClientID = ""
-    // Time Machine
-    @State private var tmDest = ""
-    @State private var tmAuto = true
-    @State private var tmAllVolumes = false
-    @State private var tmSkipSys = true
-    // DNS
-    @State private var dnsHTTPS = true
-    @State private var dnsServer = ""
-    // Dock
-    @State private var dockOrientation = "bottom"
-    @State private var dockAutohide = false
-    @State private var dockTileSize = 48
-    @State private var dockRecents = true
-    // Finder
-    @State private var finderShowDrives = true
-    @State private var finderShowAll = false
-    @State private var finderWarnTrash = true
-    // KEXT
-    @State private var kextTeamIDs = ""
-    @State private var kextUserOverrides = false
-    // PPPC
-    @State private var pppcID = ""
-    @State private var pppcIsPath = false
-    @State private var pppcCodeReq = ""
-    @State private var pppcFDA = true
-    @State private var pppcAccessibility = false
-    @State private var pppcScreen = false
-    @State private var pppcInput = false
-    @State private var pppcAuth = "Allow"
-    // Single App Mode
-    @State private var singleAppID = ""
-    @State private var singleDisableAutoLock = true
-    @State private var singleDisableTouch = false
-    // Notifications
-    @State private var notifBundleID = ""
-    @State private var notifEnabled = true
-    @State private var notifAlertType = 2
-    @State private var notifSounds = true
-    @State private var notifBadges = true
-    @State private var notifLockScreen = true
-    @State private var notifCenter = true
-    @State private var notifCritical = false
-    // Web filter
-    @State private var wfAutoFilter = false
-    @State private var wfAllowed = ""
-    @State private var wfBlocked = ""
-    // CalDAV / CardDAV
-    @State private var davDesc = ""
-    @State private var davHost = ""
-    @State private var davPort = 0
-    @State private var davPrincipal = ""
-    @State private var davUser = ""
-    @State private var davSSL = true
-    // Associated domains
-    @State private var assocAppID = ""
-    @State private var assocDomains = ""
-    // Platform SSO
-    @State private var ssoVendor: ProfilePayloads.SSOVendor = .entra
-    @State private var ssoExtensionID = ProfilePayloads.SSOVendor.entra.extensionID
-    @State private var ssoTeamID = ProfilePayloads.SSOVendor.entra.teamID
-    @State private var ssoURLs = ProfilePayloads.SSOVendor.entra.urls.joined(separator: "\n")
-    @State private var ssoAuthMethod = "UserSecureEnclaveKey"
-    @State private var ssoSharedKeys = false
-    // Mail
-    @State private var mailDesc = ""
-    @State private var mailAddress = ""
-    @State private var mailHost = ""
-    @State private var mailPort = 0
-    @State private var mailUser = ""
-    @State private var mailSSL = true
-    @State private var mailIMAP = true
-    // Energy
-    @State private var energyDisplaySleep = 10
-    @State private var energySystemSleep = 0
-    @State private var energyWakeOnLAN = true
-    @State private var energyRestartAfterPower = true
-    // Safari
-    @State private var safariHome = ""
-    @State private var safariOpenHome = true
-    @State private var safariNoPrivate = false
-    // Chrome
-    @State private var chromeHome = ""
-    @State private var chromeRestore = false
-    @State private var chromeNoIncognito = false
-    // Screen Time (US rating thresholds; 1000 = allow all)
-    @State private var stApps = 1000
-    @State private var stMovies = 1000
-    @State private var stTV = 1000
-    @State private var stExplicit = true
-    // Drag-drop feedback
+    @State private var template: ProfileTemplate = .fileVault
+    /// All the template form fields + build/validation, factored out so the
+    /// form is its own view and the logic is testable.
+    @State private var form = ProfileFormState()
+    /// Drag-drop highlight for the .mobileconfig drop target.
     @State private var dropHighlight = false
-
-    // Wi-Fi
-    @State private var ssid = ""
-    @State private var wifiPassword = ""
-    @State private var wifiHidden = false
-    @State private var wifiSecurity: ProfilePayloads.WiFiSecurity = .wpa2
-
-    // Passcode
-    @State private var minLength = 8
-    @State private var requireAlphanumeric = true
-    @State private var maxInactivity = 0   // minutes; 0 = none
-
-    // Custom
-    @State private var customXML = ""
 
     // Targets + deploy
     @State private var devices: [MDMEnrollment] = []
@@ -300,7 +40,7 @@ struct ProfilesView: View {
     }
 
     // Saved / favorited profiles
-    enum CatalogItem: Hashable { case template(Template); case saved(UUID) }
+    enum CatalogItem: Hashable { case template(ProfileTemplate); case saved(UUID) }
     @State private var selected: CatalogItem = .template(.fileVault)
     @State private var saved: [SavedProfile] = []
     @State private var showingSaveSheet = false
@@ -320,11 +60,11 @@ struct ProfilesView: View {
     }
 
     /// Platform filter toggles — empty = show all.
-    @State private var platformFilter: Set<Platform> = []
+    @State private var platformFilter: Set<ProfilePlatform> = []
 
     /// Templates alphabetized and platform-filtered; Custom pinned last.
-    private var sortedTemplates: [Template] {
-        Template.allCases.filter { $0 != .custom }
+    private var sortedTemplates: [ProfileTemplate] {
+        ProfileTemplate.allCases.filter { $0 != .custom }
             .filter { platformFilter.isEmpty || !$0.platformSet.isDisjoint(with: platformFilter) }
             .sorted { $0.rawValue.localizedCaseInsensitiveCompare($1.rawValue) == .orderedAscending } + [.custom]
     }
@@ -383,7 +123,7 @@ struct ProfilesView: View {
 
     private var platformToggles: some View {
         HStack(spacing: 6) {
-            ForEach(Platform.allCases) { p in
+            ForEach(ProfilePlatform.allCases) { p in
                 let on = platformFilter.contains(p)
                 Button {
                     if on { platformFilter.remove(p) } else { platformFilter.insert(p) }
@@ -475,7 +215,7 @@ struct ProfilesView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Text(template.rawValue).font(.headline)
-                    formForTemplate
+                    TemplateFormView(template: template, form: $form)
                     Divider()
                     targetPicker
                     resultLine
@@ -487,7 +227,7 @@ struct ProfilesView: View {
                 Button {
                     saveName = template.rawValue; saveFavorite = false; showingSaveSheet = true
                 } label: { Label("Save…", systemImage: "tray.and.arrow.down") }
-                    .disabled(!formValid)
+                    .disabled(!form.isValid(for: template))
                     .help("Save this configured profile to reuse or favorite")
                 Spacer()
                 Button {
@@ -498,7 +238,7 @@ struct ProfilesView: View {
                                  systemImage: "paperplane.fill") }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(deploying || resolvedTargets.isEmpty || !formValid)
+                .disabled(deploying || resolvedTargets.isEmpty || !form.isValid(for: template))
             }
             .padding(12)
         }
@@ -583,354 +323,6 @@ struct ProfilesView: View {
         }
     }
 
-    @ViewBuilder
-    private var formForTemplate: some View {
-        switch template {
-        case .fileVault:
-            Form {
-                Toggle("Defer until next logout", isOn: $fvDefer)
-                Text("Forces FileVault on and escrows the recovery key with the MDM. With defer on, the user is prompted to enable it the next time they log out (the standard, least-disruptive flow).")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            .formStyle(.columns)
-        case .firewall:
-            Form {
-                Toggle("Stealth mode (don't respond to probes)", isOn: $fwStealth)
-                Toggle("Block all incoming connections", isOn: $fwBlockAll)
-            }
-            .formStyle(.columns)
-        case .softwareUpdate:
-            Form {
-                Toggle("Download updates automatically", isOn: $suAutoDownload)
-                Toggle("Install macOS updates automatically", isOn: $suAutoInstallOS)
-                Toggle("Install security responses & system files", isOn: $suAutoSecurity)
-            }
-            .formStyle(.columns)
-        case .screenLock:
-            Form {
-                Stepper("Start screen saver after \(slIdleMinutes) min", value: $slIdleMinutes, in: 1...60)
-                Stepper(slDelaySeconds == 0 ? "Require password immediately"
-                        : "Require password after \(slDelaySeconds)s",
-                        value: $slDelaySeconds, in: 0...300, step: 15)
-            }
-            .formStyle(.columns)
-        case .restrictions:
-            Form {
-                Toggle("Allow Erase All Content & Settings", isOn: $rAllowErase)
-                Toggle("Allow AirDrop", isOn: $rAllowAirDrop)
-                Toggle("Allow Game Center", isOn: $rAllowGameCenter)
-                Toggle("Allow installing apps", isOn: $rAllowAppStore)
-                Text("Turn a switch OFF to restrict it. Anything left on isn't written to the profile.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            .formStyle(.columns)
-        case .gatekeeper:
-            Form {
-                Toggle("Allow identified developers (not just App Store)", isOn: $gkAllowDevelopers)
-                Text("Gatekeeper assessment is always on — only signed, notarized apps run. Turn the switch off to allow App Store apps only.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            .formStyle(.columns)
-        case .loginWindow:
-            Form {
-                Toggle("Disable guest account", isOn: $lwDisableGuest)
-                Toggle("Hide admin users from the list", isOn: $lwHideAdmins)
-                Toggle("Show name + password fields (not a user list)", isOn: $lwNamePasswordFields)
-            }
-            .formStyle(.columns)
-        case .certificate:
-            VStack(alignment: .leading, spacing: 6) {
-                TextField("Certificate name", text: $certName, prompt: Text("Corp Root CA"))
-                    .textFieldStyle(.roundedBorder)
-                Text("Paste the root CA in PEM form (-----BEGIN CERTIFICATE-----).")
-                    .font(.caption).foregroundStyle(.secondary)
-                TextEditor(text: $certPEM)
-                    .font(.caption.monospaced())
-                    .frame(minHeight: 160)
-                    .overlay(RoundedRectangle(cornerRadius: 4)
-                        .stroke(Color.secondary.opacity(0.25), lineWidth: 1))
-            }
-        case .timeMachine:
-            Form {
-                TextField("Backup destination URL", text: $tmDest,
-                          prompt: Text(verbatim: "smb://nas.local/backups"))
-                Toggle("Back up automatically", isOn: $tmAuto)
-                Toggle("Back up all volumes", isOn: $tmAllVolumes)
-                Toggle("Skip system files", isOn: $tmSkipSys)
-            }
-            .formStyle(.columns)
-        case .dns:
-            Form {
-                Picker("Protocol", selection: $dnsHTTPS) {
-                    Text("DNS over HTTPS").tag(true)
-                    Text("DNS over TLS").tag(false)
-                }
-                TextField(dnsHTTPS ? "Server URL" : "Server name", text: $dnsServer,
-                          prompt: Text(dnsHTTPS ? "https://dns.example.com/dns-query" : "dns.example.com"))
-            }
-            .formStyle(.columns)
-        case .dock:
-            Form {
-                Picker("Position", selection: $dockOrientation) {
-                    Text("Bottom").tag("bottom"); Text("Left").tag("left"); Text("Right").tag("right")
-                }
-                Toggle("Auto-hide", isOn: $dockAutohide)
-                Stepper("Icon size: \(dockTileSize)", value: $dockTileSize, in: 16...128, step: 4)
-                Toggle("Show recent apps", isOn: $dockRecents)
-            }
-            .formStyle(.columns)
-        case .finder:
-            Form {
-                Toggle("Show drives on the desktop", isOn: $finderShowDrives)
-                Toggle("Show hidden files", isOn: $finderShowAll)
-                Toggle("Warn before emptying Trash", isOn: $finderWarnTrash)
-            }
-            .formStyle(.columns)
-        case .kext:
-            Form {
-                TextField("Allowed Team IDs (comma-separated)", text: $kextTeamIDs,
-                          prompt: Text("ABCDE12345, FGHIJ67890"))
-                Toggle("Allow users to approve more", isOn: $kextUserOverrides)
-                Text("Pre-approves kernel extensions from these developer Team IDs so security tools and drivers load without a user prompt.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            .formStyle(.columns)
-        case .pppc:
-            Form {
-                TextField(pppcIsPath ? "App path" : "App bundle ID", text: $pppcID,
-                          prompt: Text(pppcIsPath ? "/Applications/App.app" : "com.example.app"))
-                Picker("Identifier type", selection: $pppcIsPath) {
-                    Text("Bundle ID").tag(false); Text("Path").tag(true)
-                }
-                Picker("Authorization", selection: $pppcAuth) {
-                    Text("Allow").tag("Allow")
-                    Text("Allow (user can change)").tag("AllowStandardUserToSetSystemService")
-                    Text("Deny").tag("Deny")
-                }
-                Toggle("Full Disk Access", isOn: $pppcFDA)
-                Toggle("Accessibility", isOn: $pppcAccessibility)
-                Toggle("Screen Recording", isOn: $pppcScreen)
-                Toggle("Input Monitoring", isOn: $pppcInput)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Code requirement").font(.caption).foregroundStyle(.secondary)
-                    TextEditor(text: $pppcCodeReq)
-                        .font(.caption2.monospaced()).frame(minHeight: 60)
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1))
-                    Text("Required. Get it with:  codesign -dr - /Applications/App.app  (copy the line after “designated => ”).")
-                        .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .formStyle(.columns)
-        case .singleApp:
-            Form {
-                TextField("App bundle ID", text: $singleAppID, prompt: Text("com.apple.TVRemote"))
-                Toggle("Disable auto-lock", isOn: $singleDisableAutoLock)
-                Toggle("Disable touch", isOn: $singleDisableTouch)
-                Text("Locks the device to this one app (autonomous single-app / kiosk mode). For Apple TV or a dedicated iPad.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            .formStyle(.columns)
-        case .notifications:
-            Form {
-                TextField("App bundle ID", text: $notifBundleID, prompt: Text("com.apple.Safari"))
-                HStack {
-                    Button("Deliver quietly") {
-                        notifEnabled = true; notifAlertType = 0
-                        notifSounds = false; notifBadges = false
-                        notifLockScreen = false; notifCenter = true; notifCritical = false
-                    }
-                    .help("Silence this app's banners and sounds — warnings still land in Notification Center but never pop an alert. Good for chatty background agents.")
-                    Button("Silence completely") {
-                        notifEnabled = false; notifAlertType = 0
-                        notifSounds = false; notifBadges = false
-                        notifLockScreen = false; notifCenter = false; notifCritical = false
-                    }
-                    .help("Turn the app's notifications off entirely.")
-                }
-                Toggle("Notifications enabled", isOn: $notifEnabled)
-                Picker("Alert style", selection: $notifAlertType) {
-                    Text("None").tag(0); Text("Banner").tag(1); Text("Persistent alert").tag(2)
-                }
-                .disabled(!notifEnabled)
-                Toggle("Sounds", isOn: $notifSounds).disabled(!notifEnabled)
-                Toggle("Badges", isOn: $notifBadges).disabled(!notifEnabled)
-                Toggle("Show on lock screen", isOn: $notifLockScreen).disabled(!notifEnabled)
-                Toggle("Show in Notification Center", isOn: $notifCenter).disabled(!notifEnabled)
-                Toggle("Allow critical alerts", isOn: $notifCritical).disabled(!notifEnabled)
-                Text("“Deliver quietly” keeps the app running normally but stops its warning banners and sounds from interrupting. Requires the app's bundle ID (find it with the app's Info.plist or `osascript -e 'id of app \"Name\"'`).")
-                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            .formStyle(.columns)
-        case .webFilter:
-            Form {
-                Toggle("Limit adult content (auto filter)", isOn: $wfAutoFilter)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Always allow (one URL per line)").font(.caption).foregroundStyle(.secondary)
-                    TextEditor(text: $wfAllowed).font(.caption.monospaced()).frame(minHeight: 60)
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1))
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Always block (one URL per line)").font(.caption).foregroundStyle(.secondary)
-                    TextEditor(text: $wfBlocked).font(.caption.monospaced()).frame(minHeight: 60)
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1))
-                }
-            }
-            .formStyle(.columns)
-        case .calDAV, .cardDAV:
-            Form {
-                TextField("Account description", text: $davDesc, prompt: Text("Work Calendar"))
-                TextField("Server host", text: $davHost, prompt: Text("dav.example.com"))
-                TextField("Principal URL (optional)", text: $davPrincipal, prompt: Text("/principals/users/me/"))
-                TextField("Username (optional)", text: $davUser)
-                Toggle("Use SSL", isOn: $davSSL)
-                Text("Password isn't stored in the profile — the user is prompted on install. Port auto-detects unless you need a custom one.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            .formStyle(.columns)
-        case .platformSSO:
-            Form {
-                Picker("Identity provider", selection: $ssoVendor) {
-                    ForEach(ProfilePayloads.SSOVendor.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .onChange(of: ssoVendor) { _, v in
-                    if v != .custom {
-                        ssoExtensionID = v.extensionID
-                        ssoTeamID = v.teamID
-                        ssoURLs = v.urls.joined(separator: "\n")
-                    }
-                }
-                TextField("Extension identifier", text: $ssoExtensionID)
-                TextField("Team identifier", text: $ssoTeamID)
-                Picker("Authentication", selection: $ssoAuthMethod) {
-                    Text("Secure Enclave key (passwordless)").tag("UserSecureEnclaveKey")
-                    Text("Password").tag("Password")
-                    Text("Smart Card").tag("SmartCard")
-                }
-                Toggle("Share device keys across users", isOn: $ssoSharedKeys)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Redirect URLs (one per line)").font(.caption).foregroundStyle(.secondary)
-                    TextEditor(text: $ssoURLs).font(.caption.monospaced()).frame(minHeight: 70)
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1))
-                }
-                Text("macOS 13+. The IdP's SSO extension app (Company Portal for Entra, Okta Verify for Okta) must be installed separately — push it with Munki. For Okta, replace example.okta.com with your tenant.")
-                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            .formStyle(.columns)
-        case .mail:
-            Form {
-                TextField("Account description", text: $mailDesc, prompt: Text("Work Mail"))
-                TextField("Email address", text: $mailAddress, prompt: Text("user@example.com"))
-                TextField("Mail server", text: $mailHost, prompt: Text("mail.example.com"))
-                TextField("Username (optional)", text: $mailUser)
-                Picker("Type", selection: $mailIMAP) { Text("IMAP").tag(true); Text("POP").tag(false) }
-                Toggle("Use SSL", isOn: $mailSSL)
-                Text("Password isn't stored — the user is prompted on install. Port auto-detects unless set.")
-                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            .formStyle(.columns)
-        case .energy:
-            Form {
-                Stepper("Display sleep: \(energyDisplaySleep == 0 ? "Never" : "\(energyDisplaySleep) min")", value: $energyDisplaySleep, in: 0...180, step: 5)
-                Stepper("System sleep: \(energySystemSleep == 0 ? "Never" : "\(energySystemSleep) min")", value: $energySystemSleep, in: 0...180, step: 5)
-                Toggle("Wake on LAN", isOn: $energyWakeOnLAN)
-                Toggle("Restart after power failure", isOn: $energyRestartAfterPower)
-            }
-            .formStyle(.columns)
-        case .safari:
-            Form {
-                TextField("Homepage URL", text: $safariHome, prompt: Text("https://example.com"))
-                Toggle("New windows/tabs open to homepage", isOn: $safariOpenHome)
-                Toggle("Disable private browsing", isOn: $safariNoPrivate)
-            }
-            .formStyle(.columns)
-        case .chrome:
-            Form {
-                TextField("Homepage URL", text: $chromeHome, prompt: Text("https://example.com"))
-                Toggle("Restore last session on startup", isOn: $chromeRestore)
-                Toggle("Disable incognito mode", isOn: $chromeNoIncognito)
-                Text("Applies via Chrome's enterprise policy (com.google.Chrome).")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
-            .formStyle(.columns)
-        case .screenTime:
-            Form {
-                Picker("Apps", selection: $stApps) {
-                    Text("Allow all").tag(1000); Text("17+").tag(600); Text("12+").tag(300)
-                    Text("9+").tag(200); Text("4+").tag(100); Text("Don't allow").tag(0)
-                }
-                Picker("Movies", selection: $stMovies) {
-                    Text("Allow all").tag(1000); Text("NC-17").tag(500); Text("R").tag(400)
-                    Text("PG-13").tag(300); Text("PG").tag(200); Text("G").tag(100); Text("Don't allow").tag(0)
-                }
-                Picker("TV shows", selection: $stTV) {
-                    Text("Allow all").tag(1000); Text("TV-MA").tag(600); Text("TV-14").tag(500)
-                    Text("TV-PG").tag(400); Text("TV-G").tag(300); Text("TV-Y7").tag(200)
-                    Text("TV-Y").tag(100); Text("Don't allow").tag(0)
-                }
-                Toggle("Allow explicit content (music, podcasts, news)", isOn: $stExplicit)
-                Text("US rating system. Sets Content & Privacy restrictions. Screen Time downtime / app limits aren't profile-deliverable (Family Controls only).")
-                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            .formStyle(.columns)
-        case .associatedDomains:
-            Form {
-                TextField("App bundle ID", text: $assocAppID, prompt: Text("com.example.app"))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Domains (one per line, e.g. applinks:example.com)").font(.caption).foregroundStyle(.secondary)
-                    TextEditor(text: $assocDomains).font(.caption.monospaced()).frame(minHeight: 70)
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1))
-                }
-            }
-            .formStyle(.columns)
-        case .munki:
-            Form {
-                HStack {
-                    TextField("Munki repo URL", text: $munkiRepoURL,
-                              prompt: Text(verbatim: "https://munki.example.com/repo"))
-                    if !settings.munkiRepoEndpoint.isEmpty {
-                        Button("Use BlueConnect") { munkiRepoURL = settings.munkiRepoEndpoint }
-                            .buttonStyle(.link).font(.caption)
-                    }
-                }
-                TextField("Client identifier (optional)", text: $munkiClientID,
-                          prompt: Text("manifest name"))
-                Text("Sets ManagedInstalls SoftwareRepoURL so enrolled Macs pull managed software from your BlueConnect Munki repo. The Munki tools must be installed on the Mac (deploy them via Munki bootstrap or a package).")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            .formStyle(.columns)
-        case .wifi:
-            Form {
-                TextField("Network name (SSID)", text: $ssid)
-                Picker("Security", selection: $wifiSecurity) {
-                    ForEach(ProfilePayloads.WiFiSecurity.allCases) { Text($0.rawValue).tag($0) }
-                }
-                if wifiSecurity.needsPassword {
-                    SecureField("Password", text: $wifiPassword)
-                }
-                Toggle("Hidden network", isOn: $wifiHidden)
-            }
-            .formStyle(.columns)
-        case .passcode:
-            Form {
-                Stepper("Minimum length: \(minLength)", value: $minLength, in: 4...64)
-                Toggle("Require letters and numbers", isOn: $requireAlphanumeric)
-                Stepper(maxInactivity == 0 ? "Auto-lock: off"
-                        : "Auto-lock after \(maxInactivity) min",
-                        value: $maxInactivity, in: 0...60, step: 5)
-            }
-            .formStyle(.columns)
-        case .custom:
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Paste a .mobileconfig (XML). It must be a Configuration profile.")
-                    .font(.caption).foregroundStyle(.secondary)
-                TextEditor(text: $customXML)
-                    .font(.caption.monospaced())
-                    .frame(minHeight: 200)
-                    .overlay(RoundedRectangle(cornerRadius: 4)
-                        .stroke(Color.secondary.opacity(0.25), lineWidth: 1))
-            }
-        }
-    }
 
     private var targetPicker: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1015,167 +407,6 @@ struct ProfilesView: View {
         return d.serialNumber ?? String(d.id.prefix(8))
     }
 
-    private var formValid: Bool {
-        switch template {
-        case .wifi: return !ssid.trimmingCharacters(in: .whitespaces).isEmpty
-        case .custom: return !customXML.trimmingCharacters(in: .whitespaces).isEmpty
-        case .certificate: return certPEM.contains("BEGIN CERTIFICATE")
-        case .munki: return !munkiRepoURL.trimmingCharacters(in: .whitespaces).isEmpty
-        case .dns: return !dnsServer.trimmingCharacters(in: .whitespaces).isEmpty
-        case .singleApp: return !singleAppID.trimmingCharacters(in: .whitespaces).isEmpty
-        case .notifications: return !notifBundleID.trimmingCharacters(in: .whitespaces).isEmpty
-        case .calDAV, .cardDAV:
-            return !davDesc.trimmingCharacters(in: .whitespaces).isEmpty
-                && !davHost.trimmingCharacters(in: .whitespaces).isEmpty
-        case .associatedDomains:
-            return !assocAppID.trimmingCharacters(in: .whitespaces).isEmpty
-                && !assocDomains.trimmingCharacters(in: .whitespaces).isEmpty
-        case .platformSSO:
-            return !ssoExtensionID.trimmingCharacters(in: .whitespaces).isEmpty
-                && !ssoTeamID.trimmingCharacters(in: .whitespaces).isEmpty
-        case .mail:
-            return !mailDesc.trimmingCharacters(in: .whitespaces).isEmpty
-                && !mailAddress.trimmingCharacters(in: .whitespaces).isEmpty
-                && !mailHost.trimmingCharacters(in: .whitespaces).isEmpty
-        case .pppc:
-            return !pppcID.trimmingCharacters(in: .whitespaces).isEmpty
-                && !pppcCodeReq.trimmingCharacters(in: .whitespaces).isEmpty
-                && (pppcFDA || pppcAccessibility || pppcScreen || pppcInput)
-        default: return true
-        }
-    }
-
-    private func buildProfile() throws -> (data: Data, name: String) {
-        switch template {
-        case .fileVault:
-            return (ProfilePayloads.fileVault(deferEnable: fvDefer), "FileVault")
-        case .firewall:
-            return (ProfilePayloads.firewall(blockAllIncoming: fwBlockAll, stealthMode: fwStealth), "Firewall")
-        case .softwareUpdate:
-            return (ProfilePayloads.softwareUpdate(autoCheck: true, autoDownload: suAutoDownload,
-                                                   autoInstallOS: suAutoInstallOS,
-                                                   autoInstallSecurity: suAutoSecurity), "Software Update")
-        case .screenLock:
-            return (ProfilePayloads.screenLock(idleSeconds: slIdleMinutes * 60,
-                                               delaySeconds: slDelaySeconds), "Screen Lock")
-        case .restrictions:
-            return (ProfilePayloads.restrictions(allowEraseAllContent: rAllowErase,
-                                                 allowAirDrop: rAllowAirDrop,
-                                                 allowGameCenter: rAllowGameCenter,
-                                                 allowAppStore: rAllowAppStore), "Restrictions")
-        case .gatekeeper:
-            return (ProfilePayloads.gatekeeper(allowIdentifiedDevelopers: gkAllowDevelopers), "Gatekeeper")
-        case .loginWindow:
-            return (ProfilePayloads.loginWindow(disableGuest: lwDisableGuest,
-                                                hideAdminUsers: lwHideAdmins,
-                                                showNamePasswordFields: lwNamePasswordFields), "Login Window")
-        case .certificate:
-            return (try ProfilePayloads.rootCertificate(pem: certPEM, name: certName), "Certificate")
-        case .munki:
-            return (ProfilePayloads.munki(repoURL: munkiRepoURL.trimmingCharacters(in: .whitespaces),
-                                          clientIdentifier: munkiClientID.trimmingCharacters(in: .whitespaces)),
-                    "Munki")
-        case .timeMachine:
-            return (ProfilePayloads.timeMachine(destinationURL: tmDest.trimmingCharacters(in: .whitespaces),
-                                                autoBackup: tmAuto, allVolumes: tmAllVolumes,
-                                                skipSystemFiles: tmSkipSys), "Time Machine")
-        case .dns:
-            return (ProfilePayloads.encryptedDNS(useHTTPS: dnsHTTPS,
-                                                 server: dnsServer.trimmingCharacters(in: .whitespaces)), "Encrypted DNS")
-        case .dock:
-            return (ProfilePayloads.dock(orientation: dockOrientation, autohide: dockAutohide,
-                                         tileSize: dockTileSize, showRecents: dockRecents), "Dock")
-        case .finder:
-            return (ProfilePayloads.finder(showDrivesOnDesktop: finderShowDrives,
-                                           showAllFiles: finderShowAll,
-                                           warnOnEmptyTrash: finderWarnTrash), "Finder")
-        case .kext:
-            let teams = kextTeamIDs.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-            return (ProfilePayloads.kernelExtensions(teamIdentifiers: teams,
-                                                     allowUserOverrides: kextUserOverrides), "Kernel Extensions")
-        case .pppc:
-            var services: [String] = []
-            if pppcFDA { services.append("SystemPolicyAllFiles") }
-            if pppcAccessibility { services.append("Accessibility") }
-            if pppcScreen { services.append("ScreenCapture") }
-            if pppcInput { services.append("ListenEvent") }
-            return (ProfilePayloads.pppc(identifier: pppcID.trimmingCharacters(in: .whitespaces),
-                                         identifierType: pppcIsPath ? "path" : "bundleID",
-                                         codeRequirement: pppcCodeReq.trimmingCharacters(in: .whitespaces),
-                                         services: services, authorization: pppcAuth), "Privacy (PPPC)")
-        case .singleApp:
-            return (ProfilePayloads.singleAppMode(bundleID: singleAppID.trimmingCharacters(in: .whitespaces),
-                                                  disableAutoLock: singleDisableAutoLock,
-                                                  disableTouch: singleDisableTouch), "Single App Mode")
-        case .notifications:
-            return (ProfilePayloads.notifications(bundleID: notifBundleID.trimmingCharacters(in: .whitespaces),
-                                                  enabled: notifEnabled, alertType: notifAlertType,
-                                                  sounds: notifSounds, badges: notifBadges,
-                                                  lockScreen: notifLockScreen, notificationCenter: notifCenter,
-                                                  critical: notifCritical), "Notifications")
-        case .webFilter:
-            let allow = wfAllowed.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-            let block = wfBlocked.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-            return (ProfilePayloads.webFilter(autoFilter: wfAutoFilter, allowedURLs: allow, blockedURLs: block), "Web Content Filter")
-        case .calDAV:
-            return (ProfilePayloads.calDAV(description: davDesc.trimmingCharacters(in: .whitespaces),
-                                           host: davHost.trimmingCharacters(in: .whitespaces),
-                                           port: davPort,
-                                           principalURL: davPrincipal.trimmingCharacters(in: .whitespaces),
-                                           username: davUser.trimmingCharacters(in: .whitespaces),
-                                           useSSL: davSSL), "CalDAV: \(davDesc)")
-        case .cardDAV:
-            return (ProfilePayloads.cardDAV(description: davDesc.trimmingCharacters(in: .whitespaces),
-                                            host: davHost.trimmingCharacters(in: .whitespaces),
-                                            port: davPort,
-                                            principalURL: davPrincipal.trimmingCharacters(in: .whitespaces),
-                                            username: davUser.trimmingCharacters(in: .whitespaces),
-                                            useSSL: davSSL), "CardDAV: \(davDesc)")
-        case .associatedDomains:
-            let domains = assocDomains.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-            return (ProfilePayloads.associatedDomains(appID: assocAppID.trimmingCharacters(in: .whitespaces),
-                                                      domains: domains), "Associated Domains: \(assocAppID)")
-        case .platformSSO:
-            let urls = ssoURLs.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-            return (ProfilePayloads.platformSSO(extensionID: ssoExtensionID.trimmingCharacters(in: .whitespaces),
-                                                teamID: ssoTeamID.trimmingCharacters(in: .whitespaces),
-                                                urls: urls, authMethod: ssoAuthMethod,
-                                                useSharedDeviceKeys: ssoSharedKeys),
-                    "Platform SSO (\(ssoVendor.rawValue))")
-        case .mail:
-            return (ProfilePayloads.mail(accountDescription: mailDesc.trimmingCharacters(in: .whitespaces),
-                                         address: mailAddress.trimmingCharacters(in: .whitespaces),
-                                         host: mailHost.trimmingCharacters(in: .whitespaces),
-                                         port: mailPort, username: mailUser.trimmingCharacters(in: .whitespaces),
-                                         useSSL: mailSSL, imap: mailIMAP), "Mail: \(mailDesc)")
-        case .energy:
-            return (ProfilePayloads.energy(displaySleep: energyDisplaySleep, systemSleep: energySystemSleep,
-                                           wakeOnLAN: energyWakeOnLAN,
-                                           restartAfterPowerFailure: energyRestartAfterPower), "Energy Saver")
-        case .safari:
-            return (ProfilePayloads.safari(homepage: safariHome.trimmingCharacters(in: .whitespaces),
-                                           openWithHomepage: safariOpenHome,
-                                           disablePrivateBrowsing: safariNoPrivate), "Safari (managed)")
-        case .chrome:
-            return (ProfilePayloads.chrome(homepage: chromeHome.trimmingCharacters(in: .whitespaces),
-                                           restoreLastSession: chromeRestore,
-                                           disableIncognito: chromeNoIncognito), "Chrome (managed)")
-        case .screenTime:
-            return (ProfilePayloads.screenTime(ratingApps: stApps, ratingMovies: stMovies,
-                                               ratingTVShows: stTV, allowExplicitContent: stExplicit), "Screen Time")
-        case .wifi:
-            return (ProfilePayloads.wifi(ssid: ssid, password: wifiPassword,
-                                         hidden: wifiHidden, security: wifiSecurity),
-                    "Wi-Fi “\(ssid)”")
-        case .passcode:
-            return (ProfilePayloads.passcode(minLength: minLength,
-                                             requireAlphanumeric: requireAlphanumeric,
-                                             maxInactivityMinutes: maxInactivity == 0 ? nil : maxInactivity),
-                    "Password Policy")
-        case .custom:
-            return (try ProfilePayloads.custom(xml: customXML), "Custom profile")
-        }
-    }
 
     /// Accept a dropped .mobileconfig: load its XML into the Custom
     /// template so it can be reviewed and deployed.
@@ -1184,7 +415,7 @@ struct ProfilesView: View {
         _ = provider.loadObject(ofClass: URL.self) { url, _ in
             guard let url, let text = try? String(contentsOf: url, encoding: .utf8) else { return }
             DispatchQueue.main.async {
-                customXML = text
+                form.customXML = text
                 template = .custom
                 result = "Loaded \(url.lastPathComponent) — review and deploy."
             }
@@ -1216,7 +447,7 @@ struct ProfilesView: View {
     @MainActor
     private func deployBuilt() async {
         let built: (data: Data, name: String)
-        do { built = try buildProfile() }
+        do { built = try form.build(for: template) }
         catch { result = "Couldn't build profile: \(error.localizedDescription)"; return }
         await deploy(data: built.data, name: built.name)
     }
@@ -1225,7 +456,7 @@ struct ProfilesView: View {
     @MainActor
     private func attemptDeployBuilt() async {
         let built: (data: Data, name: String)
-        do { built = try buildProfile() }
+        do { built = try form.build(for: template) }
         catch { result = "Couldn't build profile: \(error.localizedDescription)"; return }
         await attemptDeploy(data: built.data, name: built.name)
     }
@@ -1353,7 +584,7 @@ struct ProfilesView: View {
     private func saveCurrent() {
         showingSaveSheet = false
         let built: (data: Data, name: String)
-        do { built = try buildProfile() } catch { result = "Couldn't build: \(error.localizedDescription)"; return }
+        do { built = try form.build(for: template) } catch { result = "Couldn't build: \(error.localizedDescription)"; return }
         let desc = SavedProfilesStore.describe(built.data, fallbackName: saveName)
         let sp = SavedProfile(name: saveName.trimmingCharacters(in: .whitespaces),
                               data: built.data, favorite: saveFavorite, summary: desc.summary)
