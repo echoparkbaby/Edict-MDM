@@ -104,6 +104,9 @@ struct GroupDashboardView: View {
     }
     @State private var category: Category = .devices
     @State private var tableSearch = ""
+    /// Which Mac the category tables (Apps, Local Users, …) are scoped to.
+    /// nil = all Macs, rolled up; a value = just that machine's rows.
+    @State private var inventoryDeviceID: String?
     @State private var enablingAll = false
     @State private var editingGroup: SmartGroup?
     @State private var pushCert: PushCertInfo?
@@ -121,6 +124,7 @@ struct GroupDashboardView: View {
         .task { await refresh() }
         .onChange(of: settings.mdmRequireFileVault) { _, _ in rebuildFacts() }
         .onChange(of: settings.mdmMinOSVersion) { _, _ in rebuildFacts() }
+        .onChange(of: selectedGroupID) { _, _ in inventoryDeviceID = nil }
     }
 
     // MARK: - Membership / facts
@@ -286,9 +290,9 @@ struct GroupDashboardView: View {
             case .drift:
                 ScrollView { driftCard.padding(18) }
             case .apps:
-                inventoryTable(columns: [("Device", 180), ("Application", 320), ("Version", 110), ("Status", 110)], rows: appRows)
+                inventoryTable(columns: appColumns, rows: appRows)
             case .users:
-                inventoryTable(columns: [("Device", 180), ("User", 150), ("Admin", 70), ("Last login", 140)], rows: userRows)
+                inventoryTable(columns: userColumns, rows: userRows)
             case .storage:
                 inventoryTable(columns: [("Device", 180), ("Free", 100), ("Total", 100), ("Encrypted", 100), ("SMART", 90)], rows: storageRows)
             case .updates:
@@ -305,8 +309,15 @@ struct GroupDashboardView: View {
 
     private func attentionScore(_ d: MDMEnrollment) -> (score: Int, issues: [String]) { df.attentionScore(d) }
 
+    /// The Macs the category tables show: all in scope, or the one the
+    /// operator picked from the table's Mac menu.
+    private var inventoryScope: [MDMEnrollment] {
+        guard let id = inventoryDeviceID else { return scoped }
+        return scoped.filter { $0.id == id }
+    }
+
     private var attentionRows: [(id: String, cells: [String])] {
-        scoped.compactMap { d -> (id: String, cells: [String])? in
+        inventoryScope.compactMap { d -> (id: String, cells: [String])? in
             let r = attentionScore(d)
             guard r.score > 0 else { return nil }
             return (id: d.id, cells: [label(for: d), r.issues.joined(separator: " · "), "\(r.score)"])
@@ -319,35 +330,76 @@ struct GroupDashboardView: View {
         return mrInventory.bySerial[s]
     }
 
+    // Apps / Local Users drop the per-machine "Device" column: the Mac menu
+    // already says which machine you're looking at, and the rolled-up "All
+    // Macs" view counts machines instead of listing one row each.
+    private var appColumns: [(String, CGFloat)] {
+        inventoryDeviceID == nil
+            ? [("Application", 340), ("Version", 120), ("On Macs", 110)]
+            : [("Application", 340), ("Version", 120), ("Status", 120)]
+    }
+    private var userColumns: [(String, CGFloat)] {
+        inventoryDeviceID == nil
+            ? [("User", 180), ("Admin", 150), ("On Macs", 90)]
+            : [("User", 180), ("Admin", 90), ("Last login", 150)]
+    }
+
     private var appRows: [(id: String, cells: [String])] {
-        var out: [(id: String, cells: [String])] = []
+        if let id = inventoryDeviceID {
+            // One Mac: its installed apps.
+            guard let d = scoped.first(where: { $0.id == id }),
+                  let apps = mr(for: d)?.managed_installs else { return [] }
+            return apps.filter(\.installed).map { a in
+                (id: "\(id)|\(a.id)", cells: [a.display_name ?? a.name ?? "?", a.version ?? "—", a.status ?? "installed"])
+            }.sorted { $0.cells[0].localizedCaseInsensitiveCompare($1.cells[0]) == .orderedAscending }
+        }
+        // All Macs: one row per app, with how many Macs have it.
+        var byApp: [String: (versions: Set<String>, devices: Set<String>)] = [:]
         for d in scoped {
             guard let apps = mr(for: d)?.managed_installs else { continue }
-            let name = label(for: d)
             for a in apps where a.installed {
-                out.append((id: "\(d.id)|\(a.id)",
-                            cells: [name, a.display_name ?? a.name ?? "?", a.version ?? "—", a.status ?? "installed"]))
+                let name = a.display_name ?? a.name ?? "?"
+                var e = byApp[name] ?? (versions: [], devices: [])
+                e.versions.insert(a.version ?? "—")
+                e.devices.insert(d.id)
+                byApp[name] = e
             }
         }
-        return out.sorted { $0.cells[1].localizedCaseInsensitiveCompare($1.cells[1]) == .orderedAscending }
+        let total = scoped.count
+        return byApp.map { name, e in
+            let version = e.versions.count == 1 ? (e.versions.first ?? "—") : "varies"
+            return (id: name, cells: [name, version, "\(e.devices.count) of \(total)"])
+        }.sorted { $0.cells[0].localizedCaseInsensitiveCompare($1.cells[0]) == .orderedAscending }
     }
 
     private var userRows: [(id: String, cells: [String])] {
-        var out: [(id: String, cells: [String])] = []
+        if let id = inventoryDeviceID {
+            // One Mac: its local accounts.
+            guard let d = scoped.first(where: { $0.id == id }),
+                  let users = mr(for: d)?.users else { return [] }
+            return users.map { u in
+                let last = u.lastLoginDate.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—"
+                return (id: "\(id)|\(u.id)", cells: [u.shortName, (u.admin?.isOn == true) ? "Admin" : "", last])
+            }.sorted { $0.cells[0].localizedCaseInsensitiveCompare($1.cells[0]) == .orderedAscending }
+        }
+        // All Macs: one row per username, with admin + machine counts.
+        var byUser: [String: (adminOn: Int, devices: Set<String>)] = [:]
         for d in scoped {
             guard let users = mr(for: d)?.users else { continue }
-            let name = label(for: d)
             for u in users {
-                let last = u.lastLoginDate.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—"
-                out.append((id: "\(d.id)|\(u.id)",
-                            cells: [name, u.shortName, (u.admin?.isOn == true) ? "Admin" : "", last]))
+                var e = byUser[u.shortName] ?? (adminOn: 0, devices: [])
+                e.devices.insert(d.id)
+                if u.admin?.isOn == true { e.adminOn += 1 }
+                byUser[u.shortName] = e
             }
         }
-        return out.sorted { $0.cells[0].localizedCaseInsensitiveCompare($1.cells[0]) == .orderedAscending }
+        return byUser.map { name, e in
+            (id: name, cells: [name, e.adminOn > 0 ? "Admin on \(e.adminOn)" : "—", "\(e.devices.count)"])
+        }.sorted { $0.cells[0].localizedCaseInsensitiveCompare($1.cells[0]) == .orderedAscending }
     }
 
     private var storageRows: [(id: String, cells: [String])] {
-        scoped.compactMap { d in
+        inventoryScope.compactMap { d in
             guard let disk = mr(for: d)?.disk_report else { return nil }
             return (id: d.id, cells: [label(for: d),
                                       disk.freeString ?? "—", disk.totalString ?? "—",
@@ -357,7 +409,7 @@ struct GroupDashboardView: View {
     }
 
     private var updateRows: [(id: String, cells: [String])] {
-        scoped.compactMap { d in
+        inventoryScope.compactMap { d in
             guard let su = mr(for: d)?.software_updates else { return nil }
             let pending = su.recommendedupdates?.value.map(String.init) ?? "—"
             return (id: d.id, cells: [label(for: d), pending, su.lastsuccessfuldate ?? "—"])
@@ -380,6 +432,14 @@ struct GroupDashboardView: View {
                 Text(category.rawValue).font(.title3.bold())
                 Text("\(filtered.count)").font(.callout).foregroundStyle(.secondary)
                 Spacer()
+                Picker("", selection: $inventoryDeviceID) {
+                    Text("All Macs").tag(String?.none)
+                    ForEach(scoped, id: \.id) { d in
+                        Text(label(for: d)).tag(String?.some(d.id))
+                    }
+                }
+                .labelsHidden().frame(maxWidth: 190)
+                .help("Roll up every Mac, or narrow to just one")
                 Button {
                     TableCSVExport.save(filename: "\(category.rawValue).csv", columns: columns.map(\.0), rows: filtered.map(\.cells))
                 } label: { Image(systemName: "square.and.arrow.up") }
