@@ -135,6 +135,9 @@ struct ContentView: View {
     /// Customizable like the other row icons; defaults to the gavel.
     @AppStorage("mdmDeployRowIconSymbol") private var mdmDeployIcon = "hammer.fill"
 
+    /// Pending profile deploy awaiting the "what's about to change" confirm.
+    @State private var pendingProfileDeploy: PendingProfileDeploy?
+
     private func computeFilteredAndSorted() -> [BlueSkyHost] {
         var result = hostStore.hosts
         // Merge in Macs that are MDM-enrolled but not in BlueSky, so the
@@ -319,42 +322,61 @@ struct ContentView: View {
     }
 
     private func bulkMDMDeploy(_ p: SavedProfile, to hosts: [BlueSkyHost]) {
-        let targets = enrollmentIDs(hosts)
-        Task {
-            let nano = NanoMDMService(settings: settings)
-            var delivered: [String] = []
-            for t in targets {
-                if (try? await nano.installProfile(enrollmentID: t.id, profile: p.data)) != nil {
-                    _ = try? await nano.push(enrollmentIDs: t.id)
-                    delivered.append(t.id)
-                }
-            }
-            // Only record the Macs the install actually reached, so drift
-            // history and diffs aren't poisoned by failed targets.
-            if !delivered.isEmpty {
-                DeploymentLog.record(profileData: p.data, name: p.name, to: delivered,
-                                     nowEpoch: Date().timeIntervalSince1970)
-            }
-            let failed = targets.count - delivered.count
-            activity.record(.category, title: "Deployed \(p.name)",
-                            detail: "\(delivered.count) Mac\(delivered.count == 1 ? "" : "s")" + (failed > 0 ? ", \(failed) failed" : ""))
-        }
+        let ids = enrollmentIDs(hosts).map(\.id)
+        attemptProfileDeploy(p.data, name: p.name, to: ids,
+                             label: "\(ids.count) Mac\(ids.count == 1 ? "" : "s")")
     }
 
     /// Deploy a saved configuration profile to the Mac via MDM, from the
     /// gavel row button.
     private func deployProfileFromRow(_ p: SavedProfile, to h: BlueSkyHost, enrollmentID: String) {
-        Task {
-            do {
-                let nano = NanoMDMService(settings: settings)
-                _ = try await nano.installProfile(enrollmentID: enrollmentID, profile: p.data)
-                _ = try? await nano.push(enrollmentIDs: enrollmentID)
-                DeploymentLog.record(profileData: p.data, name: p.name, to: [enrollmentID],
-                                     nowEpoch: Date().timeIntervalSince1970)
-                activity.record(.category, title: "Deployed \(p.name)", detail: h.displayName)
-            } catch {
-                alert = .result(title: "Deploy failed", message: error.localizedDescription)
+        attemptProfileDeploy(p.data, name: p.name, to: [enrollmentID], label: h.displayName)
+    }
+
+    /// If the target Macs already have a profile with this identifier (per
+    /// the deployment log), show the diff first; otherwise deploy straight
+    /// away. Shared by the gavel row button and bulk deploy so they get the
+    /// same "what's about to change" confirmation as the Profiles tab.
+    private func attemptProfileDeploy(_ data: Data, name: String, to ids: [String], label: String) {
+        guard !ids.isEmpty else { return }
+        if let newID = DeploymentLog.payloadIdentifier(data) {
+            let log = DeploymentLog.load()
+            var newest: DeploymentLog.Entry?
+            for id in ids {
+                if let prior = (log[id] ?? []).first(where: { $0.identifier == newID }) {
+                    if newest == nil || prior.epoch > newest!.epoch { newest = prior }
+                }
             }
+            if let newest, !newest.dataBase64.isEmpty {
+                let changes = ProfileDiff.compare(old: newest.data, new: data)
+                if !changes.isEmpty {
+                    pendingProfileDeploy = PendingProfileDeploy(data: data, name: name,
+                                                               enrollmentIDs: ids, label: label, changes: changes)
+                    return
+                }
+            }
+        }
+        commitProfileDeploy(data: data, name: name, to: ids, label: label)
+    }
+
+    /// The actual install + push, recording only the Macs it reached.
+    private func commitProfileDeploy(data: Data, name: String, to ids: [String], label: String) {
+        Task {
+            let nano = NanoMDMService(settings: settings)
+            var delivered: [String] = []
+            for id in ids {
+                if (try? await nano.installProfile(enrollmentID: id, profile: data)) != nil {
+                    _ = try? await nano.push(enrollmentIDs: id)
+                    delivered.append(id)
+                }
+            }
+            if !delivered.isEmpty {
+                DeploymentLog.record(profileData: data, name: name, to: delivered,
+                                     nowEpoch: Date().timeIntervalSince1970)
+            }
+            let failed = ids.count - delivered.count
+            activity.record(.category, title: "Deployed \(name)",
+                            detail: "\(delivered.count) Mac\(delivered.count == 1 ? "" : "s")" + (failed > 0 ? ", \(failed) failed" : ""))
         }
     }
 
@@ -434,6 +456,10 @@ struct ContentView: View {
                 summary: $legacyImportSummary,
                 onImport: runLegacyImport,
                 onSkip: { LegacyMigration.markDone() }
+            ))
+            .modifier(ProfileDeployDiffPresenter(
+                pending: $pendingProfileDeploy,
+                onConfirm: { p in commitProfileDeploy(data: p.data, name: p.name, to: p.enrollmentIDs, label: p.label) }
             ))
             .environment(mdmFleet)
             .onChange(of: mdmFleet.version) { _, _ in filteredAndSorted = computeFilteredAndSorted() }
@@ -2478,5 +2504,83 @@ private struct LegacyImportAlerts: ViewModifier {
             } message: {
                 Text(summary ?? "")
             }
+    }
+}
+
+/// A pending profile deploy awaiting confirmation, with the diff vs the
+/// last bytes Edict sent to the target(s).
+private struct PendingProfileDeploy: Identifiable {
+    let id = UUID()
+    let data: Data
+    let name: String
+    let enrollmentIDs: [String]
+    let label: String
+    let changes: [ProfileDiff.Change]
+}
+
+/// Presents the deploy-diff sheet, kept as a modifier so ContentView's
+/// body stays inside the type-checker's budget.
+private struct ProfileDeployDiffPresenter: ViewModifier {
+    @Binding var pending: PendingProfileDeploy?
+    let onConfirm: (PendingProfileDeploy) -> Void
+
+    func body(content: Content) -> some View {
+        content.sheet(item: $pending) { p in
+            ProfileDeployDiffSheet(pending: p,
+                                   onConfirm: { onConfirm(p); pending = nil },
+                                   onCancel: { pending = nil })
+        }
+    }
+}
+
+/// "What's about to change" before re-deploying a profile from the table —
+/// same idea as the Profiles tab's diff sheet.
+private struct ProfileDeployDiffSheet: View {
+    let pending: PendingProfileDeploy
+    let onConfirm: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.triangle.2.circlepath").foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Replacing “\(pending.name)”").font(.headline)
+                    Text("\(pending.label) already \(pending.enrollmentIDs.count == 1 ? "has" : "have") this profile. \(pending.changes.count) change\(pending.changes.count == 1 ? "" : "s") versus what Edict last sent:")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(pending.changes) { c in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text(c.kind.rawValue).font(.caption2.bold())
+                                .foregroundStyle(c.kind == .added ? .green : (c.kind == .removed ? .red : .orange))
+                                .frame(width: 56, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(c.path).font(.caption.bold())
+                                switch c.kind {
+                                case .changed: Text("\(c.before ?? "—")  →  \(c.after ?? "—")").font(.caption2.monospaced()).foregroundStyle(.secondary)
+                                case .added: Text(c.after ?? "—").font(.caption2.monospaced()).foregroundStyle(.green)
+                                case .removed: Text(c.before ?? "—").font(.caption2.monospaced()).foregroundStyle(.red)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 2)
+                        Divider()
+                    }
+                }
+            }
+            .frame(maxHeight: 280)
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.2), lineWidth: 1))
+            HStack {
+                Spacer()
+                Button("Cancel") { onCancel() }.keyboardShortcut(.cancelAction)
+                Button("Deploy anyway") { onConfirm() }
+                    .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(20).frame(width: 460)
     }
 }
