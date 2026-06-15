@@ -107,6 +107,8 @@ struct GroupDashboardView: View {
     /// Which Mac the category tables (Apps, Local Users, …) are scoped to.
     /// nil = all Macs, rolled up; a value = just that machine's rows.
     @State private var inventoryDeviceID: String?
+    /// A rolled-up Apps / Local Users row expanded to show which Macs it's on.
+    @State private var expandedInventoryRow: String?
     @State private var enablingAll = false
     @State private var editingGroup: SmartGroup?
     @State private var pushCert: PushCertInfo?
@@ -124,7 +126,9 @@ struct GroupDashboardView: View {
         .task { await refresh() }
         .onChange(of: settings.mdmRequireFileVault) { _, _ in rebuildFacts() }
         .onChange(of: settings.mdmMinOSVersion) { _, _ in rebuildFacts() }
-        .onChange(of: selectedGroupID) { _, _ in inventoryDeviceID = nil }
+        .onChange(of: selectedGroupID) { _, _ in inventoryDeviceID = nil; expandedInventoryRow = nil }
+        .onChange(of: category) { _, _ in expandedInventoryRow = nil }
+        .onChange(of: inventoryDeviceID) { _, _ in expandedInventoryRow = nil }
     }
 
     // MARK: - Membership / facts
@@ -290,9 +294,11 @@ struct GroupDashboardView: View {
             case .drift:
                 ScrollView { driftCard.padding(18) }
             case .apps:
-                inventoryTable(columns: appColumns, rows: appRows)
+                inventoryTable(columns: appColumns, rows: appRows,
+                               drillDevices: inventoryDeviceID == nil ? { macsWithApp($0) } : nil)
             case .users:
-                inventoryTable(columns: userColumns, rows: userRows)
+                inventoryTable(columns: userColumns, rows: userRows,
+                               drillDevices: inventoryDeviceID == nil ? { macsWithUser($0) } : nil)
             case .storage:
                 inventoryTable(columns: [("Device", 180), ("Free", 100), ("Total", 100), ("Encrypted", 100), ("SMART", 90)], rows: storageRows)
             case .updates:
@@ -398,6 +404,24 @@ struct GroupDashboardView: View {
         }.sorted { $0.cells[0].localizedCaseInsensitiveCompare($1.cells[0]) == .orderedAscending }
     }
 
+    /// Which Macs (by label) have a given app installed — for the rolled-up
+    /// Apps row's drill-down.
+    private func macsWithApp(_ appName: String) -> [String] {
+        scoped.compactMap { d in
+            guard let apps = mr(for: d)?.managed_installs else { return nil }
+            return apps.contains { $0.installed && ($0.display_name ?? $0.name ?? "?") == appName } ? label(for: d) : nil
+        }.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    /// Which Macs (by label) have a given local account — for the rolled-up
+    /// Local Users row's drill-down.
+    private func macsWithUser(_ shortName: String) -> [String] {
+        scoped.compactMap { d in
+            guard let users = mr(for: d)?.users else { return nil }
+            return users.contains { $0.shortName == shortName } ? label(for: d) : nil
+        }.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
     private var storageRows: [(id: String, cells: [String])] {
         inventoryScope.compactMap { d in
             guard let disk = mr(for: d)?.disk_report else { return nil }
@@ -425,7 +449,8 @@ struct GroupDashboardView: View {
     /// Generic Kandji-style category table: a toolbar with title + filter,
     /// then a horizontally-scrolling sortable-width table. Column width 0
     /// means "flexible".
-    private func inventoryTable(columns: [(String, CGFloat)], rows: [(id: String, cells: [String])]) -> some View {
+    private func inventoryTable(columns: [(String, CGFloat)], rows: [(id: String, cells: [String])],
+                                drillDevices: ((String) -> [String])? = nil) -> some View {
         let filtered = filteredRows(rows)
         return VStack(spacing: 0) {
             HStack(spacing: 8) {
@@ -466,6 +491,8 @@ struct GroupDashboardView: View {
                 // instead of inflating one column and leaving an interior gap.
                 VStack(spacing: 0) {
                     HStack(spacing: 12) {
+                        // Keep header aligned with the rows' disclosure chevron.
+                        if drillDevices != nil { Color.clear.frame(width: 12, height: 1) }
                         ForEach(columns.indices, id: \.self) { i in invCell(columns[i].0, columns[i].1, header: true) }
                         Spacer(minLength: 0)
                     }
@@ -475,13 +502,7 @@ struct GroupDashboardView: View {
                     ScrollView(.vertical, showsIndicators: true) {
                         LazyVStack(spacing: 0) {
                             ForEach(filtered, id: \.id) { row in
-                                HStack(spacing: 12) {
-                                    ForEach(columns.indices, id: \.self) { i in
-                                        invCell(i < row.cells.count ? row.cells[i] : "", columns[i].1, header: false, first: i == 0)
-                                    }
-                                    Spacer(minLength: 0)
-                                }
-                                .padding(.horizontal, 18).padding(.vertical, 5)
+                                inventoryRow(row, columns: columns, drillDevices: drillDevices)
                                 Divider().opacity(0.4)
                             }
                         }
@@ -490,6 +511,45 @@ struct GroupDashboardView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// One category-table row. When `drillDevices` is supplied (rolled-up
+    /// Apps / Local Users), the row is tappable to reveal which Macs it's on.
+    @ViewBuilder
+    private func inventoryRow(_ row: (id: String, cells: [String]), columns: [(String, CGFloat)],
+                             drillDevices: ((String) -> [String])?) -> some View {
+        let expandable = drillDevices != nil
+        let isOpen = expandedInventoryRow == row.id
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                if expandable {
+                    Image(systemName: isOpen ? "chevron.down" : "chevron.right")
+                        .font(.caption2).foregroundStyle(.secondary).frame(width: 12)
+                }
+                ForEach(columns.indices, id: \.self) { i in
+                    invCell(i < row.cells.count ? row.cells[i] : "", columns[i].1, header: false, first: i == 0)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 18).padding(.vertical, 5)
+            .contentShape(Rectangle())
+            .onTapGesture { if expandable { expandedInventoryRow = isOpen ? nil : row.id } }
+            .accessibilityAddTraits(expandable ? .isButton : [])
+            if isOpen, let drillDevices {
+                let macs = drillDevices(row.id)
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(macs, id: \.self) { m in
+                        HStack(spacing: 6) {
+                            Image(systemName: "laptopcomputer").font(.caption2).foregroundStyle(.secondary)
+                            Text(m).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .padding(.leading, 48).padding(.trailing, 18).padding(.vertical, 5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.accentColor.opacity(0.05))
+            }
+        }
     }
 
     @ViewBuilder
