@@ -38,9 +38,10 @@
  *        — full inventory for one machine: machine row, reportdata,
  *          munkireport status, FileVault, disk, power, comment,
  *          managed installs, network interfaces, pending software
- *          updates, installed profiles, time-machine status. Sections
- *          come back null/[] when the corresponding MR module isn't
- *          installed (safe degradation).
+ *          updates, installed profiles, time-machine status, and
+ *          firewall + gatekeeper security posture. Sections come back
+ *          null/[] when the corresponding MR module isn't installed
+ *          (safe degradation).
  *   GET  blueconnect_api.php?action=ping
  *        — auth-only check; returns {"ok": true} when the token is valid.
  *
@@ -321,6 +322,18 @@ if ($action === 'host') {
         // fallback (that table never existed; the old `??` chain just hid
         // real SQL errors as a missing module).
         'timemachine'      => safe_fetch_one($pdo, "SELECT * FROM timemachine WHERE serial_number = :s",
+                                             [':s' => $serial]),
+
+        // Security posture for the dashboard's Application Firewall +
+        // Gatekeeper categories. SELECT * (like wifi/munkireport above) so
+        // column-set drift between MR versions, or a module that isn't
+        // installed, degrades to null instead of erroring — the Swift
+        // models read only the columns they know (global_state /
+        // stealth_enabled / logging_enabled; gatekeeper / assessments /
+        // version) and ignore the rest.
+        'firewall'         => safe_fetch_one($pdo, "SELECT * FROM firewall WHERE serial_number = :s",
+                                             [':s' => $serial]),
+        'gatekeeper'       => safe_fetch_one($pdo, "SELECT * FROM gatekeeper WHERE serial_number = :s",
                                              [':s' => $serial]),
     ];
     echo json_encode($out, JSON_UNESCAPED_SLASHES);

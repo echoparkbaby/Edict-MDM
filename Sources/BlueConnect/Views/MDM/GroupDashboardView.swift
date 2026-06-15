@@ -49,9 +49,7 @@ struct GroupDashboardView: View {
 
     // Prism explorer: category rail + sortable device table. Mirrors
     // Kandji Prism's category list — each is a fleet-wide view of one
-    // data domain. Data-backed categories pull from MunkiReport + MDM;
-    // the rest are placeholders until that MunkiReport module is wired
-    // into the blueconnect_api.php endpoint.
+    // data domain, pulled from MunkiReport (via blueconnect_api.php) + MDM.
     enum Category: String, CaseIterable, Identifiable {
         case summary = "Summary"
         case attention = "Needs Attention"
@@ -63,12 +61,8 @@ struct GroupDashboardView: View {
         case storage = "Storage"
         case updates = "Software Updates"
         case drift = "Drift"
-        // Not yet collected — need the matching MunkiReport module.
-        case activationLock = "Activation Lock"
         case appFirewall = "Application Firewall"
         case gatekeeper = "Gatekeeper & XProtect"
-        case certificates = "Certificates"
-        case kernelExtensions = "Kernel Extensions"
 
         var id: String { rawValue }
         var icon: String {
@@ -83,22 +77,8 @@ struct GroupDashboardView: View {
             case .storage: return "internaldrive"
             case .updates: return "arrow.down.circle"
             case .drift: return "arrow.triangle.2.circlepath"
-            case .activationLock: return "lock.circle"
             case .appFirewall: return "firewall"
             case .gatekeeper: return "checkmark.shield"
-            case .certificates: return "seal"
-            case .kernelExtensions: return "puzzlepiece.extension"
-            }
-        }
-        /// The MunkiReport module this category needs (nil = already wired).
-        var pendingModule: String? {
-            switch self {
-            case .activationLock: return "activation_lock / device info"
-            case .appFirewall: return "firewall"
-            case .gatekeeper: return "gatekeeper"
-            case .certificates: return "certificate"
-            case .kernelExtensions: return "kernel_panic / kext"
-            default: return nil
             }
         }
     }
@@ -305,8 +285,10 @@ struct GroupDashboardView: View {
                 inventoryTable(columns: [("Device", 180), ("Pending", 90), ("Last check", 170)], rows: updateRows)
             case .attention:
                 inventoryTable(columns: [("Device", 180), ("Issues", 400), ("Score", 64)], rows: attentionRows)
-            case .activationLock, .appFirewall, .gatekeeper, .certificates, .kernelExtensions:
-                notCollected(category)
+            case .appFirewall:
+                inventoryTable(columns: [("Device", 180), ("State", 150), ("Stealth", 90), ("Logging", 90)], rows: firewallRows)
+            case .gatekeeper:
+                inventoryTable(columns: [("Device", 180), ("Gatekeeper", 110), ("Assessments", 120), ("Version", 110)], rows: gatekeeperRows)
             }
         }
     }
@@ -440,6 +422,20 @@ struct GroupDashboardView: View {
         }
     }
 
+    private var firewallRows: [(id: String, cells: [String])] {
+        inventoryScope.compactMap { d in
+            guard let fw = mr(for: d)?.firewall else { return nil }
+            return (id: d.id, cells: [label(for: d), fw.stateText, fw.stealthText, fw.loggingText])
+        }
+    }
+
+    private var gatekeeperRows: [(id: String, cells: [String])] {
+        inventoryScope.compactMap { d in
+            guard let gk = mr(for: d)?.gatekeeper else { return nil }
+            return (id: d.id, cells: [label(for: d), gk.enabledText, gk.assessmentsText, gk.version ?? "—"])
+        }
+    }
+
     private func filteredRows(_ rows: [(id: String, cells: [String])]) -> [(id: String, cells: [String])] {
         let q = tableSearch.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return rows }
@@ -560,16 +556,6 @@ struct GroupDashboardView: View {
             .lineLimit(1).truncationMode(.tail)
         if width == 0 { view.frame(maxWidth: .infinity, alignment: .leading) }
         else { view.frame(width: width, alignment: .leading) }
-    }
-
-    private func notCollected(_ c: Category) -> some View {
-        VStack(spacing: 10) {
-            Image(systemName: c.icon).font(.system(size: 34)).foregroundStyle(.secondary)
-            Text("\(c.rawValue) — not collected yet").font(.headline)
-            Text("This view needs the MunkiReport “\(c.pendingModule ?? "?")” module surfaced through the blueconnect_api.php endpoint. Wire that module in and it fills in fleet-wide like Apps and Storage do.")
-                .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 440)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Prism (saved, configurable views)

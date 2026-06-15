@@ -167,6 +167,44 @@ struct MRHostInventory: Codable, Hashable {
     let software_updates: MRSoftwareUpdateStatus?
     let profiles: [MRProfile]?
     let timemachine: MRTimeMachine?
+    let firewall: MRFirewall?
+    let gatekeeper: MRGatekeeper?
+}
+
+/// `firewall` module — the macOS Application Layer Firewall state. All
+/// fields optional so a host that hasn't reported (or an MR without the
+/// firewall module) decodes cleanly to nil.
+struct MRFirewall: Codable, Hashable {
+    let global_state: Int?       // 0 off, 1 on, 2 block all incoming
+    let stealth_enabled: Int?
+    let logging_enabled: Int?
+
+    var stateText: String {
+        switch global_state {
+        case 0: return "Off"
+        case 1: return "On"
+        case 2: return "Block all incoming"
+        default: return "—"
+        }
+    }
+    var stealthText: String { Self.onOff(stealth_enabled) }
+    var loggingText: String { Self.onOff(logging_enabled) }
+    private static func onOff(_ v: Int?) -> String {
+        switch v { case 1: return "On"; case 0: return "Off"; default: return "—" }
+    }
+}
+
+/// `gatekeeper` module — Gatekeeper assessment state + version.
+struct MRGatekeeper: Codable, Hashable {
+    let gatekeeper: Int?         // 1 = enabled
+    let assessments: Int?        // 1 = assessments enabled
+    let version: String?
+
+    var enabledText: String { Self.onOff(gatekeeper) }
+    var assessmentsText: String { Self.onOff(assessments) }
+    private static func onOff(_ v: Int?) -> String {
+        switch v { case 1: return "On"; case 0: return "Off"; default: return "—" }
+    }
 }
 
 /// `machine` table — the core inventory facts MR always has. Column
