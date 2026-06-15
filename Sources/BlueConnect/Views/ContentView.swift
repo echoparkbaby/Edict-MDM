@@ -1316,6 +1316,7 @@ struct ContentView: View {
                         .disabled(entry == nil)
                         .help(entry != nil ? "Deploy a configuration profile to this Mac (MDM)"
                                            : "Not enrolled in MDM")
+                        .accessibilityLabel("MDM actions")
                     }
                     // Group 2 → Group 3 boundary: separates file /
                     // install from communication / automation

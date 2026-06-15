@@ -43,6 +43,9 @@ struct GroupDashboardView: View {
     /// enrollmentID → count of profiles Edict deployed (for the profile
     /// attribute), loaded alongside the facts.
     @State private var deploymentCounts: [String: Int] = [:]
+    /// Cached deployment log (enrollmentID → entries) loaded on refresh, so
+    /// the profile-assignments matrix doesn't read the JSON file every render.
+    @State private var deploymentLog: [String: [DeploymentLog.Entry]] = [:]
     @State private var showSaveView = false
     @State private var saveViewName = ""
 
@@ -424,12 +427,11 @@ struct GroupDashboardView: View {
 
     private var userRows: [(id: String, cells: [String])] {
         var out: [(id: String, cells: [String])] = []
-        let f = DateFormatter(); f.dateStyle = .short
         for d in scoped {
             guard let users = mr(for: d)?.users else { continue }
             let name = label(for: d)
             for u in users {
-                let last = u.lastLoginDate.map { f.string(from: $0) } ?? "—"
+                let last = u.lastLoginDate.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—"
                 out.append((id: "\(d.id)|\(u.id)",
                             cells: [name, u.shortName, (u.admin?.isOn == true) ? "Admin" : "", last]))
             }
@@ -475,6 +477,7 @@ struct GroupDashboardView: View {
                     exportCSV(filename: "\(category.rawValue).csv", columns: columns.map(\.0), rows: filtered.map(\.cells))
                 } label: { Image(systemName: "square.and.arrow.up") }
                 .help("Export this view as CSV").disabled(filtered.isEmpty)
+                .accessibilityLabel("Export this view as CSV")
                 HStack(spacing: 5) {
                     Image(systemName: "magnifyingglass").font(.caption).foregroundStyle(.secondary)
                     TextField("Filter", text: $tableSearch).textFieldStyle(.plain).frame(width: 150)
@@ -564,8 +567,10 @@ struct GroupDashboardView: View {
                 } label: { Image(systemName: "slider.horizontal.3") }
                 .menuStyle(.borderlessButton).fixedSize()
                 .help("Show / hide columns")
+                .accessibilityLabel("Show or hide columns")
                 Button { exportDeviceTableCSV(security: security) } label: { Image(systemName: "square.and.arrow.up") }
                     .help("Export this view as CSV")
+                    .accessibilityLabel("Export this view as CSV")
                 HStack(spacing: 5) {
                     Image(systemName: "sparkle.magnifyingglass").font(.caption).foregroundStyle(.secondary)
                     TextField("Search — e.g. “Sonoma FileVault off”", text: $tableSearch).textFieldStyle(.plain).frame(width: 230)
@@ -688,6 +693,9 @@ struct GroupDashboardView: View {
         .contentShape(Rectangle())
         .onTapGesture { selection = [hostID(for: d)] }
         .onHover { hoveredRow = $0 ? d.id : (hoveredRow == d.id ? nil : hoveredRow) }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityLabel(label(for: d))
     }
 
     // MARK: - Table cells
@@ -777,6 +785,7 @@ struct GroupDashboardView: View {
                         if isActive {
                             Button { deleteView(v) } label: { Image(systemName: "xmark.circle.fill").font(.caption2) }
                                 .buttonStyle(.plain).foregroundStyle(.secondary)
+                                .accessibilityLabel("Delete saved view “\(v.name)”")
                         }
                     }
                     .padding(.horizontal, 10).padding(.vertical, 5)
@@ -966,6 +975,7 @@ struct GroupDashboardView: View {
             } label: { Image(systemName: "person.2.badge.gearshape") }
             .menuStyle(.borderlessButton).fixedSize()
             .help("Manage smart groups")
+            .accessibilityLabel("Manage smart groups")
             if let cert = pushCert, let days = cert.daysLeft {
                 Label("\(days)d", systemImage: "key.horizontal")
                     .font(.caption).foregroundStyle(days < 30 ? .orange : .secondary)
@@ -978,6 +988,7 @@ struct GroupDashboardView: View {
                 else { Image(systemName: "arrow.clockwise") }
             }
             .help("Refresh")
+            .accessibilityLabel("Refresh")
             .disabled(loading)
         }
         .sheet(item: $editingGroup) { g in
@@ -1035,6 +1046,7 @@ struct GroupDashboardView: View {
                 Spacer()
                 Button { drillKey = nil } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Close")
             }
             ForEach(drillDevices(key), id: \.id) { d in
                 HStack(spacing: 8) {
@@ -1165,7 +1177,7 @@ struct GroupDashboardView: View {
     /// glance, which Edict-deployed profiles each device is supposed to
     /// have. Columns are the distinct profile names across the scope.
     private var assignmentsCard: some View {
-        let log = DeploymentLog.load()
+        let log = deploymentLog
         let rows = scoped.compactMap { d -> (enr: MDMEnrollment, ids: Set<String>)? in
             let entries = log[d.id] ?? []
             return entries.isEmpty ? nil : (enr: d, ids: Set(entries.map(\.identifier)))
@@ -1306,6 +1318,7 @@ struct GroupDashboardView: View {
     private func refresh() async {
         savedViews = settings.prismViews
         let log = DeploymentLog.load()
+        deploymentLog = log
         deploymentCounts = log.mapValues { $0.count }
         guard settings.mdmEnabled, settings.mdmConfigured,
               !settings.mdmDevicesAPIBaseURL.trimmingCharacters(in: .whitespaces).isEmpty

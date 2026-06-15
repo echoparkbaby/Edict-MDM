@@ -10,15 +10,8 @@ struct ConnectPanel: View {
 
     /// Tab inside the single-host pane. Persists across app launches so
     /// admins who live on the Inventory tab stay there.
-    @AppStorage("connectPanelTab") private var tabRaw: String = "connect"
     private enum Tab: String { case connect, inventory, mdm }
-    private var tab: Tab {
-        get { Tab(rawValue: tabRaw) ?? .connect }
-    }
-    private var tabBinding: Binding<Tab> {
-        Binding(get: { Tab(rawValue: tabRaw) ?? .connect },
-                set: { tabRaw = $0.rawValue })
-    }
+    @AppStorage("connectPanelTab") private var tab: Tab = .connect
 
     let hosts: [BlueSkyHost]
     let onSCPNeedsFile: (BlueSkyHost) -> Void
@@ -92,7 +85,7 @@ struct ConnectPanel: View {
         return VStack(alignment: .leading, spacing: 14) {
             hostHeader(host)
             if tabs.count > 1 {
-                Picker("View", selection: tabBinding) {
+                Picker("View", selection: $tab) {
                     ForEach(tabs, id: \.self) { Text(tabLabel($0)).tag($0) }
                 }
                 .pickerStyle(.segmented)
@@ -182,31 +175,26 @@ struct ConnectPanel: View {
             // Click serial to copy. Flashes "✓ Copied" inline for ~1.2s
             // so the click registers as having done something.
             let didCopy = (justCopiedSerial == serial)
-            HStack(spacing: 4) {
-                Text(serial)
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(didCopy
-                                     ? AnyShapeStyle(Color.green)
-                                     : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
-                if didCopy {
-                    Text("· copied")
-                        .font(.caption2)
-                        .foregroundStyle(.green)
-                }
-            }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(serial, forType: .string)
-                justCopiedSerial = serial
-                Task {
-                    try? await Task.sleep(nanoseconds: 1_200_000_000)
-                    await MainActor.run {
-                        if justCopiedSerial == serial { justCopiedSerial = nil }
+            Button {
+                copySerial(serial)
+            } label: {
+                HStack(spacing: 4) {
+                    Text(serial)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(didCopy
+                                         ? AnyShapeStyle(Color.green)
+                                         : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
+                    if didCopy {
+                        Text("· copied")
+                            .font(.caption2)
+                            .foregroundStyle(.green)
                     }
                 }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             .help("Click to copy serial to clipboard")
+            .accessibilityLabel("Copy serial \(serial)")
             Spacer()
             if mrInventory.loadingSerial == serial {
                 ProgressView().controlSize(.small)
@@ -219,6 +207,7 @@ struct ConnectPanel: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Open this host's dashboard in MunkiReport (browser)")
+                .accessibilityLabel("Open this host's dashboard in MunkiReport")
             }
             // Run Runner — SSH to the host and invoke
             // /usr/local/munkireport/munkireport-runner so a fresh
@@ -231,6 +220,7 @@ struct ConnectPanel: View {
             }
             .buttonStyle(.borderless)
             .help("Run MunkiReport runner on this host (asks for password)")
+            .accessibilityLabel("Run MunkiReport runner on this host")
             Button {
                 mrInventory.refresh(serial: serial, settings: settings)
             } label: {
@@ -238,11 +228,26 @@ struct ConnectPanel: View {
             }
             .buttonStyle(.borderless)
             .help("Re-fetch MR inventory")
+            .accessibilityLabel("Re-fetch MunkiReport inventory")
             .disabled(mrInventory.loadingSerial == serial)
         }
         .sheet(item: $runnerSheetHost) { h in
             MunkiReportRunnerSheet(host: h)
                 .environmentObject(settings)
+        }
+    }
+
+    /// Copy a serial to the clipboard and flash the inline "copied"
+    /// affordance for ~1.2s.
+    private func copySerial(_ serial: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(serial, forType: .string)
+        justCopiedSerial = serial
+        Task {
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            await MainActor.run {
+                if justCopiedSerial == serial { justCopiedSerial = nil }
+            }
         }
     }
 

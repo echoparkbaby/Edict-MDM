@@ -34,6 +34,7 @@ struct SmartGroupEditor: View {
                             group.rules.removeAll { $0.id == rule.id }
                         } label: { Image(systemName: "minus.circle.fill").foregroundStyle(.secondary) }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Remove rule")
                     }
                 }
             }

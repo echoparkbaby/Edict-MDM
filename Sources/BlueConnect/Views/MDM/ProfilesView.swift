@@ -402,6 +402,7 @@ struct ProfilesView: View {
                     Image(systemName: "xmark.circle.fill").font(.caption).foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain).help("Clear platform filter")
+                .accessibilityLabel("Clear platform filter")
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 7)
@@ -516,8 +517,10 @@ struct ProfilesView: View {
                         Button { toggleFavorite(sp) } label: {
                             Image(systemName: sp.favorite ? "star.fill" : "star").foregroundStyle(.yellow)
                         }.buttonStyle(.plain).help("Favorite")
+                        .accessibilityLabel(sp.favorite ? "Remove from favorites" : "Add to favorites")
                         Button(role: .destructive) { deleteSaved(sp) } label: { Image(systemName: "trash") }
                             .buttonStyle(.plain).help("Delete this saved profile")
+                            .accessibilityLabel("Delete this saved profile")
                     }
                     if !sp.summary.isEmpty {
                         Text("Payloads: \(sp.summary)").font(.caption).foregroundStyle(.secondary)
