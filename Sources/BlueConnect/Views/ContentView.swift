@@ -200,6 +200,14 @@ struct ContentView: View {
         }
     }
 
+    /// A POSIX-ish account short name safe to pass to ssh/scp and embed in
+    /// a /Users/<name>/… path — letters/digits/._- only, no leading dash.
+    private func isSafeRemoteUser(_ user: String) -> Bool {
+        guard !user.isEmpty, user.count <= 64, user.first != "-" else { return false }
+        let ok = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+        return user.unicodeScalars.allSatisfy { ok.contains($0) }
+    }
+
     /// Hand-deliver the signed MDM enrollment profile to a Mac's Desktop
     /// over the BlueSky SSH tunnel. Apple doesn't allow remote auto-install
     /// of enrollment profiles, so someone at the Mac double-clicks it and
@@ -218,6 +226,13 @@ struct ContentView: View {
                 return
             }
             let user = host.effectiveUser(default: settings.defaultRemoteUser)
+            // Reject usernames that could be misread as ssh/scp options or
+            // break the remote path (leading '-', '@', ':', '/', spaces…).
+            guard isSafeRemoteUser(user) else {
+                alert = .result(title: "Bad username",
+                                message: "“\(user)” isn't a safe remote username for delivery. Set a normal account name for this host in BlueSky.")
+                return
+            }
             do {
                 let profile = try EnrollmentProfileExporter.makeProfile(.init(
                     publicURL: settings.mdmPublicURL,
@@ -307,16 +322,22 @@ struct ContentView: View {
         let targets = enrollmentIDs(hosts)
         Task {
             let nano = NanoMDMService(settings: settings)
-            var ok = 0
+            var delivered: [String] = []
             for t in targets {
                 if (try? await nano.installProfile(enrollmentID: t.id, profile: p.data)) != nil {
                     _ = try? await nano.push(enrollmentIDs: t.id)
-                    ok += 1
+                    delivered.append(t.id)
                 }
             }
-            DeploymentLog.record(profileData: p.data, name: p.name, to: targets.map(\.id),
-                                 nowEpoch: Date().timeIntervalSince1970)
-            activity.record(.category, title: "Deployed \(p.name)", detail: "\(ok) Macs")
+            // Only record the Macs the install actually reached, so drift
+            // history and diffs aren't poisoned by failed targets.
+            if !delivered.isEmpty {
+                DeploymentLog.record(profileData: p.data, name: p.name, to: delivered,
+                                     nowEpoch: Date().timeIntervalSince1970)
+            }
+            let failed = targets.count - delivered.count
+            activity.record(.category, title: "Deployed \(p.name)",
+                            detail: "\(delivered.count) Mac\(delivered.count == 1 ? "" : "s")" + (failed > 0 ? ", \(failed) failed" : ""))
         }
     }
 

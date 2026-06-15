@@ -329,31 +329,42 @@ struct GroupDashboardView: View {
     /// compliance", OS marketing names ("sonoma"), and bare versions; ANDs
     /// recognized clauses, falls back to substring for anything else.
     private func matchesQuery(_ d: MDMEnrollment, _ q: String) -> Bool {
-        let lower = q.lowercased()
+        var rest = q.lowercased()
         let f = facts(for: d)
-        var matched = true, recognized = false
-        func clause(_ ok: Bool) { recognized = true; matched = matched && ok }
+        var matched = true
         func compliant() -> Bool? {
             SmartGroup.compliant(f, requireFileVault: settings.mdmRequireFileVault, minOS: settings.mdmMinOSVersion)
         }
-        if lower.contains("filevault off") || lower.contains("fv off") || lower.contains("no filevault") { clause(f.fileVaultOn == false) }
-        if lower.contains("filevault on") || lower.contains("fv on") { clause(f.fileVaultOn == true) }
-        if lower.contains("not enrolled") || lower.contains("checked out") || lower.contains("unenrolled") { clause(!d.isEnabled) }
-        else if lower.contains("enrolled") { clause(d.isEnabled) }
-        if lower.contains("out of compliance") || lower.contains("non-compliant") || lower.contains("noncompliant") { clause(compliant() == false) }
-        else if lower.contains("compliant") { clause(compliant() == true) }
-        if lower.contains("needs attention") || lower.contains("at risk") { clause(attentionScore(d).score > 0) }
-        let osNames: [(String, Int)] = [("ventura", 13), ("sonoma", 14), ("sequoia", 15), ("tahoe", 26)]
-        for (name, major) in osNames where lower.contains(name) {
-            let dMajor = (f.osVersion?.split(separator: ".").first).flatMap { Int($0) } ?? -1
-            clause(dMajor == major)
+        // Consume the first matching phrase, AND its predicate, and strip it
+        // so leftover words fall through to free-text matching.
+        func clause(_ phrases: [String], _ ok: @autoclosure () -> Bool) {
+            for p in phrases where rest.contains(p) {
+                matched = matched && ok()
+                rest = rest.replacingOccurrences(of: p, with: " ")
+                return
+            }
         }
-        if recognized { return matched }
-        // Fallback: substring across the visible facts.
-        return label(for: d).localizedCaseInsensitiveContains(q)
-            || (d.serialNumber ?? "").localizedCaseInsensitiveContains(q)
-            || (osVersions[d.id] ?? "").contains(q)
-            || (models[d.id] ?? "").localizedCaseInsensitiveContains(q)
+        // Negations before positives so "not compliant" doesn't read as compliant.
+        clause(["filevault off", "fv off", "no filevault"], f.fileVaultOn == false)
+        clause(["filevault on", "fv on"], f.fileVaultOn == true)
+        clause(["not enrolled", "checked out", "unenrolled"], !d.isEnabled)
+        clause(["enrolled"], d.isEnabled)
+        clause(["out of compliance", "non-compliant", "noncompliant", "not compliant"], compliant() == false)
+        clause(["compliant"], compliant() == true)
+        clause(["needs attention", "at risk"], attentionScore(d).score > 0)
+        for (name, major) in [("ventura", 13), ("sonoma", 14), ("sequoia", 15), ("tahoe", 26)] {
+            clause([name], (f.osVersion?.split(separator: ".").first).flatMap { Int($0) } == major)
+        }
+        guard matched else { return false }
+        // AND any leftover free text against the visible fields.
+        for token in rest.split(separator: " ").map(String.init) where !token.isEmpty {
+            let hit = label(for: d).localizedCaseInsensitiveContains(token)
+                || (d.serialNumber ?? "").localizedCaseInsensitiveContains(token)
+                || (osVersions[d.id] ?? "").contains(token)
+                || (models[d.id] ?? "").localizedCaseInsensitiveContains(token)
+            if !hit { return false }
+        }
+        return true
     }
 
     // MARK: - CSV export

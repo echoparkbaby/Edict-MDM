@@ -47,23 +47,26 @@ enum ProfilePayloads {
     }
 
     /// `com.apple.MCX.FileVault2` — force-enable FileVault disk
-    /// encryption, deferring until the user next logs out, and escrow the
-    /// recovery key. Staple of every commercial MDM.
+    /// encryption, deferring until the user next logs out, with a personal
+    /// recovery key generated on-device. Staple of every commercial MDM.
+    ///
+    /// Note: institutional key *escrow* (FDERecoveryKeyEscrow) is
+    /// deliberately omitted — Apple requires that payload to reference a
+    /// certificate payload (EncryptCertPayloadUUID) in the same profile,
+    /// which needs an escrow CA cert we don't manage here. Shipping the
+    /// escrow payload without the cert makes the whole profile invalid, so
+    /// this enables FileVault with a personal recovery key only.
     static func fileVault(deferEnable: Bool) -> Data {
         var fv: [String: Any] = base("com.apple.MCX.FileVault2",
                                       displayName: "FileVault Encryption")
         fv["Enable"] = "On"
         fv["Defer"] = deferEnable
         fv["UseRecoveryKey"] = true
-        fv["ShowRecoveryKey"] = false
+        fv["ShowRecoveryKey"] = true
         if deferEnable { fv["DeferForceAtUserLoginMaxBypassAttempts"] = 0 }
-        // Personal-recovery-key escrow so the org can unlock the disk.
-        var escrow: [String: Any] = base("com.apple.security.FDERecoveryKeyEscrow",
-                                          displayName: "FileVault Key Escrow")
-        escrow["Location"] = "Edict MDM"
         return profile(displayName: "FileVault Encryption",
                        identifier: "xyz.hellocomputer.edict.filevault",
-                       payloads: [fv, escrow])
+                       payloads: [fv])
     }
 
     /// `com.apple.security.firewall` — application firewall on, with
@@ -369,8 +372,11 @@ enum ProfilePayloads {
         m["IncomingMailServerHostName"] = host
         if port > 0 { m["IncomingMailServerPortNumber"] = port }
         m["IncomingMailServerUseSSL"] = useSSL
+        m["IncomingMailServerAuthentication"] = "EmailAuthPassword"
         m["OutgoingMailServerHostName"] = host
         m["OutgoingMailServerUseSSL"] = useSSL
+        m["OutgoingMailServerAuthentication"] = "EmailAuthPassword"
+        m["OutgoingPasswordSameAsIncomingPassword"] = true
         if !username.isEmpty {
             m["IncomingMailServerUsername"] = username
             m["OutgoingMailServerUsername"] = username
@@ -385,7 +391,7 @@ enum ProfilePayloads {
                        restartAfterPowerFailure: Bool) -> Data {
         var e: [String: Any] = base("com.apple.MCX", displayName: "Energy Saver")
         var ac: [String: Any] = ["Wake On LAN": wakeOnLAN ? 1 : 0,
-                                 "RestartAfterPowerFailure": restartAfterPowerFailure ? 1 : 0]
+                                 "Automatic Restart On Power Loss": restartAfterPowerFailure ? 1 : 0]
         if displaySleep >= 0 { ac["Display Sleep Timer"] = displaySleep }
         if systemSleep >= 0 { ac["System Sleep Timer"] = systemSleep }
         e["com.apple.EnergySaver.desktop.ACPower"] = ac
@@ -394,19 +400,31 @@ enum ProfilePayloads {
                        identifier: "xyz.hellocomputer.edict.energy", payloads: [e])
     }
 
-    /// Managed Safari preferences (`com.apple.Safari` domain payload).
+    /// Wrap a preference domain's forced keys in the correct
+    /// `com.apple.ManagedClient.preferences` payload (a bare domain payload
+    /// isn't a valid profile payload type).
+    private static func managedPreferences(domain: String, displayName: String,
+                                           identifier: String, keys: [String: Any]) -> Data {
+        var payload: [String: Any] = base("com.apple.ManagedClient.preferences", displayName: displayName)
+        payload["PayloadContent"] = [
+            domain: ["Forced": [["mcx_preference_settings": keys]]],
+        ]
+        return profile(displayName: displayName, identifier: identifier, payloads: [payload])
+    }
+
+    /// Managed Safari preferences (`com.apple.Safari`).
     static func safari(homepage: String, openWithHomepage: Bool, disablePrivateBrowsing: Bool) -> Data {
-        var s: [String: Any] = base("com.apple.Safari", displayName: "Safari")
+        var s: [String: Any] = [:]
         if !homepage.isEmpty { s["HomePage"] = homepage }
         if openWithHomepage { s["NewWindowBehavior"] = 0; s["NewTabBehavior"] = 0 } // 0 = homepage
         if disablePrivateBrowsing { s["DisablePrivateBrowsing"] = true }
-        return profile(displayName: "Safari (managed)",
-                       identifier: "xyz.hellocomputer.edict.safari", payloads: [s])
+        return managedPreferences(domain: "com.apple.Safari", displayName: "Safari (managed)",
+                                  identifier: "xyz.hellocomputer.edict.safari", keys: s)
     }
 
-    /// Managed Chrome enterprise policy (`com.google.Chrome` domain payload).
+    /// Managed Chrome enterprise policy (`com.google.Chrome`).
     static func chrome(homepage: String, restoreLastSession: Bool, disableIncognito: Bool) -> Data {
-        var c: [String: Any] = base("com.google.Chrome", displayName: "Google Chrome")
+        var c: [String: Any] = [:]
         if !homepage.isEmpty {
             c["HomepageLocation"] = homepage
             c["HomepageIsNewTabPage"] = false
@@ -414,8 +432,8 @@ enum ProfilePayloads {
         }
         c["RestoreOnStartup"] = restoreLastSession ? 1 : 5   // 1 = restore last, 5 = new tab
         if disableIncognito { c["IncognitoModeAvailability"] = 1 }  // 1 = disabled
-        return profile(displayName: "Chrome (managed)",
-                       identifier: "xyz.hellocomputer.edict.chrome", payloads: [c])
+        return managedPreferences(domain: "com.google.Chrome", displayName: "Chrome (managed)",
+                                  identifier: "xyz.hellocomputer.edict.chrome", keys: c)
     }
 
     /// Screen Time content restrictions via `com.apple.applicationaccess`

@@ -26,6 +26,8 @@ final class MDMFleetIndex {
     /// Synthetic rows for enrolled Macs with no matching BlueSky host.
     private(set) var mdmOnly: [BlueSkyHost] = []
     private(set) var loading = false
+    /// Bumped per refresh so a slow earlier refresh can't clobber a newer one.
+    @ObservationIgnored private var refreshGen = 0
     /// Bumped on every successful refresh so the table can re-derive its
     /// row list (the synthetic rows) — @Observable handles the columns.
     private(set) var version = 0
@@ -44,8 +46,10 @@ final class MDMFleetIndex {
             if !bySerial.isEmpty || !mdmOnly.isEmpty { bySerial = [:]; mdmOnly = []; version += 1 }
             return
         }
+        refreshGen += 1
+        let gen = refreshGen
         loading = true
-        defer { loading = false }
+        defer { if gen == refreshGen { loading = false } }
         guard let enrollments = try? await EnrollmentsAPI(settings: settings).list() else { return }
         let devices = enrollments.filter(\.isDevice)
         let svc = KMFDDMService(settings: settings)
@@ -70,6 +74,8 @@ final class MDMFleetIndex {
                 only.append(.mdmOnly(enrollment: d, label: name(for: d, settings: settings)))
             }
         }
+        // Drop results from a refresh that a newer one has superseded.
+        guard gen == refreshGen else { return }
         bySerial = map
         mdmOnly = only
         version += 1

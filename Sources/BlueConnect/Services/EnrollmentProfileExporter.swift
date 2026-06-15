@@ -38,6 +38,14 @@ enum EnrollmentProfileExporter {
         guard !base.isEmpty else { throw ExportError.missing("public MDM URL is empty") }
         guard !i.challenge.isEmpty else { throw ExportError.missing("SCEP challenge is empty") }
         guard !i.topic.isEmpty else { throw ExportError.missing("push topic unavailable (is the server reachable?)") }
+        // Must be a real HTTPS URL — an http:// or malformed URL would ship
+        // the SCEP challenge in the clear or simply fail to enroll on the Mac.
+        guard let comps = URLComponents(string: base),
+              comps.scheme?.lowercased() == "https",
+              let h = comps.host, !h.isEmpty,
+              comps.query == nil, comps.fragment == nil else {
+            throw ExportError.missing("public MDM URL must be a plain https:// URL (no query/fragment). Got: \(base)")
+        }
         let root = base.hasSuffix("/") ? String(base.dropLast()) : base
 
         let scepUUID = UUID().uuidString

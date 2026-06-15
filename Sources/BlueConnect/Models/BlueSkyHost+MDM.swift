@@ -41,6 +41,8 @@ extension BlueSkyHost {
             h ^= UInt32(byte)
             h = h &* 16777619
         }
-        return Int(h & 0x7fff_ffff)
+        // Never 0 — a 0 hash would make the synthetic id 0, which reads as
+        // a real (non-MDM-only) host.
+        return Int(max(1, h & 0x7fff_ffff))
     }
 }

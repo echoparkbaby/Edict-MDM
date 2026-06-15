@@ -45,7 +45,11 @@ enum LegacyMigration {
             }
         }
 
-        for account in legacyAccounts {
+        // Only copy accounts Edict actually uses — its feature secrets
+        // ("BlueConnectAdmin.*") and the admin Basic-auth, whose account is
+        // "<apiURL>|<user>". Skip anything else so unknown/retired secrets
+        // don't get a second home.
+        for account in legacyAccounts where isKnownAccount(account) {
             // Don't overwrite a secret Edict already holds.
             if KeychainHelper.read(account: account) != nil { continue }
             if let secret = KeychainHelper.read(account: account, service: oldBundleID) {
@@ -57,6 +61,14 @@ enum LegacyMigration {
         markDone()
         rehydrate(settings)
         return (defaultsCopied, secretsCopied)
+    }
+
+    /// True for keychain accounts Edict knows how to use: its prefixed
+    /// feature secrets, or the admin Basic-auth account ("<url>|<user>").
+    private static func isKnownAccount(_ a: String) -> Bool {
+        if a.hasPrefix("BlueConnectAdmin.") { return true }
+        if a.contains("|"), a.contains("http://") || a.contains("https://") { return true }
+        return false
     }
 
     /// Record the import as handled without copying (user chose Skip).

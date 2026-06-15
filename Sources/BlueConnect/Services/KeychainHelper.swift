@@ -9,17 +9,25 @@ enum KeychainHelper {
     // BlueConnect Admin build, so existing users' stored secrets survive.
     static let service = Bundle.main.bundleIdentifier ?? "xyz.hellocomputer.BlueConnectAdmin"
 
-    static func save(_ value: String, account: String) {
+    /// Update-in-place if the item exists, else add. Never deletes first
+    /// (a failed re-add used to silently drop the old secret). Returns
+    /// whether the write succeeded.
+    @discardableResult
+    static func save(_ value: String, account: String) -> Bool {
         let data = value.data(using: .utf8) ?? Data()
-        let baseQuery: [String: Any] = [
+        let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
-        SecItemDelete(baseQuery as CFDictionary)
-        var attrs = baseQuery
-        attrs[kSecValueData as String] = data
-        SecItemAdd(attrs as CFDictionary, nil)
+        let updateStatus = SecItemUpdate(query as CFDictionary,
+                                         [kSecValueData as String: data] as CFDictionary)
+        if updateStatus == errSecSuccess { return true }
+        guard updateStatus == errSecItemNotFound else { return false }
+        var add = query
+        add[kSecValueData as String] = data
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
     }
 
     static func read(account: String) -> String? {

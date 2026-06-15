@@ -61,7 +61,10 @@ enum ProfileDiff {
         "PayloadUUID", "PayloadIdentifier", "PayloadVersion", "PayloadType", "PayloadDisplayName",
     ]
 
-    /// Flatten a profile's PayloadContent into ["Display → key": "value"].
+    /// Flatten a profile's PayloadContent into leaf paths → scalar values,
+    /// recursing through nested dicts and arrays so a change buried inside
+    /// (PPPC services, PlatformSSO, managed-prefs, notifications, etc.) is
+    /// actually detected — not just top-level key add/remove.
     private static func flatten(_ dict: [String: Any]?) -> [String: String] {
         guard let content = dict?["PayloadContent"] as? [[String: Any]] else { return [:] }
         var out: [String: String] = [:]
@@ -69,22 +72,30 @@ enum ProfileDiff {
             let type = (payload["PayloadType"] as? String) ?? "Payload"
             let label = (payload["PayloadDisplayName"] as? String) ?? type
             for (k, v) in payload where !volatile.contains(k) {
-                out["\(label) → \(k)"] = describe(v)
+                flattenValue(v, path: "\(label) → \(k)", into: &out)
             }
         }
         return out
     }
 
-    private static func describe(_ v: Any) -> String {
+    private static func flattenValue(_ v: Any, path: String, into out: inout [String: String]) {
         if CFGetTypeID(v as CFTypeRef) == CFBooleanGetTypeID() {
-            return (v as? Bool) == true ? "true" : "false"
+            out[path] = (v as? Bool) == true ? "true" : "false"
+            return
         }
         switch v {
-        case let s as String: return s
-        case let n as NSNumber: return n.stringValue
-        case let a as [Any]: return "[" + a.map { describe($0) }.joined(separator: ", ") + "]"
-        case let d as [String: Any]: return "{" + d.keys.sorted().joined(separator: ", ") + "}"
-        default: return String(describing: v)
+        case let s as String: out[path] = s
+        case let n as NSNumber: out[path] = n.stringValue
+        case let d as [String: Any]:
+            if d.isEmpty { out[path] = "{}" }
+            for (k, sub) in d where !volatile.contains(k) { flattenValue(sub, path: "\(path).\(k)", into: &out) }
+        case let a as [Any]:
+            if a.isEmpty { out[path] = "[]" }
+            for (i, sub) in a.enumerated() { flattenValue(sub, path: "\(path)[\(i)]", into: &out) }
+        case let data as Data:
+            out[path] = "<\(data.count) bytes>"
+        default:
+            out[path] = String(describing: v)
         }
     }
 }
