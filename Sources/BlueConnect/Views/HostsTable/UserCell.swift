@@ -29,6 +29,7 @@ struct UserCell: View {
                 }
                 .buttonStyle(.plain)
                 .help("Set username for this host")
+                .accessibilityLabel("Set username for this host")
             }
         }
         .contentShape(Rectangle())

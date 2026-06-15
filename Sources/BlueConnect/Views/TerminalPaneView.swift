@@ -57,7 +57,7 @@ struct TerminalPaneView: View {
 
     private var tabBar: some View {
         HStack(spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
+            ScrollView(.horizontal) {
                 HStack(spacing: 0) {
                     ForEach(attachedSessions) { s in
                         TerminalTab(session: s,
@@ -79,8 +79,11 @@ struct TerminalPaneView: View {
                            onSelect: { manager.activeSelection = .log })
                 }
             }
+            .scrollIndicators(.hidden)
             Spacer(minLength: 0)
-            Button { manager.closeAll() } label: { Image(systemName: "xmark.square").help("Close all terminal tabs") }
+            Button("Close all terminal tabs", systemImage: "xmark.square") { manager.closeAll() }
+            .labelStyle(.iconOnly)
+            .help("Close all terminal tabs")
             .buttonStyle(.plain).padding(.horizontal, 8)
         }
         .frame(height: 28)

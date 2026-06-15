@@ -11,5 +11,6 @@ struct StarButton: View {
         }
         .buttonStyle(.plain)
         .help(host.isFavorite ? "Click to remove from Favorites" : "Click to add to Favorites")
+        .accessibilityLabel(host.isFavorite ? "Remove from Favorites" : "Add to Favorites")
     }
 }

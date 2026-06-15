@@ -12,54 +12,27 @@ import Testing
 @Suite("MunkiRepoStore.catalogURL composition")
 struct MunkiRepoStoreTests {
 
-    @Test func endpointOnlyComposesScheme() {
-        let url = MunkiRepoStore.catalogURL(
-            endpoint: "munki.example.com",
-            bucket: "",
-            prefix: "",
-            key: "catalogs/all"
-        )
-        #expect(url == "https://munki.example.com/catalogs/all")
-    }
-
-    @Test func bucketAndPrefixGetAppended() {
-        let url = MunkiRepoStore.catalogURL(
-            endpoint: "s3.us-east-1.wasabisys.com",
-            bucket: "my-bucket",
-            prefix: "munki_repo",
-            key: "catalogs/all"
-        )
-        #expect(url == "https://s3.us-east-1.wasabisys.com/my-bucket/munki_repo/catalogs/all")
-    }
-
-    @Test func endpointSchemeIsStripped() {
-        let url = MunkiRepoStore.catalogURL(
-            endpoint: "https://munki.example.com/",
-            bucket: "",
-            prefix: "",
-            key: "catalogs/all"
-        )
-        #expect(url == "https://munki.example.com/catalogs/all")
-    }
-
-    @Test func extraSlashesAreTrimmed() {
-        let url = MunkiRepoStore.catalogURL(
-            endpoint: "munki.example.com",
-            bucket: "/bucket/",
-            prefix: "/repo/",
-            key: "catalogs/all"
-        )
-        #expect(url == "https://munki.example.com/bucket/repo/catalogs/all")
-    }
-
-    @Test func pkgKeyWithSpacesGetsPercentEncoded() {
-        let url = MunkiRepoStore.catalogURL(
-            endpoint: "munki.example.com",
-            bucket: "",
-            prefix: "",
-            key: "pkgs/A Better Finder Rename/abfr.dmg"
-        )
-        // Spaces → %20, but path separators stay as `/`.
-        #expect(url == "https://munki.example.com/pkgs/A%20Better%20Finder%20Rename/abfr.dmg")
+    // (endpoint, bucket, prefix, key, expected)
+    @Test(arguments: [
+        // endpoint only → just prepend the scheme
+        ("munki.example.com", "", "", "catalogs/all",
+         "https://munki.example.com/catalogs/all"),
+        // bucket + prefix get appended in order
+        ("s3.us-east-1.wasabisys.com", "my-bucket", "munki_repo", "catalogs/all",
+         "https://s3.us-east-1.wasabisys.com/my-bucket/munki_repo/catalogs/all"),
+        // an explicit scheme on the endpoint is stripped, not duplicated
+        ("https://munki.example.com/", "", "", "catalogs/all",
+         "https://munki.example.com/catalogs/all"),
+        // leading/trailing slashes on bucket + prefix are trimmed
+        ("munki.example.com", "/bucket/", "/repo/", "catalogs/all",
+         "https://munki.example.com/bucket/repo/catalogs/all"),
+        // spaces in the key → %20, but path separators stay as `/`
+        ("munki.example.com", "", "", "pkgs/A Better Finder Rename/abfr.dmg",
+         "https://munki.example.com/pkgs/A%20Better%20Finder%20Rename/abfr.dmg"),
+    ])
+    func catalogURLComposition(endpoint: String, bucket: String, prefix: String,
+                               key: String, expected: String) {
+        let url = MunkiRepoStore.catalogURL(endpoint: endpoint, bucket: bucket, prefix: prefix, key: key)
+        #expect(url == expected)
     }
 }

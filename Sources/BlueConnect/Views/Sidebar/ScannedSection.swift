@@ -57,6 +57,7 @@ struct ScannedSection: View {
                 .buttonStyle(.borderless)
                 .disabled(scanner.isScanning)
                 .help("Scan subnets listed in Settings → General")
+                .accessibilityLabel("Scan subnets")
                 Button {
                     openWindow(id: "scanned-table")
                 } label: {
@@ -65,6 +66,7 @@ struct ScannedSection: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Open full scan results in a tabular window")
+                .accessibilityLabel("Open scan results window")
             }
             .contentShape(Rectangle())
         }

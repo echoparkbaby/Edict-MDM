@@ -575,7 +575,7 @@ struct GroupDashboardView: View {
     // MARK: - Prism (saved, configurable views)
 
     private var savedViewsBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        ScrollView(.horizontal) {
             HStack(spacing: 8) {
                 ForEach(savedViews) { v in
                     let isActive = activeViewID == v.id
@@ -602,6 +602,7 @@ struct GroupDashboardView: View {
                 .background(Capsule().strokeBorder(Color.secondary.opacity(0.4), style: StrokeStyle(lineWidth: 1, dash: [3])))
             }
         }
+        .scrollIndicators(.hidden)
     }
 
     private var suggestedViewName: String {

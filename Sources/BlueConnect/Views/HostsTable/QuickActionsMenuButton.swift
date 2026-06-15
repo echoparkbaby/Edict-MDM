@@ -30,6 +30,7 @@ struct QuickActionsMenuButton: View {
         .frame(width: 22, height: 22)
         .disabled(!enabled)
         .help("Quick Actions")
+        .accessibilityLabel("Quick Actions")
     }
 
     @ViewBuilder

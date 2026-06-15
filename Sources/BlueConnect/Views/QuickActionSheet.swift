@@ -288,12 +288,13 @@ struct QuickActionSheet: View {
                 .controlSize(.small)
                 .buttonStyle(.borderless)
             }
-            ScrollView(.horizontal, showsIndicators: false) {
+            ScrollView(.horizontal) {
                 Text(cmd)
                     .font(.caption.monospaced())
                     .textSelection(.enabled)
                     .padding(6)
             }
+            .scrollIndicators(.hidden)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(NSColor.textBackgroundColor))
             .overlay(
@@ -634,11 +635,13 @@ struct QuickActionSheet: View {
                 }
                 .buttonStyle(.plain)
                 .help(justCopied ? "Copied" : "Copy command to clipboard")
+                .accessibilityLabel(justCopied ? "Copied" : "Copy command")
                 .padding(4)
             }
-            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
+            .overlay { RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)) }
             .contentShape(Rectangle())
             .onTapGesture { copyCommandToPasteboard() }
+            .accessibilityAddTraits(.isButton)
         }
         // Outer padding intentionally absent — `preview` is now
         // rendered inside `detailsDisclosure` which provides its own

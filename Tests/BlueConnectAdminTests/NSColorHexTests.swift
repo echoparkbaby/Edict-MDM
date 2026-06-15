@@ -11,12 +11,9 @@ import AppKit
 @MainActor
 struct NSColorHexTests {
 
-    @Test func roundTripIsLossless() {
+    @Test func roundTripIsLossless() throws {
         let original = "#50fa7b"
-        guard let parsed = NSColor.fromHex(original) else {
-            Issue.record("Expected fromHex to parse \(original)")
-            return
-        }
+        let parsed = try #require(NSColor.fromHex(original), "Expected fromHex to parse \(original)")
         #expect(parsed.hexString == original)
     }
 

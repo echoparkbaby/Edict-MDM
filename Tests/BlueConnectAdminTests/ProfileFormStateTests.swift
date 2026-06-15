@@ -19,14 +19,14 @@ struct ProfileFormStateTests {
 
     @Test func wifiNeedsAnSSID() {
         var s = ProfileFormState()
-        #expect(!s.isValid(for: .wifi))
+        #expect(s.isValid(for: .wifi) == false)
         s.ssid = "Office"
         #expect(s.isValid(for: .wifi))
     }
 
     @Test func customNeedsXML() {
         var s = ProfileFormState()
-        #expect(!s.isValid(for: .custom))
+        #expect(s.isValid(for: .custom) == false)
         s.customXML = "<plist/>"
         #expect(s.isValid(for: .custom))
     }
@@ -34,7 +34,7 @@ struct ProfileFormStateTests {
     @Test func certificateNeedsPEMMarker() {
         var s = ProfileFormState()
         s.certPEM = "not a cert"
-        #expect(!s.isValid(for: .certificate))
+        #expect(s.isValid(for: .certificate) == false)
         s.certPEM = "-----BEGIN CERTIFICATE-----\nMII...\n-----END CERTIFICATE-----"
         #expect(s.isValid(for: .certificate))
     }
@@ -42,7 +42,7 @@ struct ProfileFormStateTests {
     @Test func mailNeedsDescriptionAddressAndHost() {
         var s = ProfileFormState()
         s.mailDesc = "Work"
-        #expect(!s.isValid(for: .mail))           // address + host still missing
+        #expect(s.isValid(for: .mail) == false)           // address + host still missing
         s.mailAddress = "a@b.com"
         s.mailHost = "mail.b.com"
         #expect(s.isValid(for: .mail))
@@ -53,7 +53,7 @@ struct ProfileFormStateTests {
         s.pppcID = "com.example.app"
         s.pppcCodeReq = "identifier \"x\""
         s.pppcFDA = false; s.pppcAccessibility = false; s.pppcScreen = false; s.pppcInput = false
-        #expect(!s.isValid(for: .pppc))           // no service selected
+        #expect(s.isValid(for: .pppc) == false)           // no service selected
         s.pppcScreen = true
         #expect(s.isValid(for: .pppc))
     }
@@ -62,7 +62,7 @@ struct ProfileFormStateTests {
         var s = ProfileFormState()
         let fv = try s.build(for: .fileVault)
         #expect(fv.name == "FileVault")
-        #expect(!fv.data.isEmpty)
+        #expect(fv.data.isEmpty == false)
 
         s.ssid = "Net"
         #expect(try s.build(for: .wifi).name == "Wi-Fi “Net”")

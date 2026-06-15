@@ -48,12 +48,12 @@ struct HostsCSVBuilderTests {
         #expect(csv.split(separator: "\n", omittingEmptySubsequences: true).count == 1)
     }
 
-    @Test func basicRowOrdering() {
+    @Test func basicRowOrdering() throws {
         let csv = HostsCSVBuilder.build([
             host(blueskyid: 7, hostname: "pine", category: "Studio",
                  favorite: true, active: true, sshPort: 2222, vncPort: 5901)
         ])
-        let row = csv.split(separator: "\n").last!
+        let row = try #require(csv.split(separator: "\n").last)
         #expect(row.hasPrefix("7,pine,,,Studio,1,1,2222,5901,,,"))
     }
 
@@ -83,7 +83,7 @@ struct HostsCSVBuilderTests {
         // hostname/category/notes nil should produce empty fields,
         // never the literal "nil" string.
         let csv = HostsCSVBuilder.build([host(hostname: nil)])
-        #expect(!csv.contains("nil"))
-        #expect(!csv.contains("Optional"))
+        #expect(csv.contains("nil") == false)
+        #expect(csv.contains("Optional") == false)
     }
 }

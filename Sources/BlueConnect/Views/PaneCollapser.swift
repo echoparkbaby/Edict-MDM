@@ -43,6 +43,7 @@ struct PaneCollapser<Content: View>: View {
             .buttonStyle(.plain)
             .padding(visible ? 4 : 8)
             .help(visible ? "Collapse pane" : "Expand pane")
+            .accessibilityLabel(visible ? "Collapse pane" : "Expand pane")
         }
     }
 

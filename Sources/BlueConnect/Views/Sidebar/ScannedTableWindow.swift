@@ -173,6 +173,7 @@ struct ScannedTableWindow: View {
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
                 }
             }
             unifiProfilePicker
@@ -215,9 +216,11 @@ struct ScannedTableWindow: View {
                     Button {
                         settings.activeUnifiProfileID = p.id
                     } label: {
-                        Label(p.label, systemImage: active?.id == p.id
-                              ? "checkmark"
-                              : "")
+                        if active?.id == p.id {
+                            Label(p.label, systemImage: "checkmark")
+                        } else {
+                            Text(p.label)
+                        }
                     }
                 }
                 Divider()

@@ -137,10 +137,10 @@ struct UniFiSettingsPane: View {
     @ViewBuilder
     private func editor(for profile: UniFiProfile) -> some View {
         Group {
-            TextField("Label", text: binding(\.label, for: profile.id),
+            TextField("Label", text: binding(\.label, for: profile.id, fallback: profile.label),
                       prompt: Text("Home UDM"))
                 .help("Friendly name shown in the Network Scan switcher")
-            TextField("Controller URL", text: binding(\.baseURL, for: profile.id),
+            TextField("Controller URL", text: binding(\.baseURL, for: profile.id, fallback: profile.baseURL),
                       prompt: Text(verbatim: "https://10.0.0.1"))
                 .help("Base URL of the UniFi Network Application. Self-signed certs are accepted.")
             SecureField("API Key", text: $apiKeyBuffer)
@@ -149,7 +149,7 @@ struct UniFiSettingsPane: View {
                     testResult = nil
                 }
                 .help("Generated in UniFi: Settings → Control Plane → Integrations → API → Create API Key.")
-            TextField("Site", text: binding(\.site, for: profile.id),
+            TextField("Site", text: binding(\.site, for: profile.id, fallback: profile.site),
                       prompt: Text(verbatim: "default"))
                 .help("Site short name (the segment used in `/api/s/<site>/…`). Most installs are `default`.")
 
@@ -233,13 +233,12 @@ struct UniFiSettingsPane: View {
     /// per character (acceptable — the JSON is tiny).
     private func binding<T>(_ kp: WritableKeyPath<UniFiProfile, T>,
                             for id: UUID,
-                            fallback: T? = nil) -> Binding<T> where T: Equatable {
+                            fallback: T) -> Binding<T> where T: Equatable {
         Binding(
             get: {
-                let list = settings.unifiProfiles
-                if let p = list.first(where: { $0.id == id }) { return p[keyPath: kp] }
-                if let fb = fallback { return fb }
-                fatalError("editing non-existent UniFi profile \(id)")
+                // The profile can vanish mid-edit (deleted from another row),
+                // so fall back to the last-known value rather than crashing.
+                settings.unifiProfiles.first(where: { $0.id == id })?[keyPath: kp] ?? fallback
             },
             set: { newValue in
                 var list = settings.unifiProfiles

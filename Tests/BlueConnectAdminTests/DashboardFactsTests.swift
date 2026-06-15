@@ -71,11 +71,11 @@ struct DashboardFactsTests {
         let d = enrollment()
         let f = facts(os: ["A": "14.6"], fv: ["A": "false"], labels: ["A": "kiosk"])
         #expect(f.matchesQuery(d, "filevault off"))
-        #expect(!f.matchesQuery(d, "filevault on"))
-        #expect(f.matchesQuery(d, "sonoma"))     // macOS 14
-        #expect(!f.matchesQuery(d, "sequoia"))   // macOS 15
-        #expect(f.matchesQuery(d, "kiosk"))      // free-text against the label
-        #expect(!f.matchesQuery(d, "frontdesk"))
+        #expect(f.matchesQuery(d, "filevault on") == false)
+        #expect(f.matchesQuery(d, "sonoma"))                 // macOS 14
+        #expect(f.matchesQuery(d, "sequoia") == false)       // macOS 15
+        #expect(f.matchesQuery(d, "kiosk"))                  // free-text against the label
+        #expect(f.matchesQuery(d, "frontdesk") == false)
     }
 
     @Test func attentionScoreFlagsFileVaultAndCheckout() {

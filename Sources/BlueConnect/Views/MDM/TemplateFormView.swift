@@ -72,8 +72,7 @@ struct TemplateFormView: View {
                 TextEditor(text: $form.certPEM)
                     .font(.caption.monospaced())
                     .frame(minHeight: 160)
-                    .overlay(RoundedRectangle(cornerRadius: 4)
-                        .stroke(Color.secondary.opacity(0.25), lineWidth: 1))
+                    .overlay { RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1) }
             }
         case .timeMachine:
             Form {
@@ -140,7 +139,7 @@ struct TemplateFormView: View {
                     Text("Code requirement").font(.caption).foregroundStyle(.secondary)
                     TextEditor(text: $form.pppcCodeReq)
                         .font(.caption2.monospaced()).frame(minHeight: 60)
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1))
+                        .overlay { RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1) }
                     Text("Required. Get it with:  codesign -dr - /Applications/App.app  (copy the line after “designated => ”).")
                         .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
@@ -192,12 +191,12 @@ struct TemplateFormView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Always allow (one URL per line)").font(.caption).foregroundStyle(.secondary)
                     TextEditor(text: $form.wfAllowed).font(.caption.monospaced()).frame(minHeight: 60)
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1))
+                        .overlay { RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1) }
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Always block (one URL per line)").font(.caption).foregroundStyle(.secondary)
                     TextEditor(text: $form.wfBlocked).font(.caption.monospaced()).frame(minHeight: 60)
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1))
+                        .overlay { RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1) }
                 }
             }
             .formStyle(.columns)
@@ -235,7 +234,7 @@ struct TemplateFormView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Redirect URLs (one per line)").font(.caption).foregroundStyle(.secondary)
                     TextEditor(text: $form.ssoURLs).font(.caption.monospaced()).frame(minHeight: 70)
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1))
+                        .overlay { RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1) }
                 }
                 Text("macOS 13+. The IdP's SSO extension app (Company Portal for Entra, Okta Verify for Okta) must be installed separately — push it with Munki. For Okta, replace example.okta.com with your tenant.")
                     .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -303,7 +302,7 @@ struct TemplateFormView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Domains (one per line, e.g. applinks:example.com)").font(.caption).foregroundStyle(.secondary)
                     TextEditor(text: $form.assocDomains).font(.caption.monospaced()).frame(minHeight: 70)
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1))
+                        .overlay { RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1) }
                 }
             }
             .formStyle(.columns)
@@ -351,8 +350,7 @@ struct TemplateFormView: View {
                 TextEditor(text: $form.customXML)
                     .font(.caption.monospaced())
                     .frame(minHeight: 200)
-                    .overlay(RoundedRectangle(cornerRadius: 4)
-                        .stroke(Color.secondary.opacity(0.25), lineWidth: 1))
+                    .overlay { RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25), lineWidth: 1) }
             }
         }
     }

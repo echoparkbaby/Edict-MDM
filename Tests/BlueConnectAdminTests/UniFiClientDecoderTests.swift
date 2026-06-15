@@ -52,7 +52,7 @@ struct UniFiClientDecoderTests {
         #expect(c.name == "shop-laptop")
         #expect(c.ip == "10.0.0.99")
         #expect(c.macAddress == "11:22:33:44:55:66")
-        #expect(!c.isWired)
+        #expect(c.isWired == false)
     }
 
     @Test func fixedIpFallback() throws {
@@ -82,27 +82,12 @@ struct UniFiClientDecoderTests {
         #expect(c.vlan == 30)
     }
 
-    @Test func displaySpeedFormatsGigabit() throws {
-        let json = """
-        {"_id": "x", "wired_rate_mbps": 1000}
-        """
-        let c = try decode(json)
-        #expect(c.displaySpeed == "1 Gbps")
-    }
-
-    @Test func displaySpeedFormatsMegabit() throws {
-        let json = """
-        {"_id": "x", "wired_rate_mbps": 100}
-        """
-        let c = try decode(json)
-        #expect(c.displaySpeed == "100 Mbps")
-    }
-
-    @Test func displaySpeedIsNilWhenUnknown() throws {
-        let json = """
-        {"_id": "x"}
-        """
-        let c = try decode(json)
-        #expect(c.displaySpeed == nil)
+    @Test(arguments: [
+        (#"{"_id": "x", "wired_rate_mbps": 1000}"#, "1 Gbps"),
+        (#"{"_id": "x", "wired_rate_mbps": 100}"#, "100 Mbps"),
+        (#"{"_id": "x"}"#, String?.none),
+    ])
+    func displaySpeedFormatting(json: String, expected: String?) throws {
+        #expect(try decode(json).displaySpeed == expected)
     }
 }

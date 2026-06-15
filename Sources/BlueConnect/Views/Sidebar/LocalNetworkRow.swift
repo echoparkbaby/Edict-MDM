@@ -253,19 +253,6 @@ struct LocalNetworkRow: View {
                           remoteUser: resolvedRemoteUser)
     }
 
-    private func openInTerminalSSH() {
-        guard let port = service.sshPort else { return }
-        let svc = ConnectionService(
-            server: settings.serverFqdn,
-            adminKeyPath: settings.expandedKeyPath,
-            serverSshPort: settings.sshTunnelPort,
-            terminals: terminals
-        )
-        svc.openDirectSSHInTerminal(hostname: service.hostname,
-                                    port: port,
-                                    remoteUser: resolvedRemoteUser)
-    }
-
     private func sendFileViaSCP(_ url: URL) {
         guard let port = service.sshPort else { return }
         let svc = ConnectionService(
