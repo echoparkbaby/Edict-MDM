@@ -23,7 +23,7 @@ struct MDMHostDetail: View {
     @State private var enablingReporting = false
 
     // Live inventory pulled straight from the Mac.
-    enum InvKind: String { case hardware = "Hardware", profiles = "Profiles", apps = "Apps" }
+    enum InvKind: String { case hardware = "Hardware", security = "Security", profiles = "Profiles", apps = "Apps" }
     @State private var invKind: InvKind?
     @State private var invItems: [String] = []
     @State private var invLoading = false
@@ -160,7 +160,7 @@ struct MDMHostDetail: View {
                 if invLoading { ProgressView().controlSize(.small) }
             }
             HStack(spacing: 6) {
-                ForEach([InvKind.hardware, .profiles, .apps], id: \.self) { kind in
+                ForEach([InvKind.hardware, .security, .profiles, .apps], id: \.self) { kind in
                     Button(kind.rawValue) { Task { await fetchInv(kind) } }
                         .buttonStyle(.bordered).controlSize(.small)
                         .disabled(invLoading)
@@ -183,7 +183,7 @@ struct MDMHostDetail: View {
                     }
                 }
             } else {
-                Text("Query live hardware, installed profiles, or apps straight from this Mac.")
+                Text("Query live hardware, security (FileVault / firewall / SIP), installed profiles, or apps straight from this Mac.")
                     .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -321,6 +321,7 @@ struct MDMHostDetail: View {
             let uuid: String
             switch kind {
             case .hardware: uuid = try await nano.requestDeviceInformation(enrollmentID: entry.enrollmentID)
+            case .security: uuid = try await nano.requestSecurityInfo(enrollmentID: entry.enrollmentID)
             case .profiles: uuid = try await nano.requestProfileList(enrollmentID: entry.enrollmentID)
             case .apps:     uuid = try await nano.requestInstalledApps(enrollmentID: entry.enrollmentID)
             }
@@ -331,6 +332,8 @@ struct MDMHostDetail: View {
                 switch kind {
                 case .hardware:
                     invItems = Self.formatDeviceInformation(res.dict("QueryResponses"))
+                case .security:
+                    invItems = Self.formatSecurityInfo(res.dict("SecurityInfo"))
                 case .profiles:
                     invItems = res.array("ProfileList").compactMap {
                         ($0["PayloadDisplayName"] as? String) ?? ($0["PayloadIdentifier"] as? String)
@@ -370,6 +373,31 @@ struct MDMHostDetail: View {
         if let name = q["DeviceName"] as? String { out.append("Device name: \(name)") }
         if let mac = q["WiFiMAC"] as? String { out.append("Wi-Fi MAC: \(mac)") }
         if let mac = q["EthernetMAC"] as? String { out.append("Ethernet MAC: \(mac)") }
+        if let al = q["IsActivationLockEnabled"] as? Bool { out.append("Activation Lock: \(al ? "On" : "Off")") }
+        return out
+    }
+
+    /// Readable rows from a SecurityInfo response — FileVault, firewall,
+    /// and SIP, straight from the device (no MunkiReport). Defensive casts:
+    /// keys the OS version doesn't return are simply skipped.
+    private static func formatSecurityInfo(_ s: [String: Any]) -> [String] {
+        var out: [String] = []
+        func onOff(_ v: Any?) -> String? { (v as? Bool).map { $0 ? "On" : "Off" } }
+        if let fv = onOff(s["FDE_Enabled"]) {
+            let key = (s["FDE_HasPersonalRecoveryKey"] as? Bool) == true ? " (recovery key escrowed)" : ""
+            out.append("FileVault: \(fv)\(key)")
+        }
+        if let fw = s["FirewallSettings"] as? [String: Any] {
+            var parts: [String] = []
+            if let e = onOff(fw["FirewallEnabled"]) { parts.append(e) }
+            if (fw["BlockAllIncoming"] as? Bool) == true { parts.append("block all incoming") }
+            if (fw["StealthMode"] as? Bool) == true { parts.append("stealth") }
+            out.append("Firewall: " + (parts.isEmpty ? "—" : parts.joined(separator: ", ")))
+        }
+        if let sip = onOff(s["SystemIntegrityProtectionEnabled"]) {
+            out.append("System Integrity Protection (SIP): \(sip)")
+        }
+        if out.isEmpty { out.append("The Mac returned no security info.") }
         return out
     }
 

@@ -127,6 +127,15 @@ struct NanoMDMService {
         return uuid
     }
 
+    /// Queue a `SecurityInfo` query — FileVault, firewall settings, and
+    /// System Integrity Protection, straight from the device (no
+    /// MunkiReport needed). Returns the command UUID to poll for the result.
+    func requestSecurityInfo(enrollmentID: String) async throws -> String {
+        let (uuid, plist) = Self.commandWithUUID([("RequestType", "SecurityInfo")])
+        _ = try await enqueue(enrollmentIDs: enrollmentID, commandPlist: plist)
+        return uuid
+    }
+
     /// Queue an `InstallProfile` of a configuration profile (mobileconfig
     /// bytes). The profile installs on the device's next checkin.
     @discardableResult
