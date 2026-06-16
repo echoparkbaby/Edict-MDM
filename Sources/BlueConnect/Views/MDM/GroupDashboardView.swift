@@ -89,6 +89,10 @@ struct GroupDashboardView: View {
     @State private var inventoryDeviceID: String?
     /// A rolled-up Apps / Local Users row expanded to show which Macs it's on.
     @State private var expandedInventoryRow: String?
+    /// Live firewall + SIP pulled from MDM (enrollmentID → facts), overriding
+    /// MunkiReport for those Macs. Populated by the "Pull via MDM" action.
+    @State private var mdmSec: [String: MDMSecurityFacts] = [:]
+    @State private var pullingSecurity = false
     @State private var enablingAll = false
     @State private var editingGroup: SmartGroup?
     @State private var pushCert: PushCertInfo?
@@ -286,9 +290,11 @@ struct GroupDashboardView: View {
             case .attention:
                 inventoryTable(columns: [("Device", 180), ("Issues", 400), ("Score", 64)], rows: attentionRows)
             case .appFirewall:
-                inventoryTable(columns: [("Device", 180), ("State", 150), ("Stealth", 90), ("Logging", 90)], rows: firewallRows)
+                inventoryTable(columns: [("Device", 180), ("State", 150), ("Stealth", 90), ("Logging", 90)], rows: firewallRows,
+                               onPullMDM: { Task { await pullSecurityViaMDM() } })
             case .gatekeeper:
-                inventoryTable(columns: [("Device", 180), ("Gatekeeper", 130), ("SIP", 130), ("Activation Lock", 140)], rows: gatekeeperRows)
+                inventoryTable(columns: [("Device", 180), ("Gatekeeper", 130), ("SIP", 130), ("Activation Lock", 140)], rows: gatekeeperRows,
+                               onPullMDM: { Task { await pullSecurityViaMDM() } })
             }
         }
     }
@@ -424,15 +430,52 @@ struct GroupDashboardView: View {
 
     private var firewallRows: [(id: String, cells: [String])] {
         inventoryScope.compactMap { d in
-            guard let fw = mr(for: d)?.firewall else { return nil }
-            return (id: d.id, cells: [label(for: d), fw.stateText, fw.stealthText, fw.loggingText])
+            let mdm = mdmSec[d.id]              // live MDM (preferred)
+            let fw = mr(for: d)?.firewall       // MunkiReport (fallback)
+            guard mdm != nil || fw != nil else { return nil }
+            // MDM doesn't report the logging setting; that stays MunkiReport.
+            return (id: d.id, cells: [label(for: d),
+                                      mdm?.firewallStateText ?? fw?.stateText ?? "—",
+                                      mdm?.stealthText ?? fw?.stealthText ?? "—",
+                                      fw?.loggingText ?? "—"])
         }
     }
 
     private var gatekeeperRows: [(id: String, cells: [String])] {
         inventoryScope.compactMap { d in
-            guard let s = mr(for: d)?.security else { return nil }
-            return (id: d.id, cells: [label(for: d), s.gatekeeperText, s.sipText, s.activationLockText])
+            let mdm = mdmSec[d.id]
+            let s = mr(for: d)?.security
+            guard mdm != nil || s != nil else { return nil }
+            // Gatekeeper + Activation Lock have no (cheap) MDM source, so they
+            // stay MunkiReport; SIP prefers the live MDM value.
+            return (id: d.id, cells: [label(for: d),
+                                      s?.gatekeeperText ?? "—",
+                                      mdm?.sipText ?? s?.sipText ?? "—",
+                                      s?.activationLockText ?? "—"])
+        }
+    }
+
+    /// Query firewall + SIP live from each scoped Mac via the MDM
+    /// SecurityInfo command, overriding MunkiReport for the ones that answer.
+    /// On demand (not in refresh) — it's a command-per-device pull and needs
+    /// each Mac online.
+    @MainActor
+    private func pullSecurityViaMDM() async {
+        pullingSecurity = true
+        defer { pullingSecurity = false }
+        let nano = NanoMDMService(settings: settings)
+        let api = EnrollmentsAPI(settings: settings)
+        for d in inventoryScope {
+            guard let uuid = try? await nano.requestSecurityInfo(enrollmentID: d.id) else { continue }
+            _ = try? await nano.push(enrollmentIDs: d.id)
+            for _ in 0..<10 {
+                try? await Task.sleep(for: .seconds(2))
+                if let res = try? await api.commandResult(uuid: uuid) {
+                    let facts = MDMSecurityFacts(securityInfo: res.dict("SecurityInfo"))
+                    if facts.hasData { mdmSec[d.id] = facts }
+                    break
+                }
+            }
         }
     }
 
@@ -446,13 +489,23 @@ struct GroupDashboardView: View {
     /// then a horizontally-scrolling sortable-width table. Column width 0
     /// means "flexible".
     private func inventoryTable(columns: [(String, CGFloat)], rows: [(id: String, cells: [String])],
-                                drillDevices: ((String) -> [String])? = nil) -> some View {
+                                drillDevices: ((String) -> [String])? = nil,
+                                onPullMDM: (() -> Void)? = nil) -> some View {
         let filtered = filteredRows(rows)
         return VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Text(category.rawValue).font(.title3.bold())
                 Text("\(filtered.count)").font(.callout).foregroundStyle(.secondary)
                 Spacer()
+                if let onPullMDM {
+                    Button { onPullMDM() } label: {
+                        if pullingSecurity { ProgressView().controlSize(.small) }
+                        else { Label("Pull via MDM", systemImage: "antenna.radiowaves.left.and.right") }
+                    }
+                    .controlSize(.small)
+                    .disabled(pullingSecurity)
+                    .help("Query firewall + SIP live from each Mac in scope via MDM, overriding MunkiReport for the ones that answer.")
+                }
                 Picker("", selection: $inventoryDeviceID) {
                     Text("All Macs").tag(String?.none)
                     ForEach(scoped, id: \.id) { d in
