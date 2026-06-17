@@ -1,17 +1,24 @@
 import Foundation
 import Observation
 
-/// Per-serial cache of MunkiReport inventory pulls. Owned by ContentView,
-/// shared with the right-side inspector pane (and the standalone sheet).
-/// Selecting the same host twice in a row hits the cache and renders
-/// instantly; the user can force a refresh from the pane's button.
+/// Per-serial cache of MunkiReport inventory pulls. Owned by the app,
+/// shared with the dashboard, the right-side inspector pane, and the
+/// standalone sheet. Selecting the same host twice in a row hits the cache
+/// and renders instantly.
+///
+/// The cache is persisted to JSON under Application Support and rehydrated
+/// at launch, so reopening the app shows the last-known inventory (FileVault,
+/// SIP, Gatekeeper, apps, …) immediately instead of a blank table while it
+/// re-fetches. Each serial is still refreshed once per app session so the
+/// shown data can't go permanently stale.
 ///
 /// Errors are recorded per-serial so the UI can surface a meaningful
 /// "MR fetch failed for this host" without losing other cached entries.
 @Observable
 @MainActor
 final class MunkiReportInventoryStore {
-    /// `serial → inventory` cache. Stays in memory for the app session.
+    /// `serial → inventory` cache. Rehydrated from disk at launch, kept in
+    /// sync to disk on every successful fetch.
     var bySerial: [String: MRHostInventory] = [:]
     /// Which serial we're actively fetching right now (used by the UI to
     /// show a spinner only for the row in flight).
@@ -20,12 +27,23 @@ final class MunkiReportInventoryStore {
     /// without globally blanking everything.
     var errorBySerial: [String: String] = [:]
 
-    /// Kick off a fetch for `serial` if we don't have it cached and aren't
-    /// already fetching it. Cheap to call repeatedly — safe to invoke
-    /// from `.onChange(of: selectedSerial)`.
+    /// Serials already refreshed from the server this app session. A
+    /// rehydrated disk entry still triggers one background refresh on first
+    /// use this launch, but repeated host selection after that hits the
+    /// cache without re-fetching.
+    @ObservationIgnored private var freshThisSession: Set<String> = []
+
+    init() {
+        bySerial = Self.loadCache()
+    }
+
+    /// Kick off a fetch for `serial` unless it's already been refreshed this
+    /// session (or is in flight). Cheap to call repeatedly — safe from
+    /// `.onChange`/`.task`. A rehydrated entry is shown immediately and
+    /// refreshed in the background the first time it's needed this launch.
     func loadIfNeeded(serial: String, settings: SettingsStore) {
         guard !serial.isEmpty else { return }
-        guard bySerial[serial] == nil, loadingSerial != serial else { return }
+        guard !freshThisSession.contains(serial), loadingSerial != serial else { return }
         guard settings.isMunkiReportAPIConfigured else { return }
         Task { await fetch(serial: serial, settings: settings) }
     }
@@ -35,6 +53,7 @@ final class MunkiReportInventoryStore {
     func refresh(serial: String, settings: SettingsStore) {
         guard !serial.isEmpty else { return }
         bySerial.removeValue(forKey: serial)
+        freshThisSession.remove(serial)
         errorBySerial.removeValue(forKey: serial)
         Task { await fetch(serial: serial, settings: settings) }
     }
@@ -46,9 +65,35 @@ final class MunkiReportInventoryStore {
             let client = MunkiReportClient()
             let inv = try await client.fetchHost(serial: serial, settings: settings)
             bySerial[serial] = inv
+            freshThisSession.insert(serial)
             errorBySerial.removeValue(forKey: serial)
+            persist()
         } catch {
             errorBySerial[serial] = error.localizedDescription
+        }
+    }
+
+    // MARK: - Disk cache
+
+    private static var cacheURL: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return base.appendingPathComponent("EdictMDM", isDirectory: true)
+            .appendingPathComponent("munkireport-inventory.json")
+    }
+
+    private static func loadCache() -> [String: MRHostInventory] {
+        guard let data = try? Data(contentsOf: cacheURL),
+              let map = try? JSONDecoder().decode([String: MRHostInventory].self, from: data)
+        else { return [:] }
+        return map
+    }
+
+    private func persist() {
+        let url = Self.cacheURL
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        if let data = try? JSONEncoder().encode(bySerial) {
+            try? data.write(to: url)
         }
     }
 }
