@@ -389,9 +389,11 @@ struct ProfilesView: View {
         )
     }
 
-    private func bscMatched(_ d: MDMEnrollment) -> Bool {
-        guard let serial = d.serialNumber, !serial.isEmpty else { return false }
-        return hostStore.hosts.contains { ($0.serialnum ?? "").caseInsensitiveCompare(serial) == .orderedSame }
+    private func bscMatched(_ d: MDMEnrollment) -> Bool { bscHost(d) != nil }
+
+    private func bscHost(_ d: MDMEnrollment) -> BlueSkyHost? {
+        guard let serial = d.serialNumber, !serial.isEmpty else { return nil }
+        return hostStore.hosts.first { ($0.serialnum ?? "").caseInsensitiveCompare(serial) == .orderedSame }
     }
 
     private func groupMembers(_ g: SmartGroup) -> [MDMEnrollment] {
@@ -400,11 +402,44 @@ struct ProfilesView: View {
                                     minOS: settings.mdmMinOSVersion) }
     }
 
+    /// Friendly name for a target row: operator label, then the BlueSky host
+    /// name (free, already cached for BSC clients), then the device's own
+    /// computer name reported by MDM (DeviceInformation → DeviceName, cached
+    /// in `autoName`), then the serial, then a short id. No MunkiReport — the
+    /// name is the device's to give, and MDM reports it.
     private func deviceLabel(_ d: MDMEnrollment) -> String {
-        if let stored = settings.mdmDevices.first(where: { $0.id == d.id })?.label, !stored.isEmpty {
-            return stored
-        }
+        let dev = settings.mdmDevices.first { $0.id == d.id }
+        if let stored = dev?.label, !stored.isEmpty { return stored }
+        if let host = bscHost(d) { return host.displayName }
+        if let auto = dev?.autoName, !auto.isEmpty { return auto }
         return d.serialNumber ?? String(d.id.prefix(8))
+    }
+
+    /// Ask MDM for the computer name of any device that would otherwise show
+    /// as a serial (no operator label, no BlueSky match, no cached name) and
+    /// stash it in `autoName`. One DeviceInformation command per unnamed Mac,
+    /// cached persistently — so it's a one-time cost that converges.
+    private func resolveDeviceNames() async {
+        let unnamed = devices.filter { d in
+            let dev = settings.mdmDevices.first { $0.id == d.id }
+            return (dev?.label ?? "").isEmpty && (dev?.autoName ?? "").isEmpty && bscHost(d) == nil
+        }
+        guard !unnamed.isEmpty else { return }
+        let nano = NanoMDMService(settings: settings)
+        let api = EnrollmentsAPI(settings: settings)
+        for d in unnamed {
+            guard let uuid = try? await nano.requestDeviceInformation(enrollmentID: d.id) else { continue }
+            _ = try? await nano.push(enrollmentIDs: d.id)
+            for _ in 0..<8 {
+                try? await Task.sleep(for: .seconds(2))
+                guard let res = try? await api.commandResult(uuid: uuid) else { continue }
+                if let name = (res.dict("QueryResponses")["DeviceName"] as? String)?
+                    .trimmingCharacters(in: .whitespaces), !name.isEmpty {
+                    settings.setMDMDeviceAutoName(name, for: d.id)
+                }
+                break
+            }
+        }
     }
 
 
@@ -431,6 +466,10 @@ struct ProfilesView: View {
         loadingDevices = true
         defer { loadingDevices = false }
         devices = (try? await EnrollmentsAPI(settings: settings).list().filter(\.isDevice)) ?? []
+        // Resolve real computer names from MDM (cached) for anything that
+        // would otherwise show a bare serial. Runs in the background so the
+        // list appears immediately and names fill in as they come back.
+        Task { await resolveDeviceNames() }
         // Facts for smart-group membership.
         let svc = KMFDDMService(settings: settings)
         var os: [String: String] = [:], fv: [String: String] = [:], mdl: [String: String] = [:]

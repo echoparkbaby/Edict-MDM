@@ -642,6 +642,20 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    /// Cache the device-reported computer name (DeviceInformation →
+    /// DeviceName) so target lists / synthetic rows show a real name instead
+    /// of a serial. Persists via `mdmDevicesRaw`; no-op if unchanged.
+    func setMDMDeviceAutoName(_ name: String, for id: String) {
+        var list = mdmDevices
+        if let idx = list.firstIndex(where: { $0.id == id }) {
+            guard list[idx].autoName != name else { return }
+            list[idx].autoName = name
+        } else {
+            list.append(MDMDevice(id: id, label: "", autoName: name))
+        }
+        mdmDevices = list
+    }
+
     // MARK: - UniFi profiles (multi-controller)
 
     /// Per-profile Keychain account name. Suffixed by the profile's
