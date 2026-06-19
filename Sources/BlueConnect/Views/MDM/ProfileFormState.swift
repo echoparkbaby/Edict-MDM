@@ -131,10 +131,16 @@ struct ProfileFormState {
     var wifiPassword = ""
     var wifiHidden = false
     var wifiSecurity: ProfilePayloads.WiFiSecurity = .wpa2
-    // Passcode
+    // Passcode / password policy
     var minLength = 8
     var requireAlphanumeric = true
-    var maxInactivity = 0   // minutes; 0 = none
+    var maxInactivity = 0       // minutes; 0 = none
+    var pcDisallowSimple = false
+    var pcMinComplex = 0        // minimum special characters
+    var pcMaxAgeDays = 0        // expiration; 0 = never
+    var pcHistory = 0           // remember last N passwords; 0 = off
+    var pcMaxFailed = 0         // lock after N failed attempts; 0 = off
+    var pcPreventRemoval = false
     // Custom
     var customXML = ""
 
@@ -296,7 +302,13 @@ struct ProfileFormState {
         case .passcode:
             return (ProfilePayloads.passcode(minLength: minLength,
                                              requireAlphanumeric: requireAlphanumeric,
-                                             maxInactivityMinutes: maxInactivity == 0 ? nil : maxInactivity),
+                                             disallowSimple: pcDisallowSimple,
+                                             minComplexChars: pcMinComplex,
+                                             maxAgeDays: pcMaxAgeDays,
+                                             history: pcHistory,
+                                             maxFailedAttempts: pcMaxFailed,
+                                             maxInactivityMinutes: maxInactivity == 0 ? nil : maxInactivity,
+                                             preventRemoval: pcPreventRemoval),
                     "Password Policy")
         case .custom:
             return (try ProfilePayloads.custom(xml: customXML), "Custom profile")

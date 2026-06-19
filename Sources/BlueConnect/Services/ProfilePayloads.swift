@@ -31,19 +31,30 @@ enum ProfilePayloads {
     }
 
     /// `com.apple.mobiledevice.passwordpolicy` — login password policy.
-    static func passcode(minLength: Int, requireAlphanumeric: Bool,
-                         maxInactivityMinutes: Int?) -> Data {
+    /// `preventRemoval` locks the profile itself so the user can't strip the
+    /// policy off in System Settings (MDM removal only).
+    static func passcode(minLength: Int, requireAlphanumeric: Bool, disallowSimple: Bool,
+                         minComplexChars: Int, maxAgeDays: Int, history: Int,
+                         maxFailedAttempts: Int, maxInactivityMinutes: Int?,
+                         preventRemoval: Bool) -> Data {
         var payload: [String: Any] = base("com.apple.mobiledevice.passwordpolicy",
                                            displayName: "Password Policy")
+        payload["forcePIN"] = true
         payload["minLength"] = minLength
         payload["requireAlphanumeric"] = requireAlphanumeric
-        payload["allowSimple"] = !requireAlphanumeric
-        if let m = maxInactivityMinutes, m > 0 {
-            payload["maxInactivity"] = m
-        }
+        // Simple = repeating/ascending characters (1234, aaaa). Alphanumeric
+        // already blocks all-letter simples, but disallowSimple is the
+        // dedicated knob.
+        payload["allowSimple"] = !disallowSimple
+        if minComplexChars > 0 { payload["minComplexChars"] = minComplexChars }
+        if maxAgeDays > 0 { payload["maxPINAgeInDays"] = maxAgeDays }
+        if history > 0 { payload["pinHistory"] = history }
+        // Apple's minimum for maxFailedAttempts is 2; treat 1 as "off".
+        if maxFailedAttempts >= 2 { payload["maxFailedAttempts"] = maxFailedAttempts }
+        if let m = maxInactivityMinutes, m > 0 { payload["maxInactivity"] = m }
         return profile(displayName: "Password Policy",
                        identifier: "xyz.hellocomputer.edict.passcode",
-                       payloads: [payload])
+                       payloads: [payload], removalDisallowed: preventRemoval)
     }
 
     /// `com.apple.MCX.FileVault2` — force-enable FileVault disk
@@ -573,8 +584,9 @@ enum ProfilePayloads {
     }
 
     private static func profile(displayName: String, identifier: String,
-                                payloads: [[String: Any]]) -> Data {
-        let dict: [String: Any] = [
+                                payloads: [[String: Any]],
+                                removalDisallowed: Bool = false) -> Data {
+        var dict: [String: Any] = [
             "PayloadType": "Configuration",
             "PayloadVersion": 1,
             "PayloadIdentifier": identifier,
@@ -583,6 +595,10 @@ enum ProfilePayloads {
             "PayloadScope": "System",
             "PayloadContent": payloads,
         ]
+        // PayloadRemovalDisallowed locks the profile to MDM removal only —
+        // the user can't take it off in System Settings. Only written when
+        // requested so the diff viewer doesn't churn on existing profiles.
+        if removalDisallowed { dict["PayloadRemovalDisallowed"] = true }
         return (try? PropertyListSerialization.data(fromPropertyList: dict,
                                                     format: .xml, options: 0)) ?? Data()
     }

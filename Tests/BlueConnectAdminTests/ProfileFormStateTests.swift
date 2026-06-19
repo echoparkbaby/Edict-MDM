@@ -81,6 +81,36 @@ struct ProfileFormStateTests {
         #expect((payloads[0]["ratingRegion"] as? String) == "us")
     }
 
+    @Test func passcodePolicyKeysAndRemovalLock() throws {
+        var s = ProfileFormState()
+        s.minLength = 12; s.requireAlphanumeric = true; s.pcDisallowSimple = true
+        s.pcMinComplex = 2; s.pcMaxAgeDays = 90; s.pcHistory = 5; s.pcMaxFailed = 6
+        s.maxInactivity = 10; s.pcPreventRemoval = true
+        let data = try s.build(for: .passcode).data
+        let plist = try #require(try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+        #expect(plist["PayloadRemovalDisallowed"] as? Bool == true)
+        let p = try #require((plist["PayloadContent"] as? [[String: Any]])?.first)
+        #expect(p["minLength"] as? Int == 12)
+        #expect(p["allowSimple"] as? Bool == false)         // disallowSimple → allowSimple false
+        #expect(p["minComplexChars"] as? Int == 2)
+        #expect(p["maxPINAgeInDays"] as? Int == 90)
+        #expect(p["pinHistory"] as? Int == 5)
+        #expect(p["maxFailedAttempts"] as? Int == 6)
+        #expect(p["maxInactivity"] as? Int == 10)
+        #expect(p["forcePIN"] as? Bool == true)
+    }
+
+    @Test func passcodeOmitsOptionalKeysAndRemovalByDefault() throws {
+        let data = try ProfileFormState().build(for: .passcode).data
+        let plist = try #require(try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+        #expect(plist["PayloadRemovalDisallowed"] == nil)   // off by default
+        let p = try #require((plist["PayloadContent"] as? [[String: Any]])?.first)
+        #expect(p["minComplexChars"] == nil)                // zero → omitted
+        #expect(p["maxPINAgeInDays"] == nil)
+        #expect(p["pinHistory"] == nil)
+        #expect(p["maxFailedAttempts"] == nil)              // default 0 < 2 → omitted
+    }
+
     @Test func buildNamesTheProfile() throws {
         var s = ProfileFormState()
         let fv = try s.build(for: .fileVault)

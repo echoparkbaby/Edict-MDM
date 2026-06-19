@@ -123,7 +123,7 @@ enum ProfileTemplate: String, CaseIterable, Identifiable {
         case .finder: return "Show drives on the desktop, reveal hidden files, trash warnings."
         case .kext: return "Allow third-party kernel extensions by developer Team ID."
         case .wifi: return "Auto-join Wi-Fi network pushed to the Mac's system store."
-        case .passcode: return "Login password requirements (length, complexity, lock timeout)."
+        case .passcode: return "Login password policy — length, complexity, expiry, history, lockout — plus lock the profile so users can't remove it."
         case .custom: return "Paste or drag in any .mobileconfig — covers every payload type."
         }
     }

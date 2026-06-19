@@ -351,9 +351,25 @@ struct TemplateFormView: View {
             Form {
                 Stepper("Minimum length: \(form.minLength)", value: $form.minLength, in: 4...64)
                 Toggle("Require letters and numbers", isOn: $form.requireAlphanumeric)
+                Toggle("Disallow simple passwords (repeats / sequences)", isOn: $form.pcDisallowSimple)
+                Stepper(form.pcMinComplex == 0 ? "Special characters: none required"
+                        : "Require \(form.pcMinComplex) special character\(form.pcMinComplex == 1 ? "" : "s")",
+                        value: $form.pcMinComplex, in: 0...4)
+                Stepper(form.pcMaxAgeDays == 0 ? "Expiration: never"
+                        : "Expire password after \(form.pcMaxAgeDays) days",
+                        value: $form.pcMaxAgeDays, in: 0...365, step: 15)
+                Stepper(form.pcHistory == 0 ? "Password history: off"
+                        : "Block reuse of last \(form.pcHistory)",
+                        value: $form.pcHistory, in: 0...20)
+                Stepper(form.pcMaxFailed < 2 ? "Lock after failed attempts: off"
+                        : "Lock after \(form.pcMaxFailed) failed attempts",
+                        value: $form.pcMaxFailed, in: 0...11)
                 Stepper(form.maxInactivity == 0 ? "Auto-lock: off"
                         : "Auto-lock after \(form.maxInactivity) min",
                         value: $form.maxInactivity, in: 0...60, step: 5)
+                Toggle("Prevent users from removing this profile", isOn: $form.pcPreventRemoval)
+                Text("“Prevent removal” locks the profile so it can only be taken off via MDM — a user (even an admin) can't strip the policy in System Settings. It applies to this profile only. Note: a profile sets the rules the password must satisfy; it can't stop a user from changing their own password to another compliant one.")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             .formStyle(.columns)
         case .custom:
