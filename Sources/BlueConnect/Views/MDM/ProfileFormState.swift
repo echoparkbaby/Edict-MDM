@@ -118,11 +118,14 @@ struct ProfileFormState {
     var chromeHome = ""
     var chromeRestore = false
     var chromeNoIncognito = false
-    // Screen Time (US rating thresholds; 1000 = allow all)
+    // Screen Time — rating thresholds (1000 = allow all), region, and extras
+    var stRegion = "us"
     var stApps = 1000
     var stMovies = 1000
     var stTV = 1000
     var stExplicit = true
+    var stSiriFilter = false
+    var stLimitWeb = false
     // Wi-Fi
     var ssid = ""
     var wifiPassword = ""
@@ -283,8 +286,9 @@ struct ProfileFormState {
                                            restoreLastSession: chromeRestore,
                                            disableIncognito: chromeNoIncognito), "Chrome (managed)")
         case .screenTime:
-            return (ProfilePayloads.screenTime(ratingApps: stApps, ratingMovies: stMovies,
-                                               ratingTVShows: stTV, allowExplicitContent: stExplicit), "Screen Time")
+            return (ProfilePayloads.screenTime(ratingRegion: stRegion, ratingApps: stApps, ratingMovies: stMovies,
+                                               ratingTVShows: stTV, allowExplicitContent: stExplicit,
+                                               siriProfanityFilter: stSiriFilter, limitAdultWebsites: stLimitWeb), "Screen Time")
         case .wifi:
             return (ProfilePayloads.wifi(ssid: ssid, password: wifiPassword,
                                          hidden: wifiHidden, security: wifiSecurity),

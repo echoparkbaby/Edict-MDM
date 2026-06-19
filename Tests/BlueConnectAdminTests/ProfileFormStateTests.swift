@@ -58,6 +58,29 @@ struct ProfileFormStateTests {
         #expect(s.isValid(for: .pppc))
     }
 
+    @Test func screenTimeBuildsContentAndWebPayloads() throws {
+        var s = ProfileFormState()
+        s.stRegion = "gb"; s.stSiriFilter = true; s.stLimitWeb = true; s.stMovies = 400
+        let data = try s.build(for: .screenTime).data
+        let plist = try #require(try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+        let payloads = try #require(plist["PayloadContent"] as? [[String: Any]])
+        #expect(payloads.count == 2)   // restrictions + web content filter
+        let access = try #require(payloads.first { ($0["PayloadType"] as? String) == "com.apple.applicationaccess" })
+        #expect(access["ratingRegion"] as? String == "gb")
+        #expect(access["forceAssistantProfanityFilter"] as? Bool == true)
+        #expect(access["ratingMovies"] as? Int == 400)
+        let web = try #require(payloads.first { ($0["PayloadType"] as? String) == "com.apple.webcontent-filter" })
+        #expect(web["AutoFilterEnabled"] as? Bool == true)
+    }
+
+    @Test func screenTimeOmitsWebPayloadAndDefaultsRegion() throws {
+        let data = try ProfileFormState().build(for: .screenTime).data
+        let plist = try #require(try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+        let payloads = try #require(plist["PayloadContent"] as? [[String: Any]])
+        #expect(payloads.count == 1)   // no web filter when the toggle is off
+        #expect((payloads[0]["ratingRegion"] as? String) == "us")
+    }
+
     @Test func buildNamesTheProfile() throws {
         var s = ProfileFormState()
         let fv = try s.build(for: .fileVault)

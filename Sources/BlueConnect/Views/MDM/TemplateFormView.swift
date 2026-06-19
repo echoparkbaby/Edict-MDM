@@ -278,6 +278,17 @@ struct TemplateFormView: View {
             .formStyle(.columns)
         case .screenTime:
             Form {
+                Picker("Rating region", selection: $form.stRegion) {
+                    Text("United States").tag("us")
+                    Text("United Kingdom").tag("gb")
+                    Text("Canada").tag("ca")
+                    Text("Australia").tag("au")
+                    Text("Ireland").tag("ie")
+                    Text("Germany").tag("de")
+                    Text("France").tag("fr")
+                    Text("Japan").tag("jp")
+                    Text("New Zealand").tag("nz")
+                }
                 Picker("Apps", selection: $form.stApps) {
                     Text("Allow all").tag(1000); Text("17+").tag(600); Text("12+").tag(300)
                     Text("9+").tag(200); Text("4+").tag(100); Text("Don't allow").tag(0)
@@ -292,7 +303,9 @@ struct TemplateFormView: View {
                     Text("TV-Y").tag(100); Text("Don't allow").tag(0)
                 }
                 Toggle("Allow explicit content (music, podcasts, news)", isOn: $form.stExplicit)
-                Text("US rating system. Sets Content & Privacy restrictions. Screen Time downtime / app limits aren't profile-deliverable (Family Controls only).")
+                Toggle("Filter explicit language in Siri", isOn: $form.stSiriFilter)
+                Toggle("Limit adult websites (built-in web filter)", isOn: $form.stLimitWeb)
+                Text("Sets Content & Privacy restrictions. Rating labels are US examples — the level you pick maps to the chosen region's equivalent ratings. Screen Time downtime / app limits aren't profile-deliverable (those are Family Controls only).")
                     .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             .formStyle(.columns)

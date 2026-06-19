@@ -441,16 +441,35 @@ enum ProfilePayloads {
     /// blocking. (Downtime / app time-limits aren't a profile payload —
     /// those are Family Controls only.) Rating ints are Apple's US
     /// thresholds; 1000 = allow all, 0 = allow none.
-    static func screenTime(ratingApps: Int, ratingMovies: Int, ratingTVShows: Int,
-                           allowExplicitContent: Bool) -> Data {
-        var r: [String: Any] = base("com.apple.applicationaccess", displayName: "Screen Time")
-        r["ratingRegion"] = "us"
+    static func screenTime(ratingRegion: String, ratingApps: Int, ratingMovies: Int, ratingTVShows: Int,
+                           allowExplicitContent: Bool, siriProfanityFilter: Bool,
+                           limitAdultWebsites: Bool) -> Data {
+        // Content & Privacy ratings + Siri filter live in the restrictions
+        // payload. The OS interprets the numeric rating thresholds in the
+        // ratingRegion's own scheme (so "allow all" / most-restrictive are
+        // region-safe; the in-between tiers map to the region's equivalents).
+        var r: [String: Any] = base("com.apple.applicationaccess", displayName: "Screen Time — Content & Privacy")
+        let region = ratingRegion.trimmingCharacters(in: .whitespaces)
+        r["ratingRegion"] = region.isEmpty ? "us" : region.lowercased()
         r["ratingApps"] = ratingApps
         r["ratingMovies"] = ratingMovies
         r["ratingTVShows"] = ratingTVShows
         r["allowExplicitContent"] = allowExplicitContent
+        r["forceAssistantProfanityFilter"] = siriProfanityFilter
+        var payloads: [[String: Any]] = [r]
+
+        // "Limit Adult Websites" — the built-in web content filter, the same
+        // BuiltIn/AutoFilterEnabled payload the Web Content Filter template
+        // produces. Bundled here so a Screen Time profile can cover web
+        // content the way Apple's own Screen Time UI groups it.
+        if limitAdultWebsites {
+            var w: [String: Any] = base("com.apple.webcontent-filter", displayName: "Limit Adult Websites")
+            w["FilterType"] = "BuiltIn"
+            w["AutoFilterEnabled"] = true
+            payloads.append(w)
+        }
         return profile(displayName: "Screen Time",
-                       identifier: "xyz.hellocomputer.edict.screentime", payloads: [r])
+                       identifier: "xyz.hellocomputer.edict.screentime", payloads: payloads)
     }
 
     // MARK: - iMazing-catalog–derived templates

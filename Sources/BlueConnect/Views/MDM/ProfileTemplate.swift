@@ -115,7 +115,7 @@ enum ProfileTemplate: String, CaseIterable, Identifiable {
         case .energy: return "Energy Saver — display/system sleep, wake-on-LAN, restart after power failure."
         case .safari: return "Managed Safari — homepage, new-window behavior, private browsing."
         case .chrome: return "Managed Chrome enterprise policy — homepage, startup, incognito."
-        case .screenTime: return "Screen Time content limits — app/movie/TV age ratings + explicit content."
+        case .screenTime: return "Content & Privacy — app/movie/TV ratings by region, explicit content, Siri language filter, adult-website limit."
         case .munki: return "Point the Mac at your BlueConnect Munki repo for managed software."
         case .timeMachine: return "Managed Time Machine backup destination and schedule."
         case .dns: return "Encrypted DNS (DoH/DoT) — route lookups through a private resolver."
