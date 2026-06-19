@@ -25,6 +25,7 @@ struct BlueConnectAdminApp: App {
     @State private var chatController = ChatSessionController()
     @State private var networkScanner = NetworkScanner()
     @State private var mrInventory = MunkiReportInventoryStore()
+    @State private var ddmLibrary = DDMLibraryStore()
     @StateObject private var quickActionStore = QuickActionStore()
     @State private var quickActionLauncher = QuickActionLauncher()
 
@@ -71,6 +72,7 @@ struct BlueConnectAdminApp: App {
             .environment(chatController)
             .environment(networkScanner)
             .environment(mrInventory)
+            .environment(ddmLibrary)
             .environmentObject(quickActionStore)
             .environment(quickActionLauncher)
             .environment(mdmScheduler)
@@ -166,6 +168,7 @@ struct BlueConnectAdminApp: App {
                 .environment(packageCatalog)
                 .environment(packagePicker)
                 .environment(mrInventory)
+                .environment(ddmLibrary)
                 .environmentObject(quickActionStore)
         }
 

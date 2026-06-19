@@ -31,12 +31,27 @@ struct DeclarationsView: View {
     @State private var confirmingDelete = false
     @State private var addSetName = "default"
 
+    private enum Mode: String { case library = "Library", server = "Server (KMFDDM)" }
+    @State private var mode: Mode = .library
+
     var body: some View {
         Group {
             if !settings.mdmEnabled || !settings.mdmConfigured {
                 notConfigured
             } else {
-                browser
+                VStack(spacing: 0) {
+                    Picker("", selection: $mode) {
+                        Text("Library").tag(Mode.library)
+                        Text("Server (KMFDDM)").tag(Mode.server)
+                    }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize()
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    Divider()
+                    switch mode {
+                    case .library: DeclarationLibraryPane()
+                    case .server:  browser
+                    }
+                }
             }
         }
         .task { await refresh() }
@@ -401,7 +416,7 @@ struct DeclarationsView: View {
 /// before enabling Upload — KMFDDM rejects malformed declarations with
 /// an HTTP error either way, but catching it client-side gives a
 /// friendlier message.
-private struct NewDeclarationSheet: View {
+struct NewDeclarationSheet: View {
     @Environment(\.dismiss) private var dismiss
     let onUpload: (Data) async -> Void
 
