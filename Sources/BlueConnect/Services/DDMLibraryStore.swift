@@ -47,9 +47,11 @@ final class DDMLibraryStore {
 
     /// Push every declaration to KMFDDM, then reconcile set membership. PUT
     /// all first so a configuration exists before its activation / set add
-    /// fires the device notifications. Returns (declarations, set additions).
+    /// fires the device notifications. With `prune`, also delete server
+    /// declarations that aren't in the library (true mirror) — destructive,
+    /// so the UI confirms first. Returns counts.
     @discardableResult
-    func sync(settings: SettingsStore) async throws -> (declarations: Int, setAdds: Int) {
+    func sync(settings: SettingsStore, prune: Bool = false) async throws -> (declarations: Int, setAdds: Int, pruned: Int) {
         let kmf = KMFDDMService(settings: settings)
         for item in items { try await kmf.putDeclaration(item.json) }
         var adds = 0
@@ -59,7 +61,28 @@ final class DDMLibraryStore {
                 adds += 1
             }
         }
-        return (items.count, adds)
+        var pruned = 0
+        if prune {
+            let extras = try await pruneCandidates(settings: settings)
+            // Pull every extra out of its sets first (devices drop them, and
+            // no activation outlives the config it referenced), then delete.
+            for id in extras {
+                for set in (try? await kmf.setsForDeclaration(id: id)) ?? [] {
+                    try? await kmf.removeDeclaration(id, fromSet: set)
+                }
+            }
+            for id in extras { try? await kmf.deleteDeclaration(id: id) }
+            pruned = extras.count
+        }
+        return (items.count, adds, pruned)
+    }
+
+    /// Declarations on the KMFDDM server that aren't in the library — what a
+    /// mirror sync would delete. Computed for the confirmation preview.
+    func pruneCandidates(settings: SettingsStore) async throws -> [String] {
+        let serverIDs = try await KMFDDMService(settings: settings).listDeclarations()
+        let libraryIDs = Set(items.map(\.identifier))
+        return serverIDs.filter { !libraryIDs.contains($0) }.sorted()
     }
 
     /// Pull every declaration currently on the KMFDDM server into the

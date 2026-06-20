@@ -17,6 +17,8 @@ struct DeclarationLibraryPane: View {
     @State private var showEnforce = false
     @State private var pulling = false
     @State private var setsField = ""
+    @State private var mirrorCandidates: [String] = []
+    @State private var showMirrorConfirm = false
 
     private var selected: DDMLibraryItem? { library.items.first { $0.id == selectedID } }
 
@@ -45,6 +47,14 @@ struct DeclarationLibraryPane: View {
             }
         }
         .onChange(of: selectedID) { _, _ in setsField = selected?.sets.joined(separator: ", ") ?? "" }
+        .alert("Mirror to KMFDDM?", isPresented: $showMirrorConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Mirror & delete \(mirrorCandidates.count)", role: .destructive) { Task { await sync(prune: true) } }
+        } message: {
+            Text("Pushes your library, and DELETES \(mirrorCandidates.count) declaration(s) on KMFDDM that aren't in the library:\n\n"
+                 + mirrorCandidates.prefix(12).joined(separator: "\n")
+                 + (mirrorCandidates.count > 12 ? "\n… (+\(mirrorCandidates.count - 12) more)" : ""))
+        }
     }
 
     // MARK: - Toolbar
@@ -70,10 +80,16 @@ struct DeclarationLibraryPane: View {
             }
             .fixedSize()
             .disabled(pulling)
-            Button("Sync to KMFDDM", systemImage: "arrow.up.circle") { Task { await sync() } }
-                .disabled(syncing || library.items.isEmpty)
-                .overlay { if syncing { ProgressView().controlSize(.small) } }
-                .help("PUT every declaration to KMFDDM and reconcile set membership")
+            if syncing { ProgressView().controlSize(.small) }
+            Menu {
+                Button("Sync — add + update") { Task { await sync(prune: false) } }
+                Button("Mirror — also delete server extras…", role: .destructive) { Task { await prepareMirror() } }
+            } label: {
+                Label("Sync to KMFDDM", systemImage: "arrow.up.circle")
+            }
+            .fixedSize()
+            .disabled(syncing || library.items.isEmpty)
+            .help("Push the library to KMFDDM. Mirror also deletes server declarations that aren't in your library.")
             Button("Export folder…", systemImage: "folder") { exportFolder() }
                 .disabled(library.items.isEmpty)
                 .help("Write a ddm_examples / syncdir folder (configurations/, activations/, sets/) for git")
@@ -220,15 +236,33 @@ struct DeclarationLibraryPane: View {
         catch { errorText = error.localizedDescription }
     }
 
-    private func sync() async {
+    private func sync(prune: Bool) async {
         syncing = true; notice = nil; errorText = nil
         defer { syncing = false }
         do {
-            let r = try await library.sync(settings: settings)
-            flash("Synced \(r.declarations) declaration(s), \(r.setAdds) set assignment(s)")
+            let r = try await library.sync(settings: settings, prune: prune)
+            var msg = "Synced \(r.declarations) declaration(s), \(r.setAdds) set assignment(s)"
+            if prune { msg += ", deleted \(r.pruned) extra(s)" }
+            flash(msg)
         } catch {
             errorText = error.localizedDescription
         }
+    }
+
+    /// Compute what a mirror would delete; confirm before doing it (or just
+    /// sync if there's nothing extra on the server).
+    private func prepareMirror() async {
+        syncing = true; notice = nil; errorText = nil
+        do {
+            mirrorCandidates = try await library.pruneCandidates(settings: settings)
+        } catch {
+            errorText = error.localizedDescription
+            syncing = false
+            return
+        }
+        syncing = false
+        if mirrorCandidates.isEmpty { await sync(prune: false) }
+        else { showMirrorConfirm = true }
     }
 
     private func flash(_ message: String) {
