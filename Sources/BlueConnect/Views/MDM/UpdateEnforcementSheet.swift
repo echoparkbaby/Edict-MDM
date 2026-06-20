@@ -7,10 +7,13 @@ import SwiftUI
 /// ultimately force-installing on its own (macOS 14+). No JSON shown.
 struct UpdateEnforcementSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var settings: SettingsStore
-    @Environment(ActivityLog.self) private var activity
-    /// Called after a successful deploy so the declarations list refreshes.
-    let onDeployed: () -> Void
+    /// Label for the commit button — "Enforce" when deploying to KMFDDM,
+    /// "Add to Library" when authoring locally.
+    var commitLabel: String = "Enforce"
+    /// Receives the built configuration declaration, its identifier, and the
+    /// chosen set. The caller decides what to do (deploy, or add to library
+    /// with its paired activation).
+    let onCommit: (_ config: Data, _ configID: String, _ set: String) async throws -> Void
 
     @State private var targetVersion = ""
     @State private var deadline = Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date()
@@ -68,12 +71,12 @@ struct UpdateEnforcementSheet: View {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button {
-                    Task { await deploy() }
+                    Task { await commit() }
                 } label: {
                     if working {
                         ProgressView().controlSize(.small)
                     } else {
-                        Text("Enforce")
+                        Text(commitLabel)
                     }
                 }
                 .keyboardShortcut(.defaultAction)
@@ -87,7 +90,7 @@ struct UpdateEnforcementSheet: View {
     }
 
     @MainActor
-    private func deploy() async {
+    private func commit() async {
         working = true
         error = nil
         defer { working = false }
@@ -98,14 +101,7 @@ struct UpdateEnforcementSheet: View {
             detailsURL: detailsURL.trimmingCharacters(in: .whitespaces)
         )
         do {
-            try await KMFDDMService(settings: settings).deploy(
-                configJSON: config,
-                configID: identifier,
-                toSet: setName.trimmingCharacters(in: .whitespaces)
-            )
-            activity.record(.category, title: "Enforced macOS \(trimmedVersion)",
-                            detail: "by \(deadline.formatted(date: .abbreviated, time: .shortened)), set “\(setName)”")
-            onDeployed()
+            try await onCommit(config, identifier, setName.trimmingCharacters(in: .whitespaces))
             dismiss()
         } catch {
             self.error = error.localizedDescription

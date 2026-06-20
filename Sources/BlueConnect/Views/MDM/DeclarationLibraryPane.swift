@@ -14,6 +14,8 @@ struct DeclarationLibraryPane: View {
     @State private var notice: String?
     @State private var errorText: String?
     @State private var showNewSheet = false
+    @State private var showEnforce = false
+    @State private var pulling = false
     @State private var setsField = ""
 
     private var selected: DDMLibraryItem? { library.items.first { $0.id == selectedID } }
@@ -37,6 +39,11 @@ struct DeclarationLibraryPane: View {
                 else { errorText = "That isn't a valid declaration (needs Type + Identifier)." }
             }
         }
+        .sheet(isPresented: $showEnforce) {
+            UpdateEnforcementSheet(commitLabel: "Add to Library") { config, configID, set in
+                addEnforcement(config, configID: configID, set: set)
+            }
+        }
         .onChange(of: selectedID) { _, _ in setsField = selected?.sets.joined(separator: ", ") ?? "" }
     }
 
@@ -54,10 +61,15 @@ struct DeclarationLibraryPane: View {
             Menu("Add", systemImage: "plus") {
                 Button("Add Declaration (JSON)…") { showNewSheet = true }
                 Button("Import .json file(s)…") { importFiles() }
+                Button("Pull from KMFDDM (server)…") { Task { await pullFromServer() } }
                 Divider()
-                Button("Add Status Subscriptions (+ activation)") { addStatusSubscriptions() }
+                Section("Built-in") {
+                    Button("Enforce macOS Update…") { showEnforce = true }
+                    Button("Status Subscriptions (+ activation)") { addStatusSubscriptions() }
+                }
             }
             .fixedSize()
+            .disabled(pulling)
             Button("Sync to KMFDDM", systemImage: "arrow.up.circle") { Task { await sync() } }
                 .disabled(syncing || library.items.isEmpty)
                 .overlay { if syncing { ProgressView().controlSize(.small) } }
@@ -146,6 +158,27 @@ struct DeclarationLibraryPane: View {
         library.add(DDMDeclarations.statusSubscriptions(identifier: configID), sets: ["default"])
         library.add(DDMDeclarations.activation(identifier: actID, configurationIDs: [configID]), sets: ["default"])
         flash("Added status subscriptions + activation to set “default”")
+    }
+
+    /// Add an update-enforcement config + its paired activation to the
+    /// library (the deploy path's `KMFDDMService.deploy` makes the activation
+    /// itself; in the library we author both explicitly).
+    private func addEnforcement(_ config: Data, configID: String, set: String) {
+        let actID = DDMDeclarations.activationID(for: configID)
+        library.add(config, sets: [set])
+        library.add(DDMDeclarations.activation(identifier: actID, configurationIDs: [configID]), sets: [set])
+        flash("Added “\(configID)” + activation to set “\(set)”")
+    }
+
+    private func pullFromServer() async {
+        pulling = true; notice = nil; errorText = nil
+        defer { pulling = false }
+        do {
+            let n = try await library.importFromServer(settings: settings)
+            flash("Pulled \(n) declaration(s) from KMFDDM")
+        } catch {
+            errorText = error.localizedDescription
+        }
     }
 
     private func importFiles() {

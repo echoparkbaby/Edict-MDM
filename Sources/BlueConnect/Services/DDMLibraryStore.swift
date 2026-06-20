@@ -62,6 +62,22 @@ final class DDMLibraryStore {
         return (items.count, adds)
     }
 
+    /// Pull every declaration currently on the KMFDDM server into the
+    /// library, preserving its set membership — to adopt an existing setup
+    /// or edit what's already deployed. Returns how many were imported.
+    @discardableResult
+    func importFromServer(settings: SettingsStore) async throws -> Int {
+        let kmf = KMFDDMService(settings: settings)
+        let ids = try await kmf.listDeclarations()
+        var n = 0
+        for id in ids {
+            guard let data = try? await kmf.declaration(id: id) else { continue }
+            let sets = (try? await kmf.setsForDeclaration(id: id)) ?? []
+            if add(data, sets: sets) { n += 1 }
+        }
+        return n
+    }
+
     /// Write the library as a ddm_examples / syncdir folder.
     func export(to dir: URL) throws { try Self.write(items, to: dir) }
 

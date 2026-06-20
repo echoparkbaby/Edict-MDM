@@ -11,6 +11,7 @@ import SwiftUI
 /// DeclarativeManagement command on every association/content change.
 struct DeclarationsView: View {
     @EnvironmentObject private var settings: SettingsStore
+    @Environment(ActivityLog.self) private var activity
 
     @State private var declarations: [String] = []
     @State private var selectedID: String?
@@ -61,9 +62,11 @@ struct DeclarationsView: View {
             }
         }
         .sheet(isPresented: $showingEnforceSheet) {
-            UpdateEnforcementSheet {
+            UpdateEnforcementSheet { config, configID, set in
+                try await KMFDDMService(settings: settings).deploy(configJSON: config, configID: configID, toSet: set)
+                activity.record(.category, title: "Enforced update", detail: "\(configID), set “\(set)”")
                 flash("Update enforcement deployed")
-                Task { await refresh() }
+                await refresh()
             }
         }
         .alert("Delete Declaration?", isPresented: $confirmingDelete) {
