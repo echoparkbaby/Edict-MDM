@@ -19,6 +19,7 @@ struct DeclarationLibraryPane: View {
     @State private var setsField = ""
     @State private var mirrorCandidates: [String] = []
     @State private var showMirrorConfirm = false
+    @State private var showJSON = false
 
     private var selected: DDMLibraryItem? { library.items.first { $0.id == selectedID } }
 
@@ -46,7 +47,10 @@ struct DeclarationLibraryPane: View {
                 addEnforcement(config, configID: configID, set: set)
             }
         }
-        .onChange(of: selectedID) { _, _ in setsField = selected?.sets.joined(separator: ", ") ?? "" }
+        .onChange(of: selectedID) { _, _ in
+            setsField = selected?.sets.joined(separator: ", ") ?? ""
+            showJSON = false
+        }
         .alert("Mirror to KMFDDM?", isPresented: $showMirrorConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Mirror & delete \(mirrorCandidates.count)", role: .destructive) { Task { await sync(prune: true) } }
@@ -112,7 +116,9 @@ struct DeclarationLibraryPane: View {
     private var list: some View {
         List(library.items, selection: $selectedID) { item in
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.identifier).font(.callout.weight(.medium)).lineLimit(1).truncationMode(.middle)
+                Text(item.summary.title).font(.callout.weight(.medium)).lineLimit(1)
+                Text(item.identifier).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
                 HStack(spacing: 6) {
                     Text(item.kind).font(.caption2)
                         .padding(.horizontal, 5).padding(.vertical, 1)
@@ -131,30 +137,63 @@ struct DeclarationLibraryPane: View {
     @ViewBuilder
     private var detail: some View {
         if let item = selected {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text(item.identifier).font(.headline).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
-                    Spacer()
-                    Button(role: .destructive) { library.remove(item.id); selectedID = nil } label: {
-                        Label("Remove", systemImage: "trash")
+            let summary = item.summary
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(summary.title).font(.title3.weight(.semibold))
+                            Text(item.identifier).font(.caption.monospaced()).foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        Spacer()
+                        Button(role: .destructive) { library.remove(item.id); selectedID = nil } label: {
+                            Label("Remove", systemImage: "trash")
+                        }
+                        .help("Remove from the local library (does not touch KMFDDM)")
                     }
-                    .help("Remove from the local library (does not touch KMFDDM)")
+
+                    Text(summary.blurb).font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if !summary.rows.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(summary.rows) { row in
+                                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                    Text(row.label).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                                        .frame(width: 110, alignment: .leading)
+                                    Text(row.value).font(.callout).textSelection(.enabled)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Spacer(minLength: 0)
+                                }
+                            }
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(NSColor.controlBackgroundColor))
+                        .clipShape(.rect(cornerRadius: 8))
+                    }
+
+                    HStack(spacing: 6) {
+                        Text("Sets").font(.caption).foregroundStyle(.secondary)
+                        TextField("default, security", text: $setsField).textFieldStyle(.roundedBorder)
+                        Button("Save") { saveSets(item) }.disabled(setsField == item.sets.joined(separator: ", "))
+                    }
+                    .help("Comma-separated KMFDDM set names this declaration belongs to")
+
+                    DisclosureGroup(isExpanded: $showJSON) {
+                        Text(item.prettyJSON)
+                            .font(.caption.monospaced()).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                            .background(Color(NSColor.textBackgroundColor))
+                            .clipShape(.rect(cornerRadius: 6))
+                            .overlay { RoundedRectangle(cornerRadius: 6).stroke(Color(NSColor.separatorColor), lineWidth: 0.5) }
+                    } label: {
+                        Text("Raw JSON").font(.callout.weight(.medium))
+                    }
                 }
-                HStack(spacing: 6) {
-                    Text("Sets").font(.caption).foregroundStyle(.secondary)
-                    TextField("default, security", text: $setsField).textFieldStyle(.roundedBorder)
-                    Button("Save") { saveSets(item) }.disabled(setsField == item.sets.joined(separator: ", "))
-                }
-                ScrollView {
-                    Text(item.prettyJSON)
-                        .font(.caption.monospaced()).textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(8)
-                }
-                .background(Color(NSColor.textBackgroundColor))
-                .clipShape(.rect(cornerRadius: 6))
-                .overlay { RoundedRectangle(cornerRadius: 6).stroke(Color(NSColor.separatorColor), lineWidth: 0.5) }
+                .padding(12)
             }
-            .padding(12)
         } else {
             Text("Select a declaration").foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

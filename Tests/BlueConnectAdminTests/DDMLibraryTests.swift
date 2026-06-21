@@ -33,6 +33,41 @@ struct DDMLibraryTests {
         #expect(item.kind == "activation")
     }
 
+    @Test func summaryStatusSubscriptionsReadsItemNames() {
+        let payload: [String: Any] = ["StatusItems": [
+            ["Name": "device.operating-system.version"],
+            ["Name": "diskmanagement.filevault.enabled"],
+        ]]
+        let s = DDMDeclarationSummary.make(type: "com.apple.configuration.management.status-subscriptions", payload: payload)
+        #expect(s.title == "Status reporting")
+        #expect(s.rows.count == 1)
+        #expect(s.rows.first?.label == "Reports")
+        #expect(s.rows.first?.value == "macOS version, FileVault enabled")
+    }
+
+    @Test func summaryEnforcementAndActivation() {
+        let enforce = DDMDeclarationSummary.make(
+            type: "com.apple.configuration.softwareupdate.enforcement.specific",
+            payload: ["TargetOSVersion": "15.5", "TargetLocalDateTime": "2026-07-01T12:00:00"])
+        #expect(enforce.title == "Enforce macOS update")
+        #expect(enforce.rows.contains { $0.label == "Target version" && $0.value == "15.5" })
+        #expect(enforce.rows.contains { $0.label == "Install by" && $0.value == "2026-07-01T12:00:00" })
+
+        let act = DDMDeclarationSummary.make(
+            type: "com.apple.activation.simple",
+            payload: ["StandardConfigurations": ["com.x.config"]])
+        #expect(act.title == "Activation")
+        #expect(act.rows.first?.value == "com.x.config")
+    }
+
+    @Test func summaryUnknownTypeFallsBackAndLabelsPrettify() {
+        let unknown = DDMDeclarationSummary.make(type: "com.apple.configuration.exotic.thing", payload: [:])
+        #expect(unknown.title == "Configuration")
+        #expect(unknown.rows.isEmpty)
+        #expect(DDMDeclarationSummary.statusItemLabel("foo.bar-baz") == "Foo bar baz")
+        #expect(DDMDeclarationSummary.statusItemLabel("device.operating-system.version") == "macOS version")
+    }
+
     @Test func exportWritesTypeFoldersAndSetFiles() throws {
         let items = [
             DDMLibraryItem(json: decl(type: "com.apple.configuration.foo", id: "com.x.config"), sets: ["default"]),

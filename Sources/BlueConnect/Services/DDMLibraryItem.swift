@@ -14,8 +14,11 @@ struct DDMLibraryItem: Codable, Identifiable, Hashable {
     }
     var identifier: String { (object?["Identifier"] as? String) ?? "—" }
     var type: String { (object?["Type"] as? String) ?? "—" }
+    var payload: [String: Any] { (object?["Payload"] as? [String: Any]) ?? [:] }
     /// configuration / activation / asset / management / declaration.
     var kind: String { Self.kind(forType: type) }
+    /// Plain-English read of this declaration for the UI.
+    var summary: DDMDeclarationSummary { DDMDeclarationSummary.make(type: type, payload: payload) }
 
     var prettyJSON: String {
         guard let obj = object,
