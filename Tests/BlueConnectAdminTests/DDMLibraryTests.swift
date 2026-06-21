@@ -152,6 +152,20 @@ struct DDMLibraryTests {
         #expect(payload["Notifications"] as? Bool == false)
     }
 
+    @Test func setsMatrixFlagsUnactivatedConfigsPerSet() throws {
+        let config = DDMLibraryItem(json: decl(type: "com.apple.configuration.foo", id: "com.x.cfg"), sets: ["default", "staging"])
+        let activation = DDMLibraryItem(
+            json: DDMDeclarations.activation(identifier: "com.x.cfg.activation", configurationIDs: ["com.x.cfg"]),
+            sets: ["default"])     // activates the config only in "default"
+        let m = DDMSetsMatrix.make(from: [config, activation])
+        let cfgRow = try #require(m.rows.first { $0.identifier == "com.x.cfg" })
+        #expect(cfgRow.isUnactivated(in: "staging"))    // no activation in staging
+        #expect(!cfgRow.isUnactivated(in: "default"))   // activated in default
+        #expect(m.unactivatedCount == 1)
+        let actRow = try #require(m.rows.first { $0.identifier == "com.x.cfg.activation" })
+        #expect(actRow.unactivatedSets.isEmpty)         // activations are never flagged
+    }
+
     @Test func setsMatrixRowsSortedByTitle() {
         let items = [
             DDMLibraryItem(json: decl(type: "com.apple.activation.simple", id: "z"), sets: []),                              // "Activation"

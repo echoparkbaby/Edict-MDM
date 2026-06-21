@@ -50,6 +50,11 @@ struct SetsGridPane: View {
                     .font(.caption).foregroundStyle(.orange)
                     .help("These declarations belong to no set, so Sync uploads them but no device receives them. Check them into a set.")
             }
+            if matrix.unactivatedCount > 0 {
+                Label("\(matrix.unactivatedCount) won't take effect", systemImage: "bolt.slash")
+                    .font(.caption).foregroundStyle(.orange)
+                    .help("Configurations checked into a set with no activation there (shown as ⚠ in the grid). They reach the device but stay inactive — add the matching activation to the same set.")
+            }
             Spacer()
             TextField("new set name", text: $newSet)
                 .textFieldStyle(.roundedBorder).frame(width: 140)
@@ -139,18 +144,22 @@ struct SetsGridPane: View {
 
     private func cell(row: DDMSetsMatrix.Row, set: String) -> some View {
         let on = row.isMember(of: set)
+        let broken = on && row.isUnactivated(in: set)
         return Button {
             library.setMembership(row.id, set: set, isMember: !on)
         } label: {
-            Image(systemName: on ? "checkmark.circle.fill" : "circle")
+            Image(systemName: broken ? "exclamationmark.triangle.fill"
+                                     : (on ? "checkmark.circle.fill" : "circle"))
                 .font(.title3)
-                .foregroundStyle(on ? Color.accentColor : Color.secondary.opacity(0.35))
+                .foregroundStyle(broken ? Color.orange
+                                        : (on ? Color.accentColor : Color.secondary.opacity(0.35)))
         }
         .buttonStyle(.plain)
         .frame(minWidth: 70)
-        .help(on ? "In “\(set)” — click to remove" : "Not in “\(set)” — click to add")
+        .help(broken ? "In “\(set)”, but won't take effect — no activation in this set references it"
+              : (on ? "In “\(set)” — click to remove" : "Not in “\(set)” — click to add"))
         .accessibilityLabel("\(row.title), set \(set)")
-        .accessibilityValue(on ? "in set" : "not in set")
+        .accessibilityValue(broken ? "in set, won't take effect" : (on ? "in set" : "not in set"))
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 }

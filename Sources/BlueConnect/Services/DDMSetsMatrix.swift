@@ -13,7 +13,12 @@ struct DDMSetsMatrix {
         let identifier: String
         let kind: String
         let sets: Set<String>
+        /// Member-sets in which this configuration has no activation, so it
+        /// won't take effect there. Always empty for activations/assets/etc.
+        let unactivatedSets: Set<String>
         func isMember(of set: String) -> Bool { sets.contains(set) }
+        /// True when this row is in `set` but won't take effect there.
+        func isUnactivated(in set: String) -> Bool { unactivatedSets.contains(set) }
     }
 
     /// Column order — every set name referenced by the library plus any
@@ -32,14 +37,36 @@ struct DDMSetsMatrix {
     /// pushes them to KMFDDM but no enrolled device receives them.
     var orphans: [Row] { rows.filter { $0.sets.isEmpty } }
 
+    /// Total (configuration, set) memberships that won't take effect — a
+    /// configuration checked into a set with no activation referencing it
+    /// there. Drives the grid's warning count.
+    var unactivatedCount: Int { rows.reduce(0) { $0 + $1.unactivatedSets.count } }
+
     static func make(from items: [DDMLibraryItem], extraSets: [String] = []) -> DDMSetsMatrix {
         let cols = Set(items.flatMap(\.sets)).union(extraSets)
-        let rows = items.map { item in
-            Row(id: item.id,
-                title: item.summary.title,
-                identifier: item.identifier,
-                kind: item.kind,
-                sets: Set(item.sets))
+
+        // set name → configuration ids activated there (an activation in the
+        // set lists them in its StandardConfigurations).
+        var activatedBySet: [String: Set<String>] = [:]
+        for item in items where item.kind == "activation" {
+            guard let refs = item.payload["StandardConfigurations"] as? [String] else { continue }
+            for set in item.sets { activatedBySet[set, default: []].formUnion(refs) }
+        }
+
+        let rows = items.map { item -> Row in
+            let memberSets = Set(item.sets)
+            var unactivated = Set<String>()
+            if item.kind == "configuration" {
+                for set in memberSets where !(activatedBySet[set]?.contains(item.identifier) ?? false) {
+                    unactivated.insert(set)
+                }
+            }
+            return Row(id: item.id,
+                       title: item.summary.title,
+                       identifier: item.identifier,
+                       kind: item.kind,
+                       sets: memberSets,
+                       unactivatedSets: unactivated)
         }
         .sorted { ($0.title, $0.identifier) < ($1.title, $1.identifier) }
         return DDMSetsMatrix(sets: cols.sorted(), rows: rows)
