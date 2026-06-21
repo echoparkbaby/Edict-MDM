@@ -99,6 +99,59 @@ struct DDMLibraryTests {
         #expect(summary.rows.first?.value == "macOS version, FileVault enabled")
     }
 
+    @Test func diskManagementBuilderAndSummary() throws {
+        let data = DDMDeclarations.diskManagement(identifier: "com.x.disk",
+                                                  externalStorage: "ReadOnly",
+                                                  networkStorage: "Disallowed")
+        let obj = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(obj["Type"] as? String == "com.apple.configuration.diskmanagement.settings")
+        let payload = try #require(obj["Payload"] as? [String: Any])
+        let rest = try #require(payload["Restrictions"] as? [String: Any])
+        #expect(rest["ExternalStorage"] as? String == "ReadOnly")
+        #expect(rest["NetworkStorage"] as? String == "Disallowed")
+        let summary = DDMDeclarationSummary.make(type: obj["Type"] as! String, payload: payload)
+        #expect(summary.title == "Drive restrictions")
+        #expect(summary.rows.contains { $0.label == "External drives" && $0.value == "Read-only" })
+        #expect(summary.rows.contains { $0.label == "Network shares" && $0.value == "Blocked" })
+    }
+
+    @Test func softwareUpdateSettingsOmitsZeroDeferrals() throws {
+        let data = DDMDeclarations.softwareUpdateSettings(
+            identifier: "com.x.suos",
+            download: "AlwaysOn", installOS: "Allowed", installSecurity: "AlwaysOn",
+            deferMajorDays: 14, deferMinorDays: 0, deferSystemDays: 0,
+            notifications: true)
+        let obj = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let payload = try #require(obj["Payload"] as? [String: Any])
+        let actions = try #require(payload["AutomaticActions"] as? [String: Any])
+        #expect(actions["Download"] as? String == "AlwaysOn")
+        #expect(actions["InstallSecurityUpdate"] as? String == "AlwaysOn")
+        let deferrals = try #require(payload["Deferrals"] as? [String: Any])
+        #expect(deferrals["MajorPeriodInDays"] as? Int == 14)
+        #expect(deferrals["MinorPeriodInDays"] == nil)     // 0 → omitted
+        #expect(deferrals["SystemPeriodInDays"] == nil)
+        // Only macOS-available keys are emitted — none of the n/a ones leak in.
+        #expect(payload["AllowStandardUserOSUpdates"] == nil)
+        #expect(payload["RecommendedCadence"] == nil)
+        #expect(payload["RapidSecurityResponse"] == nil)
+        let summary = DDMDeclarationSummary.make(type: obj["Type"] as! String, payload: payload)
+        #expect(summary.title == "Update settings")
+        #expect(summary.rows.contains { $0.label == "Download updates" && $0.value == "Always on" })
+        #expect(summary.rows.contains { $0.label == "Defer" && $0.value == "Major 14d" })
+    }
+
+    @Test func softwareUpdateSettingsNoDeferralsHasNoDeferralsKey() throws {
+        let data = DDMDeclarations.softwareUpdateSettings(
+            identifier: "com.x.suos",
+            download: "Allowed", installOS: "Allowed", installSecurity: "Allowed",
+            deferMajorDays: 0, deferMinorDays: 0, deferSystemDays: 0,
+            notifications: false)
+        let obj = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let payload = try #require(obj["Payload"] as? [String: Any])
+        #expect(payload["Deferrals"] == nil)
+        #expect(payload["Notifications"] as? Bool == false)
+    }
+
     @Test func setsMatrixRowsSortedByTitle() {
         let items = [
             DDMLibraryItem(json: decl(type: "com.apple.activation.simple", id: "z"), sets: []),                              // "Activation"

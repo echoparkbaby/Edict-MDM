@@ -40,6 +40,33 @@ struct DDMDeclarationSummary {
                          blurb: "Plumbing — turns the referenced configuration(s) on. You rarely edit this directly.",
                          rows: configs.isEmpty ? [] : [r("Turns on", configs.joined(separator: ", "))])
 
+        case "com.apple.configuration.diskmanagement.settings":
+            var rows: [Row] = []
+            if let rest = payload["Restrictions"] as? [String: Any] {
+                if let e = rest["ExternalStorage"] as? String { rows.append(r("External drives", storageLabel(e))) }
+                if let n = rest["NetworkStorage"] as? String { rows.append(r("Network shares", storageLabel(n))) }
+            }
+            return .init(title: "Drive restrictions",
+                         blurb: "Controls whether Macs can use USB drives and network shares (macOS 15+).",
+                         rows: rows)
+
+        case "com.apple.configuration.softwareupdate.settings":
+            var rows: [Row] = []
+            if let a = payload["AutomaticActions"] as? [String: Any] {
+                if let d = a["Download"] as? String { rows.append(r("Download updates", actionLabel(d))) }
+                if let o = a["InstallOSUpdates"] as? String { rows.append(r("Install macOS updates", actionLabel(o))) }
+                if let s = a["InstallSecurityUpdate"] as? String { rows.append(r("Install security updates", actionLabel(s))) }
+            }
+            if let d = payload["Deferrals"] as? [String: Any] {
+                let parts = [("Major", "MajorPeriodInDays"), ("Minor", "MinorPeriodInDays"), ("Other", "SystemPeriodInDays")]
+                    .compactMap { label, key in (d[key] as? Int).map { "\(label) \($0)d" } }
+                if !parts.isEmpty { rows.append(r("Defer", parts.joined(separator: ", "))) }
+            }
+            if let n = payload["Notifications"] as? Bool { rows.append(r("Notifications", n ? "On" : "Off")) }
+            return .init(title: "Update settings",
+                         blurb: "How Macs download, install, and defer software updates (macOS 15+).",
+                         rows: rows)
+
         case "com.apple.configuration.legacy":
             return .init(title: "Legacy profile",
                          blurb: "Installs a configuration profile the Mac downloads from a URL.",
@@ -52,6 +79,26 @@ struct DDMDeclarationSummary {
 
     private static func kindTitle(_ type: String) -> String {
         DDMLibraryItem.kind(forType: type).capitalized
+    }
+
+    /// Disk-management access enum → plain English.
+    static func storageLabel(_ value: String) -> String {
+        switch value {
+        case "Allowed":    return "Allow read & write"
+        case "ReadOnly":   return "Read-only"
+        case "Disallowed": return "Blocked"
+        default:           return value
+        }
+    }
+
+    /// Software-update AutomaticActions enum → plain English.
+    static func actionLabel(_ value: String) -> String {
+        switch value {
+        case "Allowed":   return "User decides"
+        case "AlwaysOn":  return "Always on"
+        case "AlwaysOff": return "Always off"
+        default:          return value
+        }
     }
 
     /// Friendly label for a DDM status-item name; prettifies the reverse-DNS

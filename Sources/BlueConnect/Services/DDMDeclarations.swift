@@ -58,6 +58,53 @@ enum DDMDeclarations {
                     payload: ["StatusItems": itemNames.map { ["Name": $0] }])
     }
 
+    /// `com.apple.configuration.diskmanagement.settings` (macOS 15+,
+    /// supervised) — restrict external (USB/SD/Thunderbolt) and network
+    /// storage. Each value is `Allowed`, `ReadOnly`, or `Disallowed`;
+    /// `ReadOnly` refuses to mount read-write volumes rather than
+    /// converting them. Schema: apple/device-management.
+    static func diskManagement(identifier: String,
+                               externalStorage: String,
+                               networkStorage: String) -> Data {
+        declaration(type: "com.apple.configuration.diskmanagement.settings",
+                    identifier: identifier,
+                    payload: ["Restrictions": [
+                        "ExternalStorage": externalStorage,
+                        "NetworkStorage": networkStorage,
+                    ]])
+    }
+
+    /// `com.apple.configuration.softwareupdate.settings` (macOS 15+) —
+    /// automatic-update behavior, deferral windows, and notifications.
+    /// Only the keys Apple marks macOS-available are emitted; a deferral of
+    /// 0 omits that key (no deferral). The `AutomaticActions` values are
+    /// `Allowed` (user decides), `AlwaysOn`, or `AlwaysOff`.
+    static func softwareUpdateSettings(identifier: String,
+                                       download: String,
+                                       installOS: String,
+                                       installSecurity: String,
+                                       deferMajorDays: Int,
+                                       deferMinorDays: Int,
+                                       deferSystemDays: Int,
+                                       notifications: Bool) -> Data {
+        var payload: [String: Any] = [
+            "AutomaticActions": [
+                "Download": download,
+                "InstallOSUpdates": installOS,
+                "InstallSecurityUpdate": installSecurity,
+            ],
+            "Notifications": notifications,
+        ]
+        var deferrals: [String: Any] = [:]
+        if deferMajorDays > 0 { deferrals["MajorPeriodInDays"] = deferMajorDays }
+        if deferMinorDays > 0 { deferrals["MinorPeriodInDays"] = deferMinorDays }
+        if deferSystemDays > 0 { deferrals["SystemPeriodInDays"] = deferSystemDays }
+        if !deferrals.isEmpty { payload["Deferrals"] = deferrals }
+        return declaration(type: "com.apple.configuration.softwareupdate.settings",
+                           identifier: identifier,
+                           payload: payload)
+    }
+
     /// `com.apple.activation.simple` referencing one or more configurations.
     static func activation(identifier: String, configurationIDs: [String]) -> Data {
         declaration(type: "com.apple.activation.simple",

@@ -17,6 +17,8 @@ struct DeclarationLibraryPane: View {
     @State private var showEnforce = false
     @State private var showGallery = false
     @State private var showStatusForm = false
+    @State private var showDiskForm = false
+    @State private var showSoftwareUpdateForm = false
     @State private var pendingChoice: AddChoice?
     @State private var pulling = false
     @State private var setsField = ""
@@ -47,7 +49,7 @@ struct DeclarationLibraryPane: View {
         }
         .sheet(isPresented: $showEnforce) {
             UpdateEnforcementSheet(commitLabel: "Add to Library") { config, configID, set in
-                addEnforcement(config, configID: configID, set: set)
+                addConfig(config, configID: configID, set: set, label: "update enforcement")
             }
         }
         .sheet(isPresented: $showGallery, onDismiss: handlePendingChoice) {
@@ -55,7 +57,17 @@ struct DeclarationLibraryPane: View {
         }
         .sheet(isPresented: $showStatusForm) {
             StatusReportingSheet { config, configID, set in
-                addStatusReporting(config, configID: configID, set: set)
+                addConfig(config, configID: configID, set: set, label: "status reporting")
+            }
+        }
+        .sheet(isPresented: $showDiskForm) {
+            DiskRestrictionsSheet { config, configID, set in
+                addConfig(config, configID: configID, set: set, label: "drive restrictions")
+            }
+        }
+        .sheet(isPresented: $showSoftwareUpdateForm) {
+            SoftwareUpdateSettingsSheet { config, configID, set in
+                addConfig(config, configID: configID, set: set, label: "update settings")
             }
         }
         .onChange(of: selectedID) { _, _ in
@@ -219,31 +231,24 @@ struct DeclarationLibraryPane: View {
         guard let choice = pendingChoice else { return }
         pendingChoice = nil
         switch choice {
-        case .enforceUpdate:   showEnforce = true
-        case .statusReporting: showStatusForm = true
-        case .pasteJSON:       showNewSheet = true
-        case .importFiles:     importFiles()
-        case .pullFromServer:  Task { await pullFromServer() }
+        case .enforceUpdate:          showEnforce = true
+        case .softwareUpdateSettings: showSoftwareUpdateForm = true
+        case .statusReporting:        showStatusForm = true
+        case .diskRestrictions:       showDiskForm = true
+        case .pasteJSON:              showNewSheet = true
+        case .importFiles:            importFiles()
+        case .pullFromServer:         Task { await pullFromServer() }
         }
     }
 
-    /// Add a status-subscriptions config (with the operator's chosen facts)
-    /// plus its paired activation to the library.
-    private func addStatusReporting(_ config: Data, configID: String, set: String) {
+    /// Every gallery template commits the same way: add the configuration
+    /// plus its paired activation to the library, both in the chosen set. (A
+    /// configuration only takes effect once an activation references it.)
+    private func addConfig(_ config: Data, configID: String, set: String, label: String) {
         let actID = DDMDeclarations.activationID(for: configID)
         library.add(config, sets: [set])
         library.add(DDMDeclarations.activation(identifier: actID, configurationIDs: [configID]), sets: [set])
-        flash("Added status reporting + activation to set “\(set)”")
-    }
-
-    /// Add an update-enforcement config + its paired activation to the
-    /// library (the deploy path's `KMFDDMService.deploy` makes the activation
-    /// itself; in the library we author both explicitly).
-    private func addEnforcement(_ config: Data, configID: String, set: String) {
-        let actID = DDMDeclarations.activationID(for: configID)
-        library.add(config, sets: [set])
-        library.add(DDMDeclarations.activation(identifier: actID, configurationIDs: [configID]), sets: [set])
-        flash("Added “\(configID)” + activation to set “\(set)”")
+        flash("Added \(label) + activation to set “\(set)”")
     }
 
     private func pullFromServer() async {

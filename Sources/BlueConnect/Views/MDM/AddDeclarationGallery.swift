@@ -4,7 +4,9 @@ import SwiftUI
 /// simple form; the Advanced options are the JSON/file escape hatches.
 enum AddChoice {
     case enforceUpdate
+    case softwareUpdateSettings
     case statusReporting
+    case diskRestrictions
     case pasteJSON
     case importFiles
     case pullFromServer
@@ -35,12 +37,22 @@ struct AddDeclarationGallery: View {
                              title: "Enforce a macOS update",
                              icon: "arrow.down.circle.dotted",
                              blurb: "Require a macOS version by a deadline. Each Mac nags, downloads, and installs on its own — no user action needed.")
+                        card(.softwareUpdateSettings,
+                             title: "Software update settings",
+                             icon: "gearshape.arrow.triangle.2.circlepath",
+                             blurb: "Control automatic downloads/installs, defer updates by N days, and notifications. macOS 15+.")
                     }
                     group("Reporting") {
                         card(.statusReporting,
                              title: "Status reporting",
                              icon: "checklist",
                              blurb: "Have each Mac keep reporting facts — OS version, model, serial, FileVault state — so the dashboard stays current.")
+                    }
+                    group("Security & storage") {
+                        card(.diskRestrictions,
+                             title: "Restrict external & network drives",
+                             icon: "externaldrive.badge.xmark",
+                             blurb: "Make USB/SD drives and network shares read-only or block them entirely. macOS 15+, supervised.")
                     }
                     group("Advanced") {
                         card(.pasteJSON,
