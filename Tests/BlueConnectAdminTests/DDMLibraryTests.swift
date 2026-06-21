@@ -161,6 +161,32 @@ struct DDMLibraryTests {
         #expect(m.rows.map(\.title) == ["Activation", "Status reporting"])
     }
 
+    @Test func setContentsFlagsUnactivatedConfigs() {
+        // A config with its activation in the set, a config without one, and
+        // an item in a different set that must be excluded.
+        let activated = DDMLibraryItem(json: decl(type: "com.apple.configuration.softwareupdate.enforcement.specific", id: "com.x.update"), sets: ["default"])
+        let activation = DDMLibraryItem(
+            json: DDMDeclarations.activation(identifier: "com.x.update.activation", configurationIDs: ["com.x.update"]),
+            sets: ["default"])
+        let orphanConfig = DDMLibraryItem(json: decl(type: "com.apple.configuration.diskmanagement.settings", id: "com.x.disk"), sets: ["default"])
+        let elsewhere = DDMLibraryItem(json: decl(type: "com.apple.configuration.foo", id: "com.x.other"), sets: ["security"])
+
+        let c = DDMSetContents.make(set: "default", items: [activated, activation, orphanConfig, elsewhere])
+        #expect(c.set == "default")
+        #expect(c.configs.count == 2)                 // two configs, activation + elsewhere excluded
+        #expect(c.activationCount == 1)
+        #expect(c.configs.contains { $0.identifier == "com.x.update" && $0.isActivated })
+        #expect(c.unactivated.map(\.identifier) == ["com.x.disk"])
+    }
+
+    @Test func setContentsEmptyForUnknownSet() {
+        let item = DDMLibraryItem(json: decl(type: "com.apple.configuration.foo", id: "com.x.a"), sets: ["default"])
+        let c = DDMSetContents.make(set: "nope", items: [item])
+        #expect(c.configs.isEmpty)
+        #expect(c.activationCount == 0)
+        #expect(c.unactivated.isEmpty)
+    }
+
     @Test func exportWritesTypeFoldersAndSetFiles() throws {
         let items = [
             DDMLibraryItem(json: decl(type: "com.apple.configuration.foo", id: "com.x.config"), sets: ["default"]),

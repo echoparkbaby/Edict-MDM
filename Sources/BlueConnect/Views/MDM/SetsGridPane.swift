@@ -12,6 +12,10 @@ struct SetsGridPane: View {
     /// as empty columns so you can start checking declarations into them.
     @State private var extraSets: [String] = []
     @State private var newSet = ""
+    /// The set whose "what a Mac receives" preview is open (set name).
+    @State private var previewTarget: PreviewTarget?
+
+    private struct PreviewTarget: Identifiable { let id: String }
 
     private var matrix: DDMSetsMatrix {
         DDMSetsMatrix.make(from: library.items, extraSets: extraSets)
@@ -28,6 +32,9 @@ struct SetsGridPane: View {
             } else {
                 grid
             }
+        }
+        .sheet(item: $previewTarget) { target in
+            SetContentsPreview(set: target.id)
         }
     }
 
@@ -82,19 +89,32 @@ struct SetsGridPane: View {
     // MARK: - Grid
 
     private var grid: some View {
-        ScrollView([.vertical, .horizontal]) {
+        VStack(spacing: 0) {
+            HStack(spacing: 4) {
+                Image(systemName: "hand.tap").font(.caption2)
+                Text("Click a set name to preview what a Mac in it receives.").font(.caption2)
+                Spacer()
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            ScrollView([.vertical, .horizontal]) {
             Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
                 GridRow {
                     Text("Declaration")
                         .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                         .gridColumnAlignment(.leading)
                     ForEach(matrix.sets, id: \.self) { set in
-                        VStack(spacing: 1) {
-                            Text(set).font(.caption.weight(.semibold)).lineLimit(1)
-                            Text("\(matrix.count(for: set))").font(.caption2).foregroundStyle(.secondary)
+                        Button {
+                            previewTarget = PreviewTarget(id: set)
+                        } label: {
+                            VStack(spacing: 1) {
+                                Text(set).font(.caption.weight(.semibold)).foregroundStyle(.tint).lineLimit(1)
+                                Text("\(matrix.count(for: set))").font(.caption2).foregroundStyle(.secondary)
+                            }
+                            .frame(minWidth: 70).contentShape(.rect)
                         }
-                        .frame(minWidth: 70)
-                        .help("Set “\(set)” — \(matrix.count(for: set)) declaration\(matrix.count(for: set) == 1 ? "" : "s")")
+                        .buttonStyle(.plain)
+                        .help("See what a Mac in “\(set)” receives")
                     }
                 }
                 Divider().gridCellColumns(matrix.sets.count + 1)
@@ -113,6 +133,7 @@ struct SetsGridPane: View {
                 }
             }
             .padding(12)
+            }
         }
     }
 
