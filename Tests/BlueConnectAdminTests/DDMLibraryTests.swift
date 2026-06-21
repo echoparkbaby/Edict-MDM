@@ -68,6 +68,32 @@ struct DDMLibraryTests {
         #expect(DDMDeclarationSummary.statusItemLabel("device.operating-system.version") == "macOS version")
     }
 
+    @Test func setsMatrixCountsAndOrphans() throws {
+        let items = [
+            DDMLibraryItem(json: decl(type: "com.apple.activation.simple", id: "com.x.act"), sets: ["default", "security"]),
+            DDMLibraryItem(json: decl(type: "com.apple.configuration.management.status-subscriptions", id: "com.x.status"), sets: ["default"]),
+            DDMLibraryItem(json: decl(type: "com.apple.configuration.foo", id: "com.x.orphan"), sets: []),
+        ]
+        let m = DDMSetsMatrix.make(from: items, extraSets: ["staging"])
+        #expect(m.sets == ["default", "security", "staging"])   // sorted, includes empty extra column
+        #expect(m.count(for: "default") == 2)
+        #expect(m.count(for: "security") == 1)
+        #expect(m.count(for: "staging") == 0)
+        #expect(m.orphans.map(\.identifier) == ["com.x.orphan"])
+        let act = try #require(m.rows.first { $0.identifier == "com.x.act" })
+        #expect(act.isMember(of: "security"))
+        #expect(!act.isMember(of: "staging"))
+    }
+
+    @Test func setsMatrixRowsSortedByTitle() {
+        let items = [
+            DDMLibraryItem(json: decl(type: "com.apple.activation.simple", id: "z"), sets: []),                              // "Activation"
+            DDMLibraryItem(json: decl(type: "com.apple.configuration.management.status-subscriptions", id: "a"), sets: []),  // "Status reporting"
+        ]
+        let m = DDMSetsMatrix.make(from: items)
+        #expect(m.rows.map(\.title) == ["Activation", "Status reporting"])
+    }
+
     @Test func exportWritesTypeFoldersAndSetFiles() throws {
         let items = [
             DDMLibraryItem(json: decl(type: "com.apple.configuration.foo", id: "com.x.config"), sets: ["default"]),

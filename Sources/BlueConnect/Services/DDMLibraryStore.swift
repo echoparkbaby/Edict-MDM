@@ -40,6 +40,16 @@ final class DDMLibraryStore {
         persist()
     }
 
+    /// Toggle one declaration's membership in a single set — the Sets grid's
+    /// per-cell edit.
+    func setMembership(_ id: UUID, set: String, isMember: Bool) {
+        guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
+        var s = Set(items[idx].sets)
+        if isMember { s.insert(set) } else { s.remove(set) }
+        items[idx].sets = s.sorted()
+        persist()
+    }
+
     /// Every distinct set name referenced by the library.
     var setNames: [String] { Array(Set(items.flatMap(\.sets))).sorted() }
 

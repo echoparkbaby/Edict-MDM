@@ -32,7 +32,7 @@ struct DeclarationsView: View {
     @State private var confirmingDelete = false
     @State private var addSetName = "default"
 
-    private enum Mode: String { case library = "Library", server = "Server (KMFDDM)" }
+    private enum Mode: String { case library = "Library", sets = "Sets", server = "Server (KMFDDM)" }
     @State private var mode: Mode = .library
 
     var body: some View {
@@ -43,6 +43,7 @@ struct DeclarationsView: View {
                 VStack(spacing: 0) {
                     Picker("", selection: $mode) {
                         Text("Library").tag(Mode.library)
+                        Text("Sets").tag(Mode.sets)
                         Text("Server (KMFDDM)").tag(Mode.server)
                     }
                     .pickerStyle(.segmented).labelsHidden().fixedSize()
@@ -50,6 +51,7 @@ struct DeclarationsView: View {
                     Divider()
                     switch mode {
                     case .library: DeclarationLibraryPane()
+                    case .sets:    SetsGridPane()
                     case .server:  browser
                     }
                 }
