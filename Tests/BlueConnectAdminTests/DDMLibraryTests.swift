@@ -85,6 +85,20 @@ struct DDMLibraryTests {
         #expect(!act.isMember(of: "staging"))
     }
 
+    @Test func statusSubscriptionsHonorsChosenFacts() throws {
+        let chosen = ["device.operating-system.version", "diskmanagement.filevault.enabled"]
+        let data = DDMDeclarations.statusSubscriptions(identifier: "com.x.status", itemNames: chosen)
+        let obj = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(obj["Type"] as? String == "com.apple.configuration.management.status-subscriptions")
+        let items = try #require((obj["Payload"] as? [String: Any])?["StatusItems"] as? [[String: Any]])
+        #expect(items.compactMap { $0["Name"] as? String } == chosen)
+        // The summary reads it back into the plain-English labels the form shows.
+        let summary = DDMDeclarationSummary.make(
+            type: "com.apple.configuration.management.status-subscriptions",
+            payload: (obj["Payload"] as? [String: Any]) ?? [:])
+        #expect(summary.rows.first?.value == "macOS version, FileVault enabled")
+    }
+
     @Test func setsMatrixRowsSortedByTitle() {
         let items = [
             DDMLibraryItem(json: decl(type: "com.apple.activation.simple", id: "z"), sets: []),                              // "Activation"

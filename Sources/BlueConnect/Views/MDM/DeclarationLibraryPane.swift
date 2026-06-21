@@ -15,6 +15,9 @@ struct DeclarationLibraryPane: View {
     @State private var errorText: String?
     @State private var showNewSheet = false
     @State private var showEnforce = false
+    @State private var showGallery = false
+    @State private var showStatusForm = false
+    @State private var pendingChoice: AddChoice?
     @State private var pulling = false
     @State private var setsField = ""
     @State private var mirrorCandidates: [String] = []
@@ -47,6 +50,14 @@ struct DeclarationLibraryPane: View {
                 addEnforcement(config, configID: configID, set: set)
             }
         }
+        .sheet(isPresented: $showGallery, onDismiss: handlePendingChoice) {
+            AddDeclarationGallery { choice in pendingChoice = choice }
+        }
+        .sheet(isPresented: $showStatusForm) {
+            StatusReportingSheet { config, configID, set in
+                addStatusReporting(config, configID: configID, set: set)
+            }
+        }
         .onChange(of: selectedID) { _, _ in
             setsField = selected?.sets.joined(separator: ", ") ?? ""
             showJSON = false
@@ -72,18 +83,9 @@ struct DeclarationLibraryPane: View {
             if let errorText {
                 Text(errorText).font(.caption).foregroundStyle(.orange).lineLimit(1).truncationMode(.tail).help(errorText)
             }
-            Menu("Add", systemImage: "plus") {
-                Button("Add Declaration (JSON)…") { showNewSheet = true }
-                Button("Import .json file(s)…") { importFiles() }
-                Button("Pull from KMFDDM (server)…") { Task { await pullFromServer() } }
-                Divider()
-                Section("Built-in") {
-                    Button("Enforce macOS Update…") { showEnforce = true }
-                    Button("Status Subscriptions (+ activation)") { addStatusSubscriptions() }
-                }
-            }
-            .fixedSize()
-            .disabled(pulling)
+            Button("Add Declaration", systemImage: "plus") { showGallery = true }
+                .disabled(pulling)
+                .help("Pick a template — enforce an update, status reporting, or import")
             if syncing { ProgressView().controlSize(.small) }
             Menu {
                 Button("Sync — add + update") { Task { await sync(prune: false) } }
@@ -105,8 +107,11 @@ struct DeclarationLibraryPane: View {
         VStack(spacing: 10) {
             Image(systemName: "doc.badge.gearshape").font(.system(size: 36)).foregroundStyle(.secondary)
             Text("No declarations yet").font(.headline)
-            Text("Add a declaration as JSON, import .json files (e.g. from macadmins/ddm_examples), or add a built-in like Status Subscriptions. Then Sync to push them to KMFDDM, or Export a folder to version in git.")
+            Text("Pick a template — enforce a macOS update or status reporting — without touching JSON. Then Sync to push to KMFDDM, or Export a folder to version in git.")
                 .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 460)
+            Button("Add Declaration", systemImage: "plus") { showGallery = true }
+                .controlSize(.large)
+                .padding(.top, 4)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -207,12 +212,28 @@ struct DeclarationLibraryPane: View {
         library.setMembership(item.id, sets: sets)
     }
 
-    private func addStatusSubscriptions() {
-        let configID = "com.hellocomputer.edict.status-subscriptions"
+    /// After the gallery sheet closes, open the form (or run the action) for
+    /// the chosen template. Deferred to the gallery's onDismiss so the next
+    /// sheet presents cleanly after the gallery is fully gone.
+    private func handlePendingChoice() {
+        guard let choice = pendingChoice else { return }
+        pendingChoice = nil
+        switch choice {
+        case .enforceUpdate:   showEnforce = true
+        case .statusReporting: showStatusForm = true
+        case .pasteJSON:       showNewSheet = true
+        case .importFiles:     importFiles()
+        case .pullFromServer:  Task { await pullFromServer() }
+        }
+    }
+
+    /// Add a status-subscriptions config (with the operator's chosen facts)
+    /// plus its paired activation to the library.
+    private func addStatusReporting(_ config: Data, configID: String, set: String) {
         let actID = DDMDeclarations.activationID(for: configID)
-        library.add(DDMDeclarations.statusSubscriptions(identifier: configID), sets: ["default"])
-        library.add(DDMDeclarations.activation(identifier: actID, configurationIDs: [configID]), sets: ["default"])
-        flash("Added status subscriptions + activation to set “default”")
+        library.add(config, sets: [set])
+        library.add(DDMDeclarations.activation(identifier: actID, configurationIDs: [configID]), sets: [set])
+        flash("Added status reporting + activation to set “\(set)”")
     }
 
     /// Add an update-enforcement config + its paired activation to the

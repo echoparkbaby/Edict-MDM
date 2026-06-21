@@ -31,27 +31,31 @@ enum DDMDeclarations {
                            payload: payload)
     }
 
+    /// The conservative, macOS-supported status items the device-detail
+    /// pane and dashboard rely on — the default when the operator doesn't
+    /// pick a custom set.
+    static let defaultStatusItems = [
+        "device.identifier.serial-number",
+        "device.identifier.udid",
+        "device.model.family",
+        "device.model.identifier",
+        "device.model.marketing-name",
+        "device.operating-system.family",
+        "device.operating-system.version",
+        "device.operating-system.build-version",
+        "device.operating-system.marketing-name",
+        "diskmanagement.filevault.enabled",
+    ]
+
     /// `com.apple.configuration.management.status-subscriptions` — asks
     /// devices to continuously report the listed status items. This is
     /// what feeds the device-detail pane: OS version/build, model,
     /// serial, and FileVault state, kept current by the device itself.
-    /// Conservative, macOS-supported item set.
-    static func statusSubscriptions(identifier: String) -> Data {
-        let items = [
-            "device.identifier.serial-number",
-            "device.identifier.udid",
-            "device.model.family",
-            "device.model.identifier",
-            "device.model.marketing-name",
-            "device.operating-system.family",
-            "device.operating-system.version",
-            "device.operating-system.build-version",
-            "device.operating-system.marketing-name",
-            "diskmanagement.filevault.enabled",
-        ]
-        return declaration(type: "com.apple.configuration.management.status-subscriptions",
-                           identifier: identifier,
-                           payload: ["StatusItems": items.map { ["Name": $0] }])
+    static func statusSubscriptions(identifier: String,
+                                    itemNames: [String] = defaultStatusItems) -> Data {
+        declaration(type: "com.apple.configuration.management.status-subscriptions",
+                    identifier: identifier,
+                    payload: ["StatusItems": itemNames.map { ["Name": $0] }])
     }
 
     /// `com.apple.activation.simple` referencing one or more configurations.
