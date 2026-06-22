@@ -628,6 +628,18 @@ final class SettingsStore: ObservableObject {
     /// True once at least one profile or set is in the baseline.
     var hasOnboardingBaseline: Bool { !mdmOnboardProfileIDs.isEmpty || !mdmOnboardSets.isEmpty }
 
+    /// "<enrollmentID>\u{1}<setName>" pairs already assigned by a smart-group
+    /// baseline, so group-policy enforcement assigns each set once per device
+    /// instead of every refresh. (Profiles dedupe via the deployment log.)
+    @AppStorage("mdmAppliedGroupSetsRaw") private var mdmAppliedGroupSetsRaw: String = "[]"
+    private var mdmAppliedGroupSets: Set<String> {
+        get { Set((try? JSONDecoder().decode([String].self, from: Data(mdmAppliedGroupSetsRaw.utf8))) ?? []) }
+        set { mdmAppliedGroupSetsRaw = String(data: (try? JSONEncoder().encode(Array(newValue))) ?? Data("[]".utf8), encoding: .utf8) ?? "[]" }
+    }
+    private func groupSetKey(_ id: String, _ set: String) -> String { id + "\u{1}" + set }
+    func hasAppliedGroupSet(deviceID: String, set: String) -> Bool { mdmAppliedGroupSets.contains(groupSetKey(deviceID, set)) }
+    func markAppliedGroupSet(deviceID: String, set: String) { mdmAppliedGroupSets.insert(groupSetKey(deviceID, set)) }
+
     /// PayloadIdentifier of the enrollment profile installed on managed
     /// Macs. "Remove from MDM" sends a RemoveProfile for this identifier —
     /// pulling the enrollment profile unenrolls the device.

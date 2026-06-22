@@ -49,4 +49,35 @@ struct OnboardingServiceTests {
                     try enr("b", created: "2026-06-22T13:00:00Z")]
         #expect(OnboardingService.devicesToOnboard(list, enabledAt: cutoff, onboarded: ["a", "b"]).isEmpty)
     }
+
+    // MARK: - Group baseline (smart-group policy)
+
+    private func group(_ name: String, rule: SmartGroupRule.Field, value: String = "",
+                       sets: [String] = [], profiles: [UUID] = []) -> SmartGroup {
+        SmartGroup(name: name, rules: [SmartGroupRule(field: rule, value: value)],
+                   onboardProfileIDs: profiles, onboardSets: sets)
+    }
+
+    @Test func groupBaselineUnionsMatchingGroups() {
+        let pA = UUID(), pB = UUID()
+        let groups = [
+            group("FileVault on", rule: .fileVaultOn, sets: ["security"], profiles: [pA]),
+            group("Sonoma+", rule: .osAtLeast, value: "14", sets: ["base"], profiles: [pB]),
+            group("Old", rule: .osBelow, value: "13", sets: ["legacy"]),   // won't match
+            group("No baseline", rule: .enrolled),                         // matches but empty
+        ]
+        let facts = SmartGroup.DeviceFacts(osVersion: "15.5", fileVaultOn: true, model: "MacBookPro",
+                                           matchedBlueSky: true, enrolled: true)
+        let bl = OnboardingService.groupBaseline(for: facts, in: groups, requireFileVault: false, minOS: "")
+        #expect(Set(bl.sets) == ["security", "base"])      // union of the two matching groups, not "legacy"
+        #expect(Set(bl.profiles) == [pA, pB])
+    }
+
+    @Test func groupBaselineEmptyWhenNoMatchOrNoBaseline() {
+        let groups = [group("FV off", rule: .fileVaultOff, sets: ["x"])]
+        let facts = SmartGroup.DeviceFacts(osVersion: "15.5", fileVaultOn: true, model: nil,
+                                           matchedBlueSky: false, enrolled: true)
+        let bl = OnboardingService.groupBaseline(for: facts, in: groups, requireFileVault: false, minOS: "")
+        #expect(bl.sets.isEmpty && bl.profiles.isEmpty)
+    }
 }

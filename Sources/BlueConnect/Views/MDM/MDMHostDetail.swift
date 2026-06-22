@@ -328,8 +328,12 @@ struct MDMHostDetail: View {
         onboarding = true
         notice = nil; errorText = nil
         defer { onboarding = false }
-        let r = await OnboardingService(settings: settings, activity: activity)
-            .onboard(entry.enrollmentID, deviceLabel: host.displayName)
+        let svc = OnboardingService(settings: settings, activity: activity)
+        let r = await svc.onboard(entry.enrollmentID, deviceLabel: host.displayName)
+        // Also apply any smart-group policy this Mac matches right now.
+        let facts = SmartGroup.DeviceFacts(osVersion: os, fileVaultOn: fileVault, model: model,
+                                           matchedBlueSky: host.blueskyid > 0, enrolled: entry.enrolled)
+        _ = await svc.enforceGroupBaselines([(entry.enrollmentID, facts)])
         deployed = DeploymentLog.entries(for: entry.enrollmentID)
         notice = "Onboarded — \(r.profiles) profile\(r.profiles == 1 ? "" : "s"), \(r.sets) set\(r.sets == 1 ? "" : "s")"
             + (r.failures > 0 ? ", \(r.failures) failed" : "") + ". The Mac applies them on its next sync."

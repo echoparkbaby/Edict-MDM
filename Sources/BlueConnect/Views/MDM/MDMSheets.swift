@@ -7,8 +7,12 @@ import SwiftUI
 /// matches every rule (AND).
 struct SmartGroupEditor: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(DDMLibraryStore.self) private var ddmLibrary
     @State var group: SmartGroup
     let onSave: (SmartGroup) -> Void
+
+    @State private var savedProfiles: [SavedProfile] = []
+    @State private var showBaseline = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -43,6 +47,9 @@ struct SmartGroupEditor: View {
             } label: { Label("Add Rule", systemImage: "plus") }
             .buttonStyle(.link)
 
+            Divider()
+            baselineSection
+
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -52,6 +59,61 @@ struct SmartGroupEditor: View {
             }
         }
         .padding(20).frame(width: 480)
+        .task { savedProfiles = SavedProfilesStore.load() }
+    }
+
+    private var baselineSummary: String {
+        group.hasOnboardingBaseline
+            ? "\(group.onboardProfileIDs.count) profile\(group.onboardProfileIDs.count == 1 ? "" : "s"), \(group.onboardSets.count) set\(group.onboardSets.count == 1 ? "" : "s")"
+            : "none"
+    }
+
+    private var baselineSection: some View {
+        DisclosureGroup(isExpanded: $showBaseline) {
+            Text("Edict ensures every Mac matching this group has these — applied once per Mac, automatically on refresh. A Mac that starts matching later (once it reports OS/FileVault) is covered then.")
+                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+
+            Text("Profiles").font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 4)
+            if savedProfiles.isEmpty {
+                Text("No saved profiles — create them in the Profiles tab.").font(.caption).foregroundStyle(.secondary)
+            } else {
+                ForEach(savedProfiles) { p in
+                    Toggle(p.name, isOn: profileBinding(p.id)).font(.callout)
+                }
+            }
+            Text("Declaration sets").font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 4)
+            if ddmLibrary.setNames.isEmpty {
+                Text("No sets — create them in Declarations → Sets.").font(.caption).foregroundStyle(.secondary)
+            } else {
+                ForEach(ddmLibrary.setNames, id: \.self) { set in
+                    Toggle(set, isOn: setBinding(set)).font(.callout)
+                }
+            }
+        } label: {
+            HStack {
+                Label("Onboarding baseline", systemImage: "shippingbox")
+                Spacer()
+                Text(baselineSummary).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func profileBinding(_ id: UUID) -> Binding<Bool> {
+        Binding(
+            get: { group.onboardProfileIDs.contains(id) },
+            set: { on in
+                if on { if !group.onboardProfileIDs.contains(id) { group.onboardProfileIDs.append(id) } }
+                else { group.onboardProfileIDs.removeAll { $0 == id } }
+            })
+    }
+
+    private func setBinding(_ set: String) -> Binding<Bool> {
+        Binding(
+            get: { group.onboardSets.contains(set) },
+            set: { on in
+                if on { if !group.onboardSets.contains(set) { group.onboardSets.append(set) } }
+                else { group.onboardSets.removeAll { $0 == set } }
+            })
     }
 }
 

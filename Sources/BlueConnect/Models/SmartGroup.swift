@@ -32,6 +32,13 @@ struct SmartGroup: Codable, Hashable, Identifiable {
     var id = UUID()
     var name: String
     var rules: [SmartGroupRule] = []
+    /// Onboarding baseline for this group — saved-profile IDs and KMFDDM set
+    /// names every member should receive. Edict ensures matching Macs have
+    /// these (applied once per device). Optional; empty = no group policy.
+    var onboardProfileIDs: [UUID] = []
+    var onboardSets: [String] = []
+
+    var hasOnboardingBaseline: Bool { !onboardProfileIDs.isEmpty || !onboardSets.isEmpty }
 
     /// The resolved facts about one device, supplied by whichever view is
     /// evaluating membership (Devices, Profiles, …).

@@ -333,6 +333,23 @@ struct ContentView: View {
         attemptProfileDeploy(p.data, name: p.name, to: [enrollmentID], label: h.displayName)
     }
 
+    /// An enrolled Mac that should have the onboarding baseline but hasn't
+    /// been given it yet — typically one that enrolled before auto-onboarding
+    /// was switched on (the cutoff skips those on purpose).
+    private func needsOnboarding(_ entry: MDMFleetIndex.Entry) -> Bool {
+        settings.hasOnboardingBaseline && entry.enrolled && !settings.isOnboarded(entry.enrollmentID)
+    }
+
+    /// Apply the onboarding baseline to one Mac from its row, then refresh so
+    /// the badge clears.
+    private func rowOnboard(_ h: BlueSkyHost, enrollmentID: String) {
+        Task {
+            _ = await OnboardingService(settings: settings, activity: activity)
+                .onboard(enrollmentID, deviceLabel: h.displayName)
+            await refreshMDMFleet()
+        }
+    }
+
     /// If the target Macs already have a profile with this identifier (per
     /// the deployment log), show the diff first; otherwise deploy straight
     /// away. Shared by the gavel row button and bulk deploy so they get the
@@ -403,11 +420,26 @@ struct ContentView: View {
             $0.serialnum?.trimmingCharacters(in: .whitespaces).uppercased()
         }.filter { !$0.isEmpty })
         await mdmFleet.refresh(settings: settings, bscSerials: serials)
-        // Auto-onboard Macs that enrolled since onboarding was switched on.
-        if settings.mdmOnboardingEnabled, settings.hasOnboardingBaseline,
+        // Onboarding: global baseline for newly-enrolled Macs, plus smart-group
+        // policy for any matching Mac. Both need the live enrollment list.
+        let groupPolicyActive = settings.smartGroups.contains(where: \.hasOnboardingBaseline)
+        if (settings.mdmOnboardingEnabled && settings.hasOnboardingBaseline) || groupPolicyActive,
            let enrollments = try? await EnrollmentsAPI(settings: settings).list() {
-            _ = await OnboardingService(settings: settings, activity: activity)
-                .autoOnboardNewDevices(enrollments)
+            let svc = OnboardingService(settings: settings, activity: activity)
+            if settings.mdmOnboardingEnabled, settings.hasOnboardingBaseline {
+                _ = await svc.autoOnboardNewDevices(enrollments)
+            }
+            if groupPolicyActive {
+                let devs = enrollments.filter(\.isDevice).map { d -> (id: String, facts: SmartGroup.DeviceFacts) in
+                    let serial = d.serialNumber?.trimmingCharacters(in: .whitespaces)
+                    let entry = serial.flatMap { mdmFleet.entry(forSerial: $0) }
+                    let matchedBS = serial.map { serials.contains($0.uppercased()) } ?? false
+                    return (d.id, SmartGroup.DeviceFacts(osVersion: entry?.os, fileVaultOn: entry?.fileVault,
+                                                         model: entry?.model, matchedBlueSky: matchedBS,
+                                                         enrolled: d.isEnabled))
+                }
+                _ = await svc.enforceGroupBaselines(devs)
+            }
         }
     }
 
@@ -1296,8 +1328,17 @@ struct ContentView: View {
                     if settings.mdmEnabled {
                         rowDivider
                         let entry = mdmFleet.entry(forSerial: h.serialnum)
+                        let pendingOnboard = entry.map(needsOnboarding) ?? false
                         Menu {
                             if let entry {
+                                if pendingOnboard {
+                                    Button {
+                                        rowOnboard(h, enrollmentID: entry.enrollmentID)
+                                    } label: {
+                                        Label("Onboard now (\(settings.mdmOnboardProfileIDs.count) profile, \(settings.mdmOnboardSets.count) set)", systemImage: "shippingbox")
+                                    }
+                                    Divider()
+                                }
                                 Button("Open MDM Details") { openMDMDetails(h) }
                                 Button("Open Profiles Tab") { sidebarFilter = .mdmProfiles }
                                 let saved = SavedProfilesStore.load()
@@ -1315,14 +1356,20 @@ struct ContentView: View {
                         } label: {
                             Image(systemName: mdmDeployIcon)
                                 .foregroundStyle(entry != nil ? Color.indigo : Color.secondary)
+                                .overlay(alignment: .topTrailing) {
+                                    if pendingOnboard {
+                                        Circle().fill(.orange).frame(width: 6, height: 6).offset(x: 3, y: -3)
+                                    }
+                                }
                         }
                         .menuStyle(.borderlessButton)
                         .menuIndicator(.hidden)
                         .fixedSize()
                         .disabled(entry == nil)
-                        .help(entry != nil ? "Deploy a configuration profile to this Mac (MDM)"
-                                           : "Not enrolled in MDM")
-                        .accessibilityLabel("MDM actions")
+                        .help(pendingOnboard ? "Needs onboarding — apply the baseline"
+                              : (entry != nil ? "Deploy a configuration profile to this Mac (MDM)"
+                                              : "Not enrolled in MDM"))
+                        .accessibilityLabel(pendingOnboard ? "MDM actions, needs onboarding" : "MDM actions")
                     }
                     // Group 2 → Group 3 boundary: separates file /
                     // install from communication / automation
