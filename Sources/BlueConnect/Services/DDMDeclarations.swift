@@ -105,6 +105,37 @@ enum DDMDeclarations {
                            payload: payload)
     }
 
+    /// `com.apple.configuration.passcode.settings` (macOS 13+) — login
+    /// password rules. Every key is macOS-supported per
+    /// apple/device-management; only meaningful values are emitted (0 / false
+    /// means "don't set"), and `MaximumFailedAttempts` is only emitted in its
+    /// valid 2–11 range. An empty policy emits an empty payload.
+    static func passcodeSettings(identifier: String,
+                                 requirePasscode: Bool,
+                                 minimumLength: Int,
+                                 requireAlphanumeric: Bool,
+                                 requireComplex: Bool,
+                                 minimumComplexChars: Int,
+                                 maxInactivityMinutes: Int,
+                                 maxFailedAttempts: Int,
+                                 maxAgeInDays: Int,
+                                 reuseLimit: Int,
+                                 changeAtNextAuth: Bool) -> Data {
+        var p: [String: Any] = [:]
+        if requirePasscode { p["RequirePasscode"] = true }
+        if minimumLength > 0 { p["MinimumLength"] = minimumLength }
+        if requireAlphanumeric { p["RequireAlphanumericPasscode"] = true }
+        if requireComplex { p["RequireComplexPasscode"] = true }
+        if minimumComplexChars > 0 { p["MinimumComplexCharacters"] = minimumComplexChars }
+        if maxInactivityMinutes > 0 { p["MaximumInactivityInMinutes"] = maxInactivityMinutes }
+        if maxFailedAttempts >= 2 { p["MaximumFailedAttempts"] = maxFailedAttempts }
+        if maxAgeInDays > 0 { p["MaximumPasscodeAgeInDays"] = maxAgeInDays }
+        if reuseLimit >= 1 { p["PasscodeReuseLimit"] = reuseLimit }
+        if changeAtNextAuth { p["ChangeAtNextAuth"] = true }
+        return declaration(type: "com.apple.configuration.passcode.settings",
+                           identifier: identifier, payload: p)
+    }
+
     /// `com.apple.activation.simple` referencing one or more configurations.
     static func activation(identifier: String, configurationIDs: [String]) -> Data {
         declaration(type: "com.apple.activation.simple",

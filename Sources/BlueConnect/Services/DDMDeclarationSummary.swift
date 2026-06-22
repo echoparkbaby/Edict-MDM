@@ -67,6 +67,22 @@ struct DDMDeclarationSummary {
                          blurb: "How Macs download, install, and defer software updates (macOS 15+).",
                          rows: rows)
 
+        case "com.apple.configuration.passcode.settings":
+            var rows: [Row] = []
+            if payload["RequirePasscode"] as? Bool == true { rows.append(r("Login password", "Required")) }
+            if let n = payload["MinimumLength"] as? Int { rows.append(r("Minimum length", "\(n)")) }
+            if payload["RequireAlphanumericPasscode"] as? Bool == true { rows.append(r("Letters & numbers", "Required")) }
+            if payload["RequireComplexPasscode"] as? Bool == true { rows.append(r("Complex password", "Required")) }
+            if let n = payload["MinimumComplexCharacters"] as? Int { rows.append(r("Special characters", "\(n)")) }
+            if let n = payload["MaximumInactivityInMinutes"] as? Int { rows.append(r("Auto-lock", "\(n) min")) }
+            if let n = payload["MaximumFailedAttempts"] as? Int { rows.append(r("Lock after", "\(n) tries")) }
+            if let n = payload["MaximumPasscodeAgeInDays"] as? Int { rows.append(r("Expires every", "\(n) days")) }
+            if let n = payload["PasscodeReuseLimit"] as? Int { rows.append(r("No reuse of last", "\(n)")) }
+            if payload["ChangeAtNextAuth"] as? Bool == true { rows.append(r("Change at next login", "Yes")) }
+            return .init(title: "Passcode policy",
+                         blurb: "Login-password rules each Mac enforces (macOS 13+).",
+                         rows: rows)
+
         case "com.apple.configuration.legacy":
             return .init(title: "Legacy profile",
                          blurb: "Installs a configuration profile the Mac downloads from a URL.",

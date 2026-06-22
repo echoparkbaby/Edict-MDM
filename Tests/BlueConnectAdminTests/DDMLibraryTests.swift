@@ -201,6 +201,54 @@ struct DDMLibraryTests {
         #expect(act.sets == ["default", "staging"])
     }
 
+    @Test func passcodeSettingsEmitsOnlyMeaningfulKeys() throws {
+        let data = DDMDeclarations.passcodeSettings(
+            identifier: "com.x.pass",
+            requirePasscode: true, minimumLength: 10,
+            requireAlphanumeric: true, requireComplex: false,
+            minimumComplexChars: 0,          // omitted (0)
+            maxInactivityMinutes: 5,
+            maxFailedAttempts: 1,            // below 2 → omitted
+            maxAgeInDays: 0,                 // omitted (never)
+            reuseLimit: 6, changeAtNextAuth: true)
+        let obj = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(obj["Type"] as? String == "com.apple.configuration.passcode.settings")
+        let p = try #require(obj["Payload"] as? [String: Any])
+        #expect(p["RequirePasscode"] as? Bool == true)
+        #expect(p["MinimumLength"] as? Int == 10)
+        #expect(p["RequireAlphanumericPasscode"] as? Bool == true)
+        #expect(p["MaximumInactivityInMinutes"] as? Int == 5)
+        #expect(p["PasscodeReuseLimit"] as? Int == 6)
+        #expect(p["ChangeAtNextAuth"] as? Bool == true)
+        // Omitted: complex, min-complex-chars, sub-2 failed attempts, never-expire.
+        #expect(p["RequireComplexPasscode"] == nil)
+        #expect(p["MinimumComplexCharacters"] == nil)
+        #expect(p["MaximumFailedAttempts"] == nil)
+        #expect(p["MaximumPasscodeAgeInDays"] == nil)
+
+        let summary = DDMDeclarationSummary.make(type: obj["Type"] as! String, payload: p)
+        #expect(summary.title == "Passcode policy")
+        #expect(summary.rows.contains { $0.label == "Minimum length" && $0.value == "10" })
+        #expect(summary.rows.contains { $0.label == "Login password" && $0.value == "Required" })
+    }
+
+    @Test func passcodeSettingsFailedAttemptsInRangeEmitted() throws {
+        let data = DDMDeclarations.passcodeSettings(
+            identifier: "com.x.pass",
+            requirePasscode: true, minimumLength: 0,
+            requireAlphanumeric: false, requireComplex: true,
+            minimumComplexChars: 2, maxInactivityMinutes: 0,
+            maxFailedAttempts: 5, maxAgeInDays: 90,
+            reuseLimit: 0, changeAtNextAuth: false)
+        let obj = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let p = try #require(obj["Payload"] as? [String: Any])
+        #expect(p["MaximumFailedAttempts"] as? Int == 5)
+        #expect(p["MinimumComplexCharacters"] as? Int == 2)
+        #expect(p["MaximumPasscodeAgeInDays"] as? Int == 90)
+        #expect(p["MinimumLength"] == nil)               // 0 → omitted
+        #expect(p["PasscodeReuseLimit"] == nil)          // 0 → omitted
+    }
+
     @Test func setsMatrixRowsSortedByTitle() {
         let items = [
             DDMLibraryItem(json: decl(type: "com.apple.activation.simple", id: "z"), sets: []),                              // "Activation"

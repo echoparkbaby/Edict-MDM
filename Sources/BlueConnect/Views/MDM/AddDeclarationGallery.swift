@@ -6,6 +6,7 @@ enum AddChoice {
     case enforceUpdate
     case softwareUpdateSettings
     case statusReporting
+    case passcodePolicy
     case diskRestrictions
     case pasteJSON
     case importFiles
@@ -49,6 +50,10 @@ struct AddDeclarationGallery: View {
                              blurb: "Have each Mac keep reporting facts — OS version, model, serial, FileVault state — so the dashboard stays current.")
                     }
                     group("Security & storage") {
+                        card(.passcodePolicy,
+                             title: "Passcode policy",
+                             icon: "lock.shield",
+                             blurb: "Set login-password rules — minimum length, complexity, auto-lock, expiry, and lockout. macOS 13+.")
                         card(.diskRestrictions,
                              title: "Restrict external & network drives",
                              icon: "externaldrive.badge.xmark",
