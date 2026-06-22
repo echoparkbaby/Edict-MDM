@@ -271,6 +271,39 @@ struct DDMLibraryTests {
         #expect(((obj["Payload"] as? [String: Any])?["StandardConfigurations"] as? [String]) == ["com.x.cfg"])
     }
 
+    @Test func summaryLegacyUnknownAndEmptyRows() {
+        let legacy = DDMDeclarationSummary.make(type: "com.apple.configuration.legacy",
+                                                payload: ["ProfileURL": "https://x/y.mobileconfig"])
+        #expect(legacy.title == "Legacy profile")
+        #expect(legacy.rows.first?.value == "https://x/y.mobileconfig")
+
+        // Unknown type falls back to its kind segment, no rows.
+        let unknown = DDMDeclarationSummary.make(type: "com.apple.management.organization-info", payload: [:])
+        #expect(unknown.title == "Management")
+        #expect(unknown.rows.isEmpty)
+
+        // Status subscriptions with no items → no "Reports" row.
+        let emptyStatus = DDMDeclarationSummary.make(
+            type: "com.apple.configuration.management.status-subscriptions",
+            payload: ["StatusItems": [[String: Any]]()])
+        #expect(emptyStatus.title == "Status reporting")
+        #expect(emptyStatus.rows.isEmpty)
+
+        // Activation referencing nothing → no "Turns on" row.
+        let emptyAct = DDMDeclarationSummary.make(type: "com.apple.activation.simple",
+                                                  payload: ["StandardConfigurations": [String]()])
+        #expect(emptyAct.title == "Activation")
+        #expect(emptyAct.rows.isEmpty)
+    }
+
+    @Test func prettyJSONSortsKeys() throws {
+        let item = DDMLibraryItem(json: Data(#"{"Payload":{},"Identifier":"com.x.a","Type":"com.apple.activation.simple"}"#.utf8))
+        let pretty = item.prettyJSON
+        let iIdentifier = try #require(pretty.range(of: "Identifier")).lowerBound
+        let iType = try #require(pretty.range(of: "Type")).lowerBound
+        #expect(iIdentifier < iType)   // sortedKeys: Identifier < Payload < Type
+    }
+
     @Test func setsMatrixRowsSortedByTitle() {
         let items = [
             DDMLibraryItem(json: decl(type: "com.apple.activation.simple", id: "z"), sets: []),                              // "Activation"
