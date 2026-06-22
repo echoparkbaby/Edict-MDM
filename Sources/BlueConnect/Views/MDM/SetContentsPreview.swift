@@ -82,6 +82,13 @@ struct SetContentsPreview: View {
                         .help("No activation in this set references it, so it won't take effect on the device.")
                 }
                 Spacer(minLength: 0)
+                if !entry.isActivated {
+                    Button("Activate", systemImage: "bolt") {
+                        library.activate(configID: entry.identifier, in: set)
+                    }
+                    .controlSize(.small)
+                    .help("Add the matching activation to “\(set)” so this takes effect")
+                }
             }
             Text(entry.summary.blurb).font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

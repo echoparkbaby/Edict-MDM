@@ -58,4 +58,30 @@ struct DDMLibraryItem: Codable, Identifiable, Hashable {
     static func safeFilename(_ identifier: String) -> String {
         identifier.replacingOccurrences(of: "/", with: "_") + ".json"
     }
+
+    /// Returns `items` with `configID` activated in `set`: ensures a
+    /// `<configID>.activation` exists referencing the configuration and is a
+    /// member of the set, so the configuration takes effect there. Pure (no
+    /// persistence) so it's testable. Never narrows an existing activation's
+    /// references — it only adds the config and the set membership.
+    static func activating(configID: String, in set: String,
+                           within items: [DDMLibraryItem]) -> [DDMLibraryItem] {
+        var result = items
+        let actID = DDMDeclarations.activationID(for: configID)
+        if let idx = result.firstIndex(where: { $0.identifier == actID }) {
+            var refs = (result[idx].payload["StandardConfigurations"] as? [String]) ?? []
+            if !refs.contains(configID) {
+                refs.append(configID)
+                result[idx].json = DDMDeclarations.activation(identifier: actID, configurationIDs: refs)
+            }
+            if !result[idx].sets.contains(set) {
+                result[idx].sets = (result[idx].sets + [set]).sorted()
+            }
+        } else {
+            result.append(DDMLibraryItem(
+                json: DDMDeclarations.activation(identifier: actID, configurationIDs: [configID]),
+                sets: [set]))
+        }
+        return result
+    }
 }

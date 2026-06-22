@@ -166,6 +166,41 @@ struct DDMLibraryTests {
         #expect(actRow.unactivatedSets.isEmpty)         // activations are never flagged
     }
 
+    @Test func activatingCreatesActivationAndClearsFlag() throws {
+        let config = DDMLibraryItem(json: decl(type: "com.apple.configuration.foo", id: "com.x.cfg"), sets: ["staging"])
+        #expect(DDMSetsMatrix.make(from: [config]).unactivatedCount == 1)
+
+        let fixed = DDMLibraryItem.activating(configID: "com.x.cfg", in: "staging", within: [config])
+        // A new activation exists, referencing the config, in the set.
+        let act = try #require(fixed.first { $0.identifier == "com.x.cfg.activation" })
+        #expect(act.sets == ["staging"])
+        #expect((act.payload["StandardConfigurations"] as? [String]) == ["com.x.cfg"])
+        #expect(DDMSetsMatrix.make(from: fixed).unactivatedCount == 0)
+    }
+
+    @Test func activatingReusesExistingActivationAddsSet() throws {
+        let config = DDMLibraryItem(json: decl(type: "com.apple.configuration.foo", id: "com.x.cfg"), sets: ["default", "staging"])
+        let activation = DDMLibraryItem(
+            json: DDMDeclarations.activation(identifier: "com.x.cfg.activation", configurationIDs: ["com.x.cfg"]),
+            sets: ["default"])
+        let fixed = DDMLibraryItem.activating(configID: "com.x.cfg", in: "staging", within: [config, activation])
+        // Same activation, no duplicate — just gained the new set.
+        let acts = fixed.filter { $0.identifier == "com.x.cfg.activation" }
+        #expect(acts.count == 1)
+        #expect(acts[0].sets == ["default", "staging"])
+    }
+
+    @Test func activatingNeverNarrowsExistingReferences() throws {
+        // An activation that happens to reference two configs must keep both.
+        let activation = DDMLibraryItem(
+            json: DDMDeclarations.activation(identifier: "com.x.cfg.activation", configurationIDs: ["com.x.cfg", "com.x.other"]),
+            sets: ["default"])
+        let fixed = DDMLibraryItem.activating(configID: "com.x.cfg", in: "staging", within: [activation])
+        let act = try #require(fixed.first { $0.identifier == "com.x.cfg.activation" })
+        #expect(Set(act.payload["StandardConfigurations"] as? [String] ?? []) == ["com.x.cfg", "com.x.other"])
+        #expect(act.sets == ["default", "staging"])
+    }
+
     @Test func setsMatrixRowsSortedByTitle() {
         let items = [
             DDMLibraryItem(json: decl(type: "com.apple.activation.simple", id: "z"), sets: []),                              // "Activation"

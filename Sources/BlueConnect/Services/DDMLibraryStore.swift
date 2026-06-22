@@ -53,6 +53,28 @@ final class DDMLibraryStore {
     /// Every distinct set name referenced by the library.
     var setNames: [String] { Array(Set(items.flatMap(\.sets))).sorted() }
 
+    /// Make `configID` take effect in `set` by ensuring its activation is in
+    /// the set (the grid's per-cell "Activate here" fix).
+    func activate(configID: String, in set: String) {
+        items = DDMLibraryItem.activating(configID: configID, in: set, within: items)
+        persist()
+    }
+
+    /// Fix every configuration that's checked into a set with no activation
+    /// there — the grid's "Activate all" button. Returns how many (config,
+    /// set) pairs were activated.
+    @discardableResult
+    func activateAllUnactivated() -> Int {
+        let pairs = DDMSetsMatrix.make(from: items).rows.flatMap { row in
+            row.unactivatedSets.map { (row.identifier, $0) }
+        }
+        for (configID, set) in pairs {
+            items = DDMLibraryItem.activating(configID: configID, in: set, within: items)
+        }
+        if !pairs.isEmpty { persist() }
+        return pairs.count
+    }
+
     // MARK: - Sync + export
 
     /// Push every declaration to KMFDDM, then reconcile set membership. PUT

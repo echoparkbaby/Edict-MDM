@@ -53,7 +53,9 @@ struct SetsGridPane: View {
             if matrix.unactivatedCount > 0 {
                 Label("\(matrix.unactivatedCount) won't take effect", systemImage: "bolt.slash")
                     .font(.caption).foregroundStyle(.orange)
-                    .help("Configurations checked into a set with no activation there (shown as ⚠ in the grid). They reach the device but stay inactive — add the matching activation to the same set.")
+                    .help("Configurations checked into a set with no activation there (shown as ⚠ in the grid). They reach the device but stay inactive.")
+                Button("Activate all") { library.activateAllUnactivated() }
+                    .help("Add the missing activation to each flagged set so those configurations take effect")
             }
             Spacer()
             TextField("new set name", text: $newSet)
@@ -161,6 +163,17 @@ struct SetsGridPane: View {
         .accessibilityLabel("\(row.title), set \(set)")
         .accessibilityValue(broken ? "in set, won't take effect" : (on ? "in set" : "not in set"))
         .accessibilityAddTraits(on ? .isSelected : [])
+        .contextMenu {
+            if broken {
+                Button("Activate in “\(set)”", systemImage: "bolt") {
+                    library.activate(configID: row.identifier, in: set)
+                }
+            }
+            Button(on ? "Remove from “\(set)”" : "Add to “\(set)”",
+                   systemImage: on ? "minus.circle" : "plus.circle") {
+                library.setMembership(row.id, set: set, isMember: !on)
+            }
+        }
     }
 }
 
