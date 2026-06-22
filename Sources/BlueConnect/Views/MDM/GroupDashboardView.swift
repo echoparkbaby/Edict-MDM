@@ -34,8 +34,8 @@ struct GroupDashboardView: View {
     /// Which summary card is expanded to its device list (nil = none).
     @State private var drillKey: String?
 
-    // Prism: the configurable "chart the fleet by <attribute>" layer.
-    @State private var attribute: PrismView.Attribute = .osVersion
+    // Prism saved views — now scope bookmarks (the Breakdown card shows every
+    // attribute at once, so a view just captures which scope to flip to).
     @State private var savedViews: [PrismView] = []
     @State private var activeViewID: UUID?
     /// enrollmentID → count of profiles Edict deployed (for the profile
@@ -175,18 +175,6 @@ struct GroupDashboardView: View {
         return t
     }
 
-    private var fileVaultTally: Tally {
-        var t = Tally()
-        for d in scoped {
-            switch facts(for: d).fileVaultOn {
-            case .some(true): t.compliant += 1
-            case .some(false): t.nonCompliant += 1
-            case nil: t.unknown += 1
-            }
-        }
-        return t
-    }
-
     private var driftDeviceCount: Int { driftMissing.values.filter { !$0.isEmpty }.count }
     private var driftProfileCount: Int { driftMissing.values.reduce(0) { $0 + $1.count } }
 
@@ -267,9 +255,7 @@ struct GroupDashboardView: View {
                         savedViewsBar
                         summaryRow
                         if let drillKey, !drillDevices(drillKey).isEmpty { drillList(drillKey) }
-                        PrismChart(devices: scoped, facts: df, attribute: $attribute,
-                                   onAttributeChange: { activeViewID = nil })
-                        breakdownRow
+                        PrismChart(devices: scoped, facts: df)
                     }
                     .padding(18).frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -620,7 +606,7 @@ struct GroupDashboardView: View {
                     let isActive = activeViewID == v.id
                     HStack(spacing: 4) {
                         Button { apply(v) } label: {
-                            Label(v.name, systemImage: v.attribute.icon).font(.caption)
+                            Label(v.name, systemImage: "bookmark.fill").font(.caption)
                         }
                         .buttonStyle(.plain)
                         if isActive {
@@ -645,13 +631,12 @@ struct GroupDashboardView: View {
     }
 
     private var suggestedViewName: String {
-        (selectedGroup?.name).map { "\($0) — \(attribute.rawValue)" } ?? "Fleet — \(attribute.rawValue)"
+        selectedGroup?.name ?? "All devices"
     }
 
     private func apply(_ v: PrismView) {
         activeViewID = v.id
         selectedGroupID = v.groupID
-        attribute = v.attribute
     }
 
     private func deleteView(_ v: PrismView) {
@@ -663,7 +648,7 @@ struct GroupDashboardView: View {
     private func saveCurrentView() {
         let name = saveViewName.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
-        let v = PrismView(name: name, groupID: selectedGroupID, attribute: attribute)
+        let v = PrismView(name: name, groupID: selectedGroupID, attribute: .osVersion)
         savedViews.append(v)
         settings.prismViews = savedViews
         activeViewID = v.id
@@ -673,7 +658,7 @@ struct GroupDashboardView: View {
     private var saveViewSheet: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Save Prism View").font(.headline)
-            Text("Saves the current scope (\(selectedGroup?.name ?? "All devices")) and breakdown (\(attribute.rawValue)).")
+            Text("Saves the current scope (\(selectedGroup?.name ?? "All devices")) so you can flip back to it from the bar above.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             TextField("View name", text: $saveViewName).textFieldStyle(.roundedBorder)
             HStack {
@@ -817,20 +802,6 @@ struct GroupDashboardView: View {
         }
     }
 
-    private var breakdownRow: some View {
-        let fv = fileVaultTally
-        return VStack(alignment: .leading, spacing: 8) {
-            Text("FileVault").font(.headline)
-            segmentedBar([
-                .init(label: "On", count: fv.compliant, color: .green),
-                .init(label: "Off", count: fv.nonCompliant, color: .red),
-                .init(label: "Unknown", count: fv.unknown, color: .gray.opacity(0.5))
-            ])
-        }
-        .padding(14)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(NSColor.controlBackgroundColor)))
-    }
-
     private var driftCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -969,33 +940,6 @@ struct GroupDashboardView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(NSColor.controlBackgroundColor)))
-    }
-
-    private struct Segment { var label: String; var count: Int; var color: Color }
-
-    @ViewBuilder
-    private func segmentedBar(_ segments: [Segment]) -> some View {
-        let total = max(1, segments.reduce(0) { $0 + $1.count })
-        VStack(alignment: .leading, spacing: 6) {
-            GeometryReader { geo in
-                HStack(spacing: 1) {
-                    ForEach(segments.filter { $0.count > 0 }, id: \.label) { s in
-                        Rectangle().fill(s.color)
-                            .frame(width: max(2, geo.size.width * CGFloat(s.count) / CGFloat(total)))
-                    }
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-            }
-            .frame(height: 14)
-            HStack(spacing: 14) {
-                ForEach(segments, id: \.label) { s in
-                    HStack(spacing: 4) {
-                        Circle().fill(s.color).frame(width: 8, height: 8)
-                        Text("\(s.label) \(s.count)").font(.caption)
-                    }
-                }
-            }
-        }
     }
 
     private func label(for enr: MDMEnrollment) -> String { df.label(for: enr) }
