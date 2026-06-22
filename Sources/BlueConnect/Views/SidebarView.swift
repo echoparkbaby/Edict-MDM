@@ -28,6 +28,10 @@ struct SidebarView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
                     statusGroup
+                    if settings.mdmEnabled {
+                        Divider().padding(.vertical, 6)
+                        mdmGroup
+                    }
                     Divider().padding(.vertical, 6)
                     categoriesGroup
                     if settings.localNetworkEnabled {
@@ -37,10 +41,6 @@ struct SidebarView: View {
                     if settings.tailscaleEnabled {
                         Divider().padding(.vertical, 6)
                         TailscaleSection()
-                    }
-                    if settings.mdmEnabled {
-                        Divider().padding(.vertical, 6)
-                        mdmGroup
                     }
                     Divider().padding(.vertical, 6)
                     ScannedSection()
