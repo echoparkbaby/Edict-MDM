@@ -19,6 +19,8 @@ final class MDMFleetIndex {
         var model: String?
         var compliant: Bool?
         var lastSeen: Date?
+        /// Logged-in macOS user, from the device's user-channel enrollment.
+        var loggedInUser: String?
     }
 
     /// Serial (uppercased) → MDM facts.
@@ -63,7 +65,8 @@ final class MDMFleetIndex {
                 requireFileVault: settings.mdmRequireFileVault, minOS: settings.mdmMinOSVersion)
             let entry = Entry(enrollmentID: d.id, enrolled: d.isEnabled, os: f.os,
                               fileVault: f.fileVault, model: f.model,
-                              compliant: compliant, lastSeen: d.lastSeenDate)
+                              compliant: compliant, lastSeen: d.lastSeenDate,
+                              loggedInUser: d.loggedInUser)
             let serial = d.serialNumber?.trimmingCharacters(in: .whitespaces)
             if let serial, !serial.isEmpty {
                 map[serial.uppercased()] = entry

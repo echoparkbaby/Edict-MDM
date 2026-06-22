@@ -11,16 +11,38 @@ struct MDMEnrollment: Decodable, Identifiable, Hashable {
     let lastSeenAt: String?
     let createdAt: String?
     let serialNumber: String?
+    /// Logged-in user names from NanoMDM's `users` table (the user-channel
+    /// enrollment), surfaced by the sidecar. Optional so older sidecars that
+    /// don't return them still decode.
+    let userShortName: String?
+    let userLongName: String?
 
     enum CodingKeys: String, CodingKey {
         case id, type, enabled
         case lastSeenAt = "last_seen_at"
         case createdAt = "created_at"
         case serialNumber = "serial_number"
+        case userShortName = "user_short_name"
+        case userLongName = "user_long_name"
+    }
+
+    init(id: String, type: String, enabled: Int,
+         lastSeenAt: String? = nil, createdAt: String? = nil, serialNumber: String? = nil,
+         userShortName: String? = nil, userLongName: String? = nil) {
+        self.id = id; self.type = type; self.enabled = enabled
+        self.lastSeenAt = lastSeenAt; self.createdAt = createdAt; self.serialNumber = serialNumber
+        self.userShortName = userShortName; self.userLongName = userLongName
     }
 
     var isDevice: Bool { type == "Device" }
     var isEnabled: Bool { enabled != 0 }
+
+    /// Best display name for the logged-in user: full name, else short name.
+    var loggedInUser: String? {
+        if let l = userLongName?.trimmingCharacters(in: .whitespaces), !l.isEmpty { return l }
+        if let s = userShortName?.trimmingCharacters(in: .whitespaces), !s.isEmpty { return s }
+        return nil
+    }
 
     var lastSeenDate: Date? {
         guard let s = lastSeenAt else { return nil }

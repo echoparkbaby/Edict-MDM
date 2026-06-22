@@ -1187,6 +1187,17 @@ struct ContentView: View {
         TableColumn("FileVault") { (h: BlueSkyHost) in fileVaultCell(h) }
             .width(min: 60, ideal: 80, max: 120)
             .customizationID("mdm_filevault")
+        TableColumn("User") { (h: BlueSkyHost) in
+            Text(userText(h)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+        }
+        .width(min: 60, ideal: 110, max: 200)
+        .customizationID("mdm_user")
+    }
+
+    /// Logged-in macOS user for the User column, from the device's MDM
+    /// user-channel enrollment.
+    private func userText(_ h: BlueSkyHost) -> String {
+        mdmFleet.entry(forSerial: h.serialnum)?.loggedInUser ?? "—"
     }
 
     /// MDM-enrollment chip for the merged fleet table.
