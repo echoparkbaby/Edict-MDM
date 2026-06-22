@@ -590,6 +590,44 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    // MARK: - Onboarding baseline
+
+    /// When on, a Mac that enrolls AFTER `mdmOnboardingEnabledAt` is
+    /// automatically given the baseline (chosen profiles + DDM sets) the next
+    /// time Edict refreshes the fleet. Devices that enrolled earlier are left
+    /// alone (use the per-device Onboard button for those).
+    @AppStorage("mdmOnboardingEnabled") var mdmOnboardingEnabled: Bool = false
+    /// Epoch when auto-onboarding was last switched on — the cutoff for
+    /// "new" devices, so flipping it on doesn't mass-apply to the whole fleet.
+    @AppStorage("mdmOnboardingEnabledAt") var mdmOnboardingEnabledAt: Double = 0
+
+    /// Saved-profile IDs every new Mac should get (InstallProfile).
+    @AppStorage("mdmOnboardProfileIDsRaw") private var mdmOnboardProfileIDsRaw: String = "[]"
+    var mdmOnboardProfileIDs: [UUID] {
+        get { (try? JSONDecoder().decode([UUID].self, from: Data(mdmOnboardProfileIDsRaw.utf8))) ?? [] }
+        set { mdmOnboardProfileIDsRaw = String(data: (try? JSONEncoder().encode(newValue)) ?? Data("[]".utf8), encoding: .utf8) ?? "[]" }
+    }
+
+    /// KMFDDM set names every new Mac should be associated with.
+    @AppStorage("mdmOnboardSetsRaw") private var mdmOnboardSetsRaw: String = "[]"
+    var mdmOnboardSets: [String] {
+        get { (try? JSONDecoder().decode([String].self, from: Data(mdmOnboardSetsRaw.utf8))) ?? [] }
+        set { mdmOnboardSetsRaw = String(data: (try? JSONEncoder().encode(newValue)) ?? Data("[]".utf8), encoding: .utf8) ?? "[]" }
+    }
+
+    /// Enrollment IDs already onboarded, so a device is never baselined twice
+    /// automatically.
+    @AppStorage("mdmOnboardedIDsRaw") private var mdmOnboardedIDsRaw: String = "[]"
+    var mdmOnboardedIDs: Set<String> {
+        get { Set((try? JSONDecoder().decode([String].self, from: Data(mdmOnboardedIDsRaw.utf8))) ?? []) }
+        set { mdmOnboardedIDsRaw = String(data: (try? JSONEncoder().encode(Array(newValue)) ) ?? Data("[]".utf8), encoding: .utf8) ?? "[]" }
+    }
+    func isOnboarded(_ id: String) -> Bool { mdmOnboardedIDs.contains(id) }
+    func markOnboarded(_ id: String) { mdmOnboardedIDs.insert(id) }
+
+    /// True once at least one profile or set is in the baseline.
+    var hasOnboardingBaseline: Bool { !mdmOnboardProfileIDs.isEmpty || !mdmOnboardSets.isEmpty }
+
     /// PayloadIdentifier of the enrollment profile installed on managed
     /// Macs. "Remove from MDM" sends a RemoveProfile for this identifier —
     /// pulling the enrollment profile unenrolls the device.

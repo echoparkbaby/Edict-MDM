@@ -403,6 +403,12 @@ struct ContentView: View {
             $0.serialnum?.trimmingCharacters(in: .whitespaces).uppercased()
         }.filter { !$0.isEmpty })
         await mdmFleet.refresh(settings: settings, bscSerials: serials)
+        // Auto-onboard Macs that enrolled since onboarding was switched on.
+        if settings.mdmOnboardingEnabled, settings.hasOnboardingBaseline,
+           let enrollments = try? await EnrollmentsAPI(settings: settings).list() {
+            _ = await OnboardingService(settings: settings, activity: activity)
+                .autoOnboardNewDevices(enrollments)
+        }
     }
 
     private var bottomPaneVisible: Bool {

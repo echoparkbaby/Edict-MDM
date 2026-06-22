@@ -6,6 +6,7 @@ import SwiftUI
 /// own MDM services from settings; reuses LockDeviceSheet from DevicesView.
 struct MDMHostDetail: View {
     @EnvironmentObject private var settings: SettingsStore
+    @Environment(ActivityLog.self) private var activity
     let host: BlueSkyHost
     let entry: MDMFleetIndex.Entry
 
@@ -21,6 +22,7 @@ struct MDMHostDetail: View {
     @State private var showErase = false
     @State private var confirmShutdown = false
     @State private var enablingReporting = false
+    @State private var onboarding = false
 
     // Live inventory pulled straight from the Mac.
     enum InvKind: String { case hardware = "Hardware", security = "Security", profiles = "Profiles", apps = "Apps" }
@@ -242,6 +244,15 @@ struct MDMHostDetail: View {
                 .buttonStyle(.bordered).controlSize(.small)
                 .help("Subscribe this Mac to report OS, model, and FileVault status so its facts stop showing “Not reported”.")
             }
+            // Apply the onboarding baseline (chosen profiles + sets) to this Mac.
+            if settings.hasOnboardingBaseline {
+                Button { Task { await onboard() } } label: {
+                    if onboarding { ProgressView().controlSize(.small) }
+                    else { Label(settings.isOnboarded(entry.enrollmentID) ? "Re-apply baseline" : "Onboard", systemImage: "shippingbox") }
+                }
+                .buttonStyle(.bordered).controlSize(.small)
+                .help("Install the onboarding baseline (\(settings.mdmOnboardProfileIDs.count) profile(s), \(settings.mdmOnboardSets.count) set(s)) on this Mac now.")
+            }
             HStack(spacing: 8) {
                 Button { renameText = host.displayName; showRename = true } label: { Label("Rename", systemImage: "pencil") }
                 Button { showLock = true } label: { Label("Lock", systemImage: "lock.fill") }
@@ -309,6 +320,19 @@ struct MDMHostDetail: View {
         } catch {
             errorText = error.localizedDescription
         }
+    }
+
+    /// Apply the onboarding baseline (chosen profiles + DDM sets) to this Mac
+    /// on demand — the manual counterpart to auto-onboarding.
+    private func onboard() async {
+        onboarding = true
+        notice = nil; errorText = nil
+        defer { onboarding = false }
+        let r = await OnboardingService(settings: settings, activity: activity)
+            .onboard(entry.enrollmentID, deviceLabel: host.displayName)
+        deployed = DeploymentLog.entries(for: entry.enrollmentID)
+        notice = "Onboarded — \(r.profiles) profile\(r.profiles == 1 ? "" : "s"), \(r.sets) set\(r.sets == 1 ? "" : "s")"
+            + (r.failures > 0 ? ", \(r.failures) failed" : "") + ". The Mac applies them on its next sync."
     }
 
     /// Query live inventory from the Mac (DeviceInformation / ProfileList /

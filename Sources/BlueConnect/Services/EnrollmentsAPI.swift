@@ -27,6 +27,11 @@ struct MDMEnrollment: Decodable, Identifiable, Hashable {
         return Self.iso.date(from: s)
     }
 
+    var createdDate: Date? {
+        guard let s = createdAt else { return nil }
+        return Self.iso.date(from: s)
+    }
+
     private static let iso: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
