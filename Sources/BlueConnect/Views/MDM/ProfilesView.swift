@@ -153,23 +153,6 @@ struct ProfilesView: View {
             platformToggles
             Divider()
             List(selection: $selected) {
-                Section("Templates") {
-                    ForEach(sortedTemplates) { t in
-                        Label {
-                            VStack(alignment: .leading, spacing: 1) {
-                                HStack(spacing: 4) {
-                                    Text(t.rawValue)
-                                    Text(t.platforms).font(.caption2)
-                                        .padding(.horizontal, 4).padding(.vertical, 1)
-                                        .background(Capsule().fill(Color.secondary.opacity(0.15)))
-                                        .foregroundStyle(.secondary)
-                                }
-                                Text(t.blurb).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-                            }
-                        } icon: { Image(systemName: t.icon) }
-                        .tag(CatalogItem.template(t))
-                    }
-                }
                 if !saved.isEmpty {
                     Section("Saved") {
                         ForEach(sortedSaved) { sp in
@@ -186,6 +169,23 @@ struct ProfilesView: View {
                             }
                             .tag(CatalogItem.saved(sp.id))
                         }
+                    }
+                }
+                Section("Templates") {
+                    ForEach(sortedTemplates) { t in
+                        Label {
+                            VStack(alignment: .leading, spacing: 1) {
+                                HStack(spacing: 4) {
+                                    Text(t.rawValue)
+                                    Text(t.platforms).font(.caption2)
+                                        .padding(.horizontal, 4).padding(.vertical, 1)
+                                        .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(t.blurb).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                            }
+                        } icon: { Image(systemName: t.icon) }
+                        .tag(CatalogItem.template(t))
                     }
                 }
             }
