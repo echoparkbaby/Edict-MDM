@@ -253,7 +253,8 @@ struct GroupDashboardView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         savedViewsBar
-                        summaryRow
+                        heroCard
+                        attentionStrip
                         if let drillKey, !drillDevices(drillKey).isEmpty { drillList(drillKey) }
                         PrismChart(devices: scoped, facts: df)
                     }
@@ -730,20 +731,131 @@ struct GroupDashboardView: View {
         }
     }
 
-    private var summaryRow: some View {
+    // MARK: - Hero (compliance ring + stat legend)
+
+    private var heroCard: some View {
         let c = compliance
         let total = scoped.count
-        let pct = total > 0 ? Int((Double(c.compliant) / Double(total) * 100).rounded()) : 0
-        return HStack(spacing: 12) {
-            statCard("Devices", "\(total)", "laptopcomputer", .accentColor, drill: "all")
-            statCard("Compliant", "\(pct)%", "checkmark.seal.fill",
-                     pct >= 90 ? .green : (pct >= 70 ? .yellow : .red),
-                     subtitle: "\(c.compliant) of \(total)", drill: "compliant")
-            statCard("Out of compliance", "\(c.nonCompliant)", "xmark.seal.fill",
-                     c.nonCompliant == 0 ? .secondary : .red, drill: "nonCompliant")
-            statCard("Unknown", "\(c.unknown)", "questionmark.circle",
-                     c.unknown == 0 ? .secondary : .yellow,
-                     subtitle: c.unknown > 0 ? "haven't reported" : nil, drill: "unknown")
+        return HStack(alignment: .center, spacing: 24) {
+            complianceRing(compliant: c.compliant, total: total)
+            VStack(alignment: .leading, spacing: 6) {
+                statRow("All devices", total, .accentColor, "laptopcomputer", drill: "all")
+                statRow("Compliant", c.compliant, .green, "checkmark.seal.fill", drill: "compliant")
+                statRow("Out of compliance", c.nonCompliant,
+                        c.nonCompliant == 0 ? .secondary : .red, "xmark.seal.fill", drill: "nonCompliant")
+                statRow("Not reporting", c.unknown,
+                        c.unknown == 0 ? .secondary : .yellow, "questionmark.circle", drill: "unknown")
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(NSColor.controlBackgroundColor)))
+    }
+
+    private func complianceRing(compliant: Int, total: Int) -> some View {
+        let fraction = total > 0 ? Double(compliant) / Double(total) : 0
+        let pct = Int((fraction * 100).rounded())
+        let color: Color = total == 0 ? .secondary : (fraction >= 0.9 ? .green : (fraction >= 0.7 ? .yellow : .red))
+        return ZStack {
+            Circle().stroke(Color.secondary.opacity(0.15), lineWidth: 14)
+            Circle().trim(from: 0, to: max(0.0001, fraction))
+                .stroke(color, style: StrokeStyle(lineWidth: 14, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(.easeOut(duration: 0.4), value: fraction)
+            VStack(spacing: 0) {
+                Text(total == 0 ? "—" : "\(pct)%")
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .foregroundStyle(color)
+                Text("compliant").font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 132, height: 132)
+        .accessibilityElement()
+        .accessibilityLabel("\(pct) percent compliant, \(compliant) of \(total)")
+    }
+
+    private func statRow(_ title: String, _ count: Int, _ color: Color, _ icon: String, drill: String) -> some View {
+        let isOpen = drillKey == drill
+        return Button { drillKey = (drillKey == drill) ? nil : drill } label: {
+            HStack(spacing: 10) {
+                Image(systemName: icon).foregroundStyle(color).frame(width: 18)
+                Text(title).font(.callout)
+                Spacer(minLength: 24)
+                Text("\(count)").font(.title3.weight(.semibold).monospacedDigit())
+                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(isOpen ? 90 : 0))
+            }
+            .padding(.vertical, 4).padding(.horizontal, 8)
+            .background(RoundedRectangle(cornerRadius: 6).fill(isOpen ? color.opacity(0.12) : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .frame(minWidth: 240)
+    }
+
+    // MARK: - Attention strip (actionable alerts)
+
+    private struct DashAlert: Identifiable {
+        let id = UUID(); let text: String; let icon: String; let color: Color; let drill: String?
+    }
+
+    private var needsOnboardingCount: Int {
+        guard settings.hasOnboardingBaseline else { return 0 }
+        return scoped.filter { $0.isEnabled && !settings.isOnboarded($0.id) }.count
+    }
+
+    private var dashAlerts: [DashAlert] {
+        let c = compliance
+        var a: [DashAlert] = []
+        if c.nonCompliant > 0 {
+            a.append(.init(text: "\(c.nonCompliant) out of compliance", icon: "xmark.seal.fill", color: .red, drill: "nonCompliant"))
+        }
+        let needs = needsOnboardingCount
+        if needs > 0 {
+            a.append(.init(text: "\(needs) need onboarding", icon: "shippingbox", color: .orange, drill: nil))
+        }
+        if driftCheckedAt != nil && driftProfileCount > 0 {
+            a.append(.init(text: "\(driftProfileCount) profile\(driftProfileCount == 1 ? "" : "s") drifted on \(driftDeviceCount)", icon: "exclamationmark.triangle.fill", color: .orange, drill: nil))
+        }
+        if c.unknown > 0 {
+            a.append(.init(text: "\(c.unknown) not reporting", icon: "questionmark.circle", color: .yellow, drill: "unknown"))
+        }
+        return a
+    }
+
+    @ViewBuilder
+    private var attentionStrip: some View {
+        let alerts = dashAlerts
+        if alerts.isEmpty {
+            Label("Everything looks good across \(scoped.count) device\(scoped.count == 1 ? "" : "s").",
+                  systemImage: "checkmark.circle.fill")
+                .font(.callout).foregroundStyle(.green)
+                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.08)))
+        } else {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 10)], alignment: .leading, spacing: 10) {
+                ForEach(alerts) { alert in alertChip(alert) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func alertChip(_ alert: DashAlert) -> some View {
+        let content = HStack(spacing: 8) {
+            Image(systemName: alert.icon).foregroundStyle(alert.color)
+            Text(alert.text).font(.callout).foregroundStyle(.primary).lineLimit(1).truncationMode(.tail)
+            Spacer(minLength: 0)
+            if alert.drill != nil { Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary) }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(alert.color.opacity(0.12)))
+        .contentShape(Rectangle())
+        if let d = alert.drill {
+            Button { drillKey = (drillKey == d) ? nil : d } label: { content }.buttonStyle(.plain)
+        } else {
+            content
         }
     }
 
@@ -851,39 +963,6 @@ struct GroupDashboardView: View {
             return (id: d.id,
                     device: label(for: d),
                     profiles: missing.map(\.name).joined(separator: ", "))
-        }
-    }
-
-    // MARK: - Reusable bits
-
-    private func statCard(_ title: String, _ value: String, _ icon: String,
-                          _ tint: Color, subtitle: String? = nil, drill: String? = nil) -> some View {
-        let isOpen = drill != nil && drillKey == drill
-        let card = VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 5) {
-                Image(systemName: icon).foregroundStyle(tint)
-                Text(title).font(.caption).foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-                if drill != nil {
-                    Image(systemName: isOpen ? "chevron.up" : "chevron.down")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                }
-            }
-            Text(value).font(.system(size: 26, weight: .semibold, design: .rounded))
-            if let subtitle { Text(subtitle).font(.caption2).foregroundStyle(.secondary) }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(NSColor.controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 10)
-            .stroke(Color.accentColor.opacity(isOpen ? 0.6 : 0), lineWidth: 1.5))
-        return Group {
-            if let drill {
-                Button { drillKey = (drillKey == drill) ? nil : drill } label: { card }
-                    .buttonStyle(.plain)
-            } else {
-                card
-            }
         }
     }
 
