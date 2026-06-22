@@ -13,7 +13,14 @@ import Observation
 final class DDMLibraryStore {
     private(set) var items: [DDMLibraryItem] = []
 
-    init() { items = Self.load() }
+    /// Where the library persists. Defaults to Application Support; tests pass
+    /// a temp file so they never touch the real user library.
+    @ObservationIgnored private let fileURL: URL
+
+    init(fileURL: URL? = nil) {
+        self.fileURL = fileURL ?? Self.defaultFileURL
+        items = Self.load(from: self.fileURL)
+    }
 
     /// Add (or replace by Identifier) a declaration. Returns false if the
     /// bytes aren't a valid declaration.
@@ -160,19 +167,18 @@ final class DDMLibraryStore {
 
     // MARK: - Persistence
 
-    private static var fileURL: URL {
+    private static var defaultFileURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             .appendingPathComponent("EdictMDM", isDirectory: true)
             .appendingPathComponent("ddm-library.json")
     }
-    private static func load() -> [DDMLibraryItem] {
-        guard let d = try? Data(contentsOf: fileURL),
+    private static func load(from url: URL) -> [DDMLibraryItem] {
+        guard let d = try? Data(contentsOf: url),
               let arr = try? JSONDecoder().decode([DDMLibraryItem].self, from: d) else { return [] }
         return arr
     }
     private func persist() {
-        let url = Self.fileURL
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if let d = try? JSONEncoder().encode(items) { try? d.write(to: url) }
+        try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let d = try? JSONEncoder().encode(items) { try? d.write(to: fileURL) }
     }
 }

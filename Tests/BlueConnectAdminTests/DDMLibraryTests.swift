@@ -249,6 +249,28 @@ struct DDMLibraryTests {
         #expect(p["PasscodeReuseLimit"] == nil)          // 0 → omitted
     }
 
+    @Test func updateEnforcementFormatsDeadlineAndOmitsEmptyURL() throws {
+        var comps = DateComponents()
+        (comps.year, comps.month, comps.day) = (2026, 7, 1)
+        (comps.hour, comps.minute, comps.second) = (9, 30, 0)
+        let date = try #require(Calendar(identifier: .gregorian).date(from: comps))
+        let data = DDMDeclarations.updateEnforcement(identifier: "com.x.u", targetVersion: "15.5", deadline: date, detailsURL: "")
+        let obj = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let p = try #require(obj["Payload"] as? [String: Any])
+        #expect(p["TargetOSVersion"] as? String == "15.5")
+        // Local wall-clock, no zone (both Calendar + formatter use the same default tz).
+        #expect(p["TargetLocalDateTime"] as? String == "2026-07-01T09:30:00")
+        #expect(p["DetailsURL"] == nil)   // empty URL omitted
+    }
+
+    @Test func activationBuilderAndIdConvention() throws {
+        #expect(DDMDeclarations.activationID(for: "com.x.cfg") == "com.x.cfg.activation")
+        let data = DDMDeclarations.activation(identifier: "com.x.cfg.activation", configurationIDs: ["com.x.cfg"])
+        let obj = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(obj["Type"] as? String == "com.apple.activation.simple")
+        #expect(((obj["Payload"] as? [String: Any])?["StandardConfigurations"] as? [String]) == ["com.x.cfg"])
+    }
+
     @Test func setsMatrixRowsSortedByTitle() {
         let items = [
             DDMLibraryItem(json: decl(type: "com.apple.activation.simple", id: "z"), sets: []),                              // "Activation"
