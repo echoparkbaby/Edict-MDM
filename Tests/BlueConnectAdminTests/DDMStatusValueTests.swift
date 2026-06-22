@@ -29,6 +29,15 @@ struct DDMStatusValueTests {
         #expect(try decode(#"{"path":".n","value":15.5}"#).value == "15.5")
     }
 
+    /// The decoder tries String → Bool → Double. A numeric 1/0 must NOT be
+    /// mistaken for a boolean ("true"/"false") — JSONDecoder distinguishes a
+    /// real JSON bool from a number, so these stay "1"/"0". deviceFacts reads
+    /// FileVault as either "true" or "1", so this boundary matters.
+    @Test func integerOneAndZeroStayNumeric() throws {
+        #expect(try decode(#"{"path":".fv","value":1}"#).value == "1")
+        #expect(try decode(#"{"path":".fv","value":0}"#).value == "0")
+    }
+
     @Test func missingValueIsEmptyString() throws {
         #expect(try decode(#"{"path":".x"}"#).value == "")
     }
