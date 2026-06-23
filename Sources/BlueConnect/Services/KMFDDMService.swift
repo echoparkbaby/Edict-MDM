@@ -112,10 +112,16 @@ struct KMFDDMService {
 
     /// `PUT /v1/enrollment-sets/<enrollmentID>?set=<set>` — associate an
     /// enrollment with a set (triggers the DeclarativeManagement push).
+    /// KMFDDM returns 304 when the association is already present (no re-notify);
+    /// that's success, not an error, so re-assigning is safe + idempotent.
     func assign(enrollmentID: String, toSet set: String) async throws {
-        _ = try await request("v1/enrollment-sets/\(pathEsc(enrollmentID))",
-                              method: "PUT",
-                              query: [URLQueryItem(name: "set", value: set)])
+        do {
+            _ = try await request("v1/enrollment-sets/\(pathEsc(enrollmentID))",
+                                  method: "PUT",
+                                  query: [URLQueryItem(name: "set", value: set)])
+        } catch MDMError.http(304, _) {
+            // Already associated — unchanged.
+        }
     }
 
     /// `GET /v1/status-values/<enrollmentID>[?path=prefix]` — the status

@@ -55,8 +55,8 @@ struct DEPProfileSheet: View {
             Form {
                 Section("Basics") {
                     TextField("Profile name", text: $name)
-                    TextField("Enrollment URL", text: $url, prompt: Text(verbatim: "https://mdm.example.com/mdm"))
-                        .help("The MDM check-in URL devices contact — usually your public NanoMDM /mdm endpoint")
+                    TextField("Enrollment URL", text: $url, prompt: Text(verbatim: "https://mdm.example.com/mdm/enroll"))
+                        .help("Where the device fetches its enrollment profile during Setup Assistant — for NanoMDM the /mdm/enroll endpoint, NOT the /mdm check-in path. Verify against your enrollment service.")
                 }
                 Section("Behavior") {
                     Toggle("Supervised", isOn: $supervised)
@@ -76,7 +76,9 @@ struct DEPProfileSheet: View {
                     TextField("Support email", text: $supportEmail)
                 }
                 Section {
-                    Toggle("Set as auto-assigner (new ABM devices enroll automatically)", isOn: $setAsAutoAssigner)
+                    Toggle("Set as auto-assigner for new ABM devices", isOn: $setAsAutoAssigner)
+                    Text("New devices get this profile automatically — but only once the server's depsyncer runs (it's not instant).")
+                        .font(.caption2).foregroundStyle(.secondary)
                 }
             }
             .formStyle(.grouped)

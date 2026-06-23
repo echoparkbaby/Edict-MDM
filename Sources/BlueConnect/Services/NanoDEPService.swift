@@ -29,6 +29,15 @@ struct NanoDEPService {
         self.name = name
     }
 
+    /// The DEP profile's enrollment URL default — where the device fetches its
+    /// enrollment profile during Setup Assistant. For NanoMDM that's the
+    /// `/mdm/enroll` endpoint (NOT the `/mdm` check-in path). Pure + testable.
+    static func enrollURL(publicBase: String) -> String {
+        let b = publicBase.trimmingCharacters(in: .whitespaces)
+        guard !b.isEmpty else { return "" }
+        return (b.hasSuffix("/") ? String(b.dropLast()) : b) + "/mdm/enroll"
+    }
+
     // MARK: - Health
 
     /// `GET /version`.
@@ -114,11 +123,12 @@ struct NanoDEPService {
         return (try? JSONDecoder().decode(R.self, from: data).devices) ?? [:]
     }
 
-    /// `PUT /v1/assigner/<name>` — store the auto-assigner profile UUID so
-    /// NanoDEP's syncer assigns it to every newly-appearing ABM device.
+    /// `PUT /v1/assigner/<name>?profile_uuid=<uuid>` — store the auto-assigner
+    /// profile UUID so NanoDEP's syncer assigns it to every newly-appearing ABM
+    /// device. NanoDEP reads the UUID from the query string, not the body.
     func setAutoAssigner(profileUUID: String) async throws {
-        let body = try JSONSerialization.data(withJSONObject: ["profile_uuid": profileUUID])
-        _ = try await request("v1/assigner/\(pathEsc(name))", method: "PUT", body: body)
+        let q = profileUUID.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? profileUUID
+        _ = try await request("v1/assigner/\(pathEsc(name))?profile_uuid=\(q)", method: "PUT")
     }
 
     /// `GET /v1/assigner/<name>` — the current auto-assigner profile UUID, if set.

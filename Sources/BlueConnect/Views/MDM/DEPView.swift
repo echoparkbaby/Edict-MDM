@@ -60,8 +60,7 @@ struct DEPView: View {
     }
 
     private var defaultEnrollURL: String {
-        let base = settings.mdmPublicURL.trimmingCharacters(in: .whitespaces)
-        return base.isEmpty ? "" : (base.hasSuffix("/") ? base + "mdm" : base + "/mdm")
+        NanoDEPService.enrollURL(publicBase: settings.mdmPublicURL)
     }
 
     // MARK: - Header / states
@@ -110,9 +109,9 @@ struct DEPView: View {
                 row("MDM server", a.serverName ?? "—")
                 row("Admin", a.adminID ?? "—")
                 if let uuid = autoAssignerUUID {
-                    row("Auto-assigner", "\(uuid.prefix(8))… (new devices auto-enroll)")
+                    row("Auto-assigner", "\(uuid.prefix(8))… — applied to new devices when the server's depsyncer runs")
                 } else {
-                    row("Auto-assigner", "none — new devices won't auto-enroll until you set one")
+                    row("Auto-assigner", "none set")
                 }
             } else {
                 Text("Test the connection to load your ABM account detail.")

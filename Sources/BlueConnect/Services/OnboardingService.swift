@@ -50,10 +50,13 @@ struct OnboardingService {
             } catch { failures += 1 }
         }
 
-        settings.markOnboarded(enrollmentID)
+        // Only mark onboarded if nothing failed — a total/partial failure
+        // (server down, bad profile) must stay retryable on the next refresh
+        // rather than being recorded as done and skipped forever.
+        if failures == 0 { settings.markOnboarded(enrollmentID) }
         activity.record(.category, title: "Onboarded \(deviceLabel)",
                         detail: "\(profiles) profile\(profiles == 1 ? "" : "s"), \(sets) set\(sets == 1 ? "" : "s")"
-                              + (failures > 0 ? ", \(failures) failed" : ""))
+                              + (failures > 0 ? ", \(failures) failed — will retry" : ""))
         return Outcome(profiles: profiles, sets: sets, failures: failures)
     }
 
@@ -73,10 +76,12 @@ struct OnboardingService {
     }
 
     /// Ensure every device has the baseline of each smart group it matches —
-    /// the group-policy enforcement. Idempotent: a set is assigned once per
-    /// device (tracked in settings) and a profile is installed only if the
-    /// deployment log doesn't already have it. Runs each refresh, so a Mac
+    /// the group-policy enforcement. Apply-once-per-device: a set is assigned
+    /// once (tracked locally in settings) and a profile is installed only if
+    /// the deployment log doesn't already have it. Runs each refresh, so a Mac
     /// that starts matching a group later (once it reports facts) is covered.
+    /// NOT a full server-state reconciler — it won't re-assert an association
+    /// removed directly on KMFDDM, since it trusts its local applied-set memory.
     /// Returns how many devices were changed.
     @discardableResult
     func enforceGroupBaselines(_ devices: [(id: String, facts: SmartGroup.DeviceFacts)]) async -> Int {

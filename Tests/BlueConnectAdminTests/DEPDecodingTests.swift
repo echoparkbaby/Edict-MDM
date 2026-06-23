@@ -46,4 +46,11 @@ struct DEPDecodingTests {
         #expect(d.model == nil)
         #expect(d.profileStatus == nil)
     }
+
+    @Test func enrollURLAppendsEnrollPath() {
+        // DEP enrollment uses /mdm/enroll, not the /mdm check-in path.
+        #expect(NanoDEPService.enrollURL(publicBase: "https://mdm.example.com") == "https://mdm.example.com/mdm/enroll")
+        #expect(NanoDEPService.enrollURL(publicBase: "https://mdm.example.com/") == "https://mdm.example.com/mdm/enroll")
+        #expect(NanoDEPService.enrollURL(publicBase: "  ") == "")
+    }
 }
