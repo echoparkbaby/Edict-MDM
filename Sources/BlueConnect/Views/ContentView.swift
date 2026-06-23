@@ -1408,7 +1408,7 @@ struct ContentView: View {
             }
             .width(min: 200, ideal: 210, max: 240)
             .customizationID("connect")
-            TableColumn("User", value: \BlueSkyHost.usernameSortKey) { h in
+            TableColumn("BlueConnect User", value: \BlueSkyHost.usernameSortKey) { h in
                 UserCell(host: h, defaultUser: settings.defaultRemoteUser) {
                     setUsernameTargets = [h]
                     showingSetUsernameSheet = true

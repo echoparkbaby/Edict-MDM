@@ -132,6 +132,7 @@ struct MDMHostDetail: View {
             }
             row("macOS", os ?? "Not reported", color: os == nil ? .secondary : .primary)
             row("Model", model ?? "Not reported", color: model == nil ? .secondary : .primary)
+            if let user = entry.loggedInUser { row("User", user) }
             switch fileVault {
             case .some(true): row("FileVault", "On", color: .green)
             case .some(false): row("FileVault", "Off", color: .red)
