@@ -17,6 +17,8 @@ enum SidebarFilter: Hashable {
     case mdmProfiles
     /// Edict MDM: enrollment-profile builder.
     case mdmEnrollment
+    /// Edict MDM: Automated Device Enrollment (DEP / Apple Business Manager).
+    case mdmDEP
     /// Edict MDM: scheduled automation.
     case mdmScheduling
     /// Edict MDM: fleet/group compliance dashboard.
@@ -35,6 +37,7 @@ enum SidebarFilter: Hashable {
         case .mdmDevices: "mdm:dev"
         case .mdmProfiles: "mdm:prof"
         case .mdmEnrollment: "mdm:enroll"
+        case .mdmDEP: "mdm:dep"
         case .mdmScheduling: "mdm:sched"
         case .mdmDashboard: "mdm:dash"
         }

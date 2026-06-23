@@ -261,6 +261,7 @@ struct SidebarView: View {
             mdmRow(.mdmProfiles, label: "Profiles", icon: "doc.text.fill")
             mdmRow(.mdmScheduling, label: "Scheduling", icon: "clock.badge.checkmark")
             mdmRow(.mdmEnrollment, label: "Enrollment", icon: "qrcode")
+            mdmRow(.mdmDEP, label: "Auto-Enroll (DEP)", icon: "sparkles.rectangle.stack")
         }
     }
 

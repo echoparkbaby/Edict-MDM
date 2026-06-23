@@ -511,16 +511,25 @@ final class SettingsStore: ObservableObject {
     @AppStorage("nanoMDMBaseURL") var nanoMDMBaseURL: String = ""
     /// KMFDDM admin API base over the tailnet (e.g. `http://192.0.2.10:9093`).
     @AppStorage("kmfddmBaseURL") var kmfddmBaseURL: String = ""
+    /// NanoDEP admin/proxy API base over the tailnet (e.g.
+    /// `http://192.0.2.10:9001`) — Apple Automated Device Enrollment (DEP).
+    /// Optional: only orgs using Apple Business Manager need it.
+    @AppStorage("nanoDEPBaseURL") var nanoDEPBaseURL: String = ""
+    /// The NanoDEP "name" — its handle for one ABM/ASM MDM-server token.
+    @AppStorage("nanoDEPName") var nanoDEPName: String = "default"
     /// HTTP Basic API keys, loaded from Keychain at runtime (not @AppStorage).
     @Published var nanoMDMAPIKey: String = ""
     @Published var kmfddmAPIKey: String = ""
+    @Published var nanoDEPAPIKey: String = ""
 
     private static let nanoMDMAPIKeyAccount = "EdictMDM.nanoMDMAPIKey"
     private static let kmfddmAPIKeyAccount  = "EdictMDM.kmfddmAPIKey"
+    private static let nanoDEPAPIKeyAccount  = "EdictMDM.nanoDEPAPIKey"
 
     func loadMDMKeysFromKeychain() {
         nanoMDMAPIKey = KeychainHelper.read(account: Self.nanoMDMAPIKeyAccount) ?? ""
         kmfddmAPIKey  = KeychainHelper.read(account: Self.kmfddmAPIKeyAccount) ?? ""
+        nanoDEPAPIKey = KeychainHelper.read(account: Self.nanoDEPAPIKeyAccount) ?? ""
     }
     func setNanoMDMAPIKey(_ key: String) {
         nanoMDMAPIKey = key
@@ -529,6 +538,16 @@ final class SettingsStore: ObservableObject {
     func setKMFDDMAPIKey(_ key: String) {
         kmfddmAPIKey = key
         KeychainHelper.save(key, account: Self.kmfddmAPIKeyAccount)
+    }
+    func setNanoDEPAPIKey(_ key: String) {
+        nanoDEPAPIKey = key
+        KeychainHelper.save(key, account: Self.nanoDEPAPIKeyAccount)
+    }
+    /// DEP is configured when its URL + key are set (independent of the core
+    /// MDM admin config — an org may use one without the other).
+    var depConfigured: Bool {
+        !nanoDEPBaseURL.trimmingCharacters(in: .whitespaces).isEmpty
+            && !nanoDEPAPIKey.trimmingCharacters(in: .whitespaces).isEmpty
     }
     /// Both halves of the MDM admin config present?
     var mdmConfigured: Bool {

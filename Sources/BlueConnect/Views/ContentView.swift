@@ -151,7 +151,7 @@ struct ContentView: View {
         case .inactive:      result = result.filter { !$0.active }
         case .uncategorized: result = result.filter { ($0.category ?? "").isEmpty }
         case .category(let c): result = result.filter { ($0.category ?? "") == c }
-        case .mdmDeclarations, .mdmDevices, .mdmProfiles, .mdmEnrollment, .mdmScheduling, .mdmDashboard: break  // center pane shows an MDM view, not the table
+        case .mdmDeclarations, .mdmDevices, .mdmProfiles, .mdmEnrollment, .mdmDEP, .mdmScheduling, .mdmDashboard: break  // center pane shows an MDM view, not the table
         }
         if !searchText.isEmpty {
             let q = searchText
@@ -1032,6 +1032,8 @@ struct ContentView: View {
                     ProfilesView()
                 case .mdmEnrollment:
                     EnrollmentView()
+                case .mdmDEP:
+                    DEPView()
                 case .mdmScheduling:
                     SchedulingView()
                 case .mdmDashboard:
@@ -2490,6 +2492,7 @@ struct ContentView: View {
         case "mdm:dev": return .mdmDashboard   // Devices tab retired → dashboard
         case "mdm:prof": return .mdmProfiles
         case "mdm:enroll": return .mdmEnrollment
+        case "mdm:dep": return .mdmDEP
         case "mdm:sched": return .mdmScheduling
         case "mdm:dash": return .mdmDashboard
         default:
@@ -2511,6 +2514,7 @@ struct ContentView: View {
         case .mdmDevices: return "mdm:dev"
         case .mdmProfiles: return "mdm:prof"
         case .mdmEnrollment: return "mdm:enroll"
+        case .mdmDEP: return "mdm:dep"
         case .mdmScheduling: return "mdm:sched"
         case .mdmDashboard: return "mdm:dash"
         }

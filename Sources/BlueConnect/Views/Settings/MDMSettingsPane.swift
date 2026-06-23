@@ -15,6 +15,7 @@ struct MDMSettingsPane: View {
 
     @State private var nanoKeyBuffer: String = ""
     @State private var kmfddmKeyBuffer: String = ""
+    @State private var depKeyBuffer: String = ""
     @State private var challengeBuffer: String = ""
     @State private var testing = false
     @State private var testResult: TestResult?
@@ -33,6 +34,7 @@ struct MDMSettingsPane: View {
                 nanoSection
                 kmfddmSection
                 enrollmentSection
+                depSection
                 complianceSection
                 testSection
             }
@@ -42,6 +44,7 @@ struct MDMSettingsPane: View {
         .onAppear {
             nanoKeyBuffer = settings.nanoMDMAPIKey
             kmfddmKeyBuffer = settings.kmfddmAPIKey
+            depKeyBuffer = settings.nanoDEPAPIKey
             challengeBuffer = settings.scepChallenge
         }
     }
@@ -165,6 +168,21 @@ struct MDMSettingsPane: View {
             exportResult = "Saved \(url.lastPathComponent) — \(signedNote). Install it on a Mac to enroll."
         } catch {
             exportResult = "Export failed: \(error.localizedDescription)"
+        }
+    }
+
+    private var depSection: some View {
+        Section("NanoDEP (Automated Enrollment — optional)") {
+            TextField("NanoDEP URL", text: $settings.nanoDEPBaseURL,
+                      prompt: Text(verbatim: "http://192.0.2.10:9001"))
+                .help("NanoDEP admin/proxy API base over the tailnet. Only needed for Apple Business Manager zero-touch enrollment.")
+            TextField("DEP name", text: $settings.nanoDEPName, prompt: Text(verbatim: "default"))
+                .help("NanoDEP's handle for one ABM/ASM MDM-server token (the -name it was set up with).")
+            SecureField("API Key", text: $depKeyBuffer)
+                .onChange(of: depKeyBuffer) { _, newValue in settings.setNanoDEPAPIKey(newValue) }
+                .help("The -api key NanoDEP was started with (HTTP Basic password, user 'depserver').")
+            Text("Leave blank unless you use Apple Business Manager. The DEP token itself is loaded into NanoDEP server-side; this just points Edict at it. Manage devices/profiles in Device Management → Auto-Enroll.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
 
