@@ -46,8 +46,9 @@ struct DEPView: View {
                 }
             }
             .padding(18).frame(maxWidth: 760, alignment: .leading)
+                .frame(maxWidth: .infinity)   // center — no dead space on the right
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
         .sheet(isPresented: $showProfileSheet) {
             DEPProfileSheet(defaultURL: defaultEnrollURL) { uuid, setAuto in
                 lastProfileUUID = uuid

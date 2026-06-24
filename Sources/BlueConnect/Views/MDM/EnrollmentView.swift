@@ -42,9 +42,10 @@ struct EnrollmentView: View {
                 }
             }
             .padding(18)
-            .frame(maxWidth: 640, alignment: .leading)
+            .frame(maxWidth: 680, alignment: .leading)
+            .frame(maxWidth: .infinity)   // center the column — no dead space on the right
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
         .task {
             challengeBuffer = settings.scepChallenge
             signingIdentity = EnrollmentProfileExporter.developerIDIdentity()
