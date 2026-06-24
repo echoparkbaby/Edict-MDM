@@ -24,6 +24,7 @@ struct DeclarationLibraryPane: View {
     @State private var pendingChoice: AddChoice?
     @State private var pulling = false
     @State private var setsField = ""
+    @State private var predicateBuffer = ""
     @State private var mirrorCandidates: [String] = []
     @State private var showMirrorConfirm = false
     @State private var showJSON = false
@@ -84,6 +85,7 @@ struct DeclarationLibraryPane: View {
         }
         .onChange(of: selectedID) { _, _ in
             setsField = selected?.sets.joined(separator: ", ") ?? ""
+            predicateBuffer = selected?.predicate ?? ""
             showJSON = false
         }
         .alert("Mirror to KMFDDM?", isPresented: $showMirrorConfirm) {
@@ -203,6 +205,10 @@ struct DeclarationLibraryPane: View {
                         .clipShape(.rect(cornerRadius: 8))
                     }
 
+                    if item.kind == "activation" {
+                        predicateEditor(item)
+                    }
+
                     HStack(spacing: 6) {
                         Text("Sets").font(.caption).foregroundStyle(.secondary)
                         TextField("default, security", text: $setsField).textFieldStyle(.roundedBorder)
@@ -234,6 +240,34 @@ struct DeclarationLibraryPane: View {
     private func saveSets(_ item: DDMLibraryItem) {
         let sets = setsField.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         library.setMembership(item.id, sets: sets)
+    }
+
+    /// Predicate (condition) editor for an activation — gates the configuration
+    /// it turns on so it only activates on matching devices.
+    @ViewBuilder
+    private func predicateEditor(_ item: DDMLibraryItem) -> some View {
+        let current = item.predicate ?? ""
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text("Condition (predicate)").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                Spacer()
+                if item.predicate != nil {
+                    Button("Clear") {
+                        predicateBuffer = ""
+                        library.setActivationPredicate(item.id, predicate: nil)
+                    }
+                }
+                Button("Save") { library.setActivationPredicate(item.id, predicate: predicateBuffer) }
+                    .disabled(predicateBuffer == current)
+            }
+            TextField("leave blank to always activate", text: $predicateBuffer)
+                .textFieldStyle(.roundedBorder).font(.callout.monospaced())
+            Text("An NSPredicate-format string. The configuration activates only on devices where it's true — gate by the device's reported status items (OS version, model, FileVault, …). Blank = always activate. See Apple's Predicate Programming guide for the exact syntax.")
+                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.06)))
     }
 
     /// After the gallery sheet closes, open the form (or run the action) for

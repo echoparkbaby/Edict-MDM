@@ -60,6 +60,17 @@ final class DDMLibraryStore {
     /// Every distinct set name referenced by the library.
     var setNames: [String] { Array(Set(items.flatMap(\.sets))).sorted() }
 
+    /// Set (or clear, with nil/empty) the gating Predicate on an activation —
+    /// the configuration it turns on then only activates where the predicate
+    /// is true. No-op on non-activation items.
+    func setActivationPredicate(_ id: UUID, predicate: String?) {
+        guard let idx = items.firstIndex(where: { $0.id == id }), items[idx].kind == "activation" else { return }
+        items[idx].json = DDMDeclarations.activation(identifier: items[idx].identifier,
+                                                     configurationIDs: items[idx].standardConfigurations,
+                                                     predicate: predicate)
+        persist()
+    }
+
     /// Make `configID` take effect in `set` by ensuring its activation is in
     /// the set (the grid's per-cell "Activate here" fix).
     func activate(configID: String, in set: String) {

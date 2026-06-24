@@ -158,11 +158,18 @@ enum DDMDeclarations {
                            identifier: identifier, payload: p)
     }
 
-    /// `com.apple.activation.simple` referencing one or more configurations.
-    static func activation(identifier: String, configurationIDs: [String]) -> Data {
-        declaration(type: "com.apple.activation.simple",
-                    identifier: identifier,
-                    payload: ["StandardConfigurations": configurationIDs])
+    /// `com.apple.activation.simple` referencing one or more configurations,
+    /// with an optional NSPredicate-format `Predicate` that gates activation:
+    /// the configuration installs only on devices where the predicate is true
+    /// (or absent). Predicates reference the device's reported status items.
+    static func activation(identifier: String, configurationIDs: [String],
+                           predicate: String? = nil) -> Data {
+        var payload: [String: Any] = ["StandardConfigurations": configurationIDs]
+        if let p = predicate?.trimmingCharacters(in: .whitespaces), !p.isEmpty {
+            payload["Predicate"] = p
+        }
+        return declaration(type: "com.apple.activation.simple",
+                           identifier: identifier, payload: payload)
     }
 
     /// Conventional identifier for the activation paired with a config.

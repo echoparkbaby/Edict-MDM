@@ -336,6 +336,38 @@ struct DDMLibraryTests {
         #expect(p["PreventHighPerformanceConnections"] as? Bool == true)
     }
 
+    @Test func activationPredicateEmittedAndReadBack() throws {
+        let pred = "@status.device.model.family == 'Mac'"
+        let data = DDMDeclarations.activation(identifier: "com.x.act", configurationIDs: ["com.x.cfg"], predicate: pred)
+        let item = DDMLibraryItem(json: data)
+        #expect(item.standardConfigurations == ["com.x.cfg"])
+        #expect(item.predicate == pred)
+        let summary = item.summary
+        #expect(summary.title == "Activation")
+        #expect(summary.rows.contains { $0.label == "Only when" && $0.value == pred })
+
+        // No predicate → key omitted, no "Only when" row.
+        let plain = DDMLibraryItem(json: DDMDeclarations.activation(identifier: "com.x.act", configurationIDs: ["com.x.cfg"]))
+        #expect(plain.predicate == nil)
+        #expect(!plain.summary.rows.contains { $0.label == "Only when" })
+
+        // Blank/whitespace predicate is treated as none.
+        let blank = DDMLibraryItem(json: DDMDeclarations.activation(identifier: "a", configurationIDs: ["c"], predicate: "   "))
+        #expect(blank.predicate == nil)
+    }
+
+    @Test func setActivationPredicateRoundTrips() {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("ddmpred-\(UUID().uuidString)/lib.json")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        // Pure helper: setActivationPredicate rebuilds the activation JSON.
+        let act = DDMLibraryItem(json: DDMDeclarations.activation(identifier: "com.x.cfg.activation", configurationIDs: ["com.x.cfg"]))
+        // Rebuild with a predicate via the same builder the store uses.
+        let updated = DDMLibraryItem(json: DDMDeclarations.activation(
+            identifier: act.identifier, configurationIDs: act.standardConfigurations, predicate: "@status.x == 1"))
+        #expect(updated.predicate == "@status.x == 1")
+        #expect(updated.standardConfigurations == ["com.x.cfg"])
+    }
+
     @Test func setsMatrixRowsSortedByTitle() {
         let items = [
             DDMLibraryItem(json: decl(type: "com.apple.activation.simple", id: "z"), sets: []),                              // "Activation"

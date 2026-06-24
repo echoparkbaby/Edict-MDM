@@ -17,6 +17,9 @@ struct DDMLibraryItem: Codable, Identifiable, Hashable {
     var payload: [String: Any] { (object?["Payload"] as? [String: Any]) ?? [:] }
     /// configuration / activation / asset / management / declaration.
     var kind: String { Self.kind(forType: type) }
+    /// For activations: the configurations it turns on, and its gating predicate.
+    var standardConfigurations: [String] { (payload["StandardConfigurations"] as? [String]) ?? [] }
+    var predicate: String? { (payload["Predicate"] as? String).flatMap { $0.isEmpty ? nil : $0 } }
     /// Plain-English read of this declaration for the UI.
     var summary: DDMDeclarationSummary { DDMDeclarationSummary.make(type: type, payload: payload) }
 

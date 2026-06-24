@@ -36,9 +36,11 @@ struct DDMDeclarationSummary {
 
         case "com.apple.activation.simple":
             let configs = (payload["StandardConfigurations"] as? [String]) ?? []
+            var rows: [Row] = configs.isEmpty ? [] : [r("Turns on", configs.joined(separator: ", "))]
+            if let pred = payload["Predicate"] as? String, !pred.isEmpty { rows.append(r("Only when", pred)) }
             return .init(title: "Activation",
-                         blurb: "Plumbing — turns the referenced configuration(s) on. You rarely edit this directly.",
-                         rows: configs.isEmpty ? [] : [r("Turns on", configs.joined(separator: ", "))])
+                         blurb: "Plumbing — turns the referenced configuration(s) on, optionally only on devices matching a condition.",
+                         rows: rows)
 
         case "com.apple.configuration.diskmanagement.settings":
             var rows: [Row] = []
