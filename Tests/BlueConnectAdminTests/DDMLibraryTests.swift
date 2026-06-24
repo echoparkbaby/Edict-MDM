@@ -372,6 +372,43 @@ struct DDMLibraryTests {
         #expect(updated.standardConfigurations == ["com.x.cfg"])
     }
 
+    @Test func certificateAssetAndConfig() throws {
+        let asset = DDMDeclarations.certificateAsset(
+            identifier: "com.x.cert.asset",
+            dataURL: "https://certs.example.com/root.pem",
+            contentType: "application/pem", sha256: nil, mdmAuth: true)
+        let aObj = try #require(try JSONSerialization.jsonObject(with: asset) as? [String: Any])
+        #expect(aObj["Type"] as? String == "com.apple.asset.credential.certificate")
+        let ap = try #require(aObj["Payload"] as? [String: Any])
+        let ref = try #require(ap["Reference"] as? [String: Any])
+        #expect(ref["DataURL"] as? String == "https://certs.example.com/root.pem")
+        #expect(ref["ContentType"] as? String == "application/pem")
+        #expect(ref["Hash-SHA-256"] == nil)                       // nil → omitted
+        #expect((ap["Authentication"] as? [String: Any])?["Type"] as? String == "MDM")
+
+        let aItem = DDMLibraryItem(json: asset)
+        #expect(aItem.kind == "asset")
+        #expect(aItem.summary.title == "Certificate file")
+        #expect(aItem.summary.rows.contains { $0.label == "Download URL" })
+
+        let config = DDMDeclarations.certificateConfig(identifier: "com.x.cert", assetReference: "com.x.cert.asset")
+        let cObj = try #require(try JSONSerialization.jsonObject(with: config) as? [String: Any])
+        #expect(cObj["Type"] as? String == "com.apple.configuration.security.certificate")
+        #expect((cObj["Payload"] as? [String: Any])?["CredentialAssetReference"] as? String == "com.x.cert.asset")
+        let cItem = DDMLibraryItem(json: config)
+        #expect(cItem.kind == "configuration")
+        #expect(cItem.summary.title == "Certificate")
+        #expect(cItem.summary.rows.contains { $0.label == "From asset" && $0.value == "com.x.cert.asset" })
+    }
+
+    @Test func certificateAssetOmitsAuthWhenAnonymous() throws {
+        let asset = DDMDeclarations.certificateAsset(
+            identifier: "a", dataURL: "https://x/c.pem", contentType: nil, sha256: nil, mdmAuth: false)
+        let p = try #require((try JSONSerialization.jsonObject(with: asset) as? [String: Any])?["Payload"] as? [String: Any])
+        #expect(p["Authentication"] == nil)                       // anonymous → omitted
+        #expect((p["Reference"] as? [String: Any])?["ContentType"] == nil)
+    }
+
     @Test func setsMatrixRowsSortedByTitle() {
         let items = [
             DDMLibraryItem(json: decl(type: "com.apple.activation.simple", id: "z"), sets: []),                              // "Activation"

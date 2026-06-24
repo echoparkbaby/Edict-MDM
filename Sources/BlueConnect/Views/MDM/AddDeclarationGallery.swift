@@ -8,6 +8,7 @@ enum AddChoice {
     case statusReporting
     case passcodePolicy
     case screenSharing
+    case certificate
     case diskRestrictions
     case pasteJSON
     case importFiles
@@ -57,6 +58,10 @@ struct AddDeclarationGallery: View {
                              blurb: "Control macOS Screen Sharing — block file copy to/from the Mac, virtual displays, and high-performance connections. macOS 14+.")
                     }
                     group("Security & storage") {
+                        card(.certificate,
+                             title: "Install a certificate",
+                             icon: "checkmark.seal",
+                             blurb: "Deploy a certificate (root CA, trust) to Macs. You host the .pem at an HTTPS URL; DDM downloads it. macOS 14+.")
                         card(.passcodePolicy,
                              title: "Passcode policy",
                              icon: "lock.shield",

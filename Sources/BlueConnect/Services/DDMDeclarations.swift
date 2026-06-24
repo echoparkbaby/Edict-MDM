@@ -158,6 +158,30 @@ enum DDMDeclarations {
                            identifier: identifier, payload: p)
     }
 
+    /// `com.apple.asset.credential.certificate` (macOS 14+) — the asset that
+    /// holds a certificate the device DOWNLOADS from `dataURL` (an https URL;
+    /// `application/pem` or `application/pkcs1`). The cert is NOT embedded —
+    /// you host the file and reference its URL. Paired with a
+    /// `security.certificate` configuration that points at this asset.
+    static func certificateAsset(identifier: String, dataURL: String,
+                                 contentType: String?, sha256: String?, mdmAuth: Bool) -> Data {
+        var reference: [String: Any] = ["DataURL": dataURL]
+        if let ct = contentType, !ct.isEmpty { reference["ContentType"] = ct }
+        if let h = sha256, !h.isEmpty { reference["Hash-SHA-256"] = h }
+        var payload: [String: Any] = ["Reference": reference]
+        if mdmAuth { payload["Authentication"] = ["Type": "MDM"] }
+        return declaration(type: "com.apple.asset.credential.certificate",
+                           identifier: identifier, payload: payload)
+    }
+
+    /// `com.apple.configuration.security.certificate` (macOS 14+) — installs
+    /// the certificate held by the referenced credential asset.
+    static func certificateConfig(identifier: String, assetReference: String) -> Data {
+        declaration(type: "com.apple.configuration.security.certificate",
+                    identifier: identifier,
+                    payload: ["CredentialAssetReference": assetReference])
+    }
+
     /// `com.apple.activation.simple` referencing one or more configurations,
     /// with an optional NSPredicate-format `Predicate` that gates activation:
     /// the configuration installs only on devices where the predicate is true

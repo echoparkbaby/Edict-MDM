@@ -96,6 +96,23 @@ struct DDMDeclarationSummary {
                          blurb: "Login-password rules each Mac enforces (macOS 13+).",
                          rows: rows)
 
+        case "com.apple.configuration.security.certificate":
+            return .init(title: "Certificate",
+                         blurb: "Installs a certificate the Mac downloads from a credential asset (macOS 14+).",
+                         rows: [r("From asset", (payload["CredentialAssetReference"] as? String) ?? "—")])
+
+        case "com.apple.asset.credential.certificate":
+            let ref = payload["Reference"] as? [String: Any]
+            var rows: [Row] = []
+            if let url = ref?["DataURL"] as? String { rows.append(r("Download URL", url)) }
+            if let ct = ref?["ContentType"] as? String { rows.append(r("Format", ct)) }
+            if (payload["Authentication"] as? [String: Any])?["Type"] as? String == "MDM" {
+                rows.append(r("Auth", "MDM identity"))
+            }
+            return .init(title: "Certificate file",
+                         blurb: "The certificate the device downloads (PEM/PKCS1, hosted over HTTPS). Referenced by a certificate configuration.",
+                         rows: rows)
+
         case "com.apple.configuration.legacy":
             return .init(title: "Legacy profile",
                          blurb: "Installs a configuration profile the Mac downloads from a URL.",
