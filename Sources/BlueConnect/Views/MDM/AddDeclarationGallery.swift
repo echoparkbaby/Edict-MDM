@@ -7,6 +7,7 @@ enum AddChoice {
     case softwareUpdateSettings
     case statusReporting
     case passcodePolicy
+    case screenSharing
     case diskRestrictions
     case pasteJSON
     case importFiles
@@ -48,6 +49,12 @@ struct AddDeclarationGallery: View {
                              title: "Status reporting",
                              icon: "checklist",
                              blurb: "Have each Mac keep reporting facts — OS version, model, serial, FileVault state — so the dashboard stays current.")
+                    }
+                    group("Remote access") {
+                        card(.screenSharing,
+                             title: "Screen sharing",
+                             icon: "menubar.dock.rectangle",
+                             blurb: "Control macOS Screen Sharing — block file copy to/from the Mac, virtual displays, and high-performance connections. macOS 14+.")
                     }
                     group("Security & storage") {
                         card(.passcodePolicy,

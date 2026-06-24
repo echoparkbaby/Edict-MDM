@@ -136,6 +136,28 @@ enum DDMDeclarations {
                            identifier: identifier, payload: p)
     }
 
+    /// `com.apple.configuration.screensharing.host.settings` (macOS 14+,
+    /// supervised/local) — controls macOS Screen Sharing on the host: file
+    /// copy in/out, virtual-display count, and high-performance connections.
+    /// On-brand for a remote-support fleet. Only set values are emitted;
+    /// `MaximumVirtualDisplays` is 0–2, `PortBase` 1024–65535. Schema:
+    /// apple/device-management.
+    static func screenSharing(identifier: String,
+                              maxVirtualDisplays: Int?,
+                              portBase: Int,
+                              preventCopyFromHost: Bool,
+                              preventCopyToHost: Bool,
+                              preventHighPerformance: Bool) -> Data {
+        var p: [String: Any] = [:]
+        if let m = maxVirtualDisplays, (0...2).contains(m) { p["MaximumVirtualDisplays"] = m }
+        if (1024...65535).contains(portBase) { p["PortBase"] = portBase }
+        if preventCopyFromHost { p["PreventCopyFilesFromHost"] = true }
+        if preventCopyToHost { p["PreventCopyFilesToHost"] = true }
+        if preventHighPerformance { p["PreventHighPerformanceConnections"] = true }
+        return declaration(type: "com.apple.configuration.screensharing.host.settings",
+                           identifier: identifier, payload: p)
+    }
+
     /// `com.apple.activation.simple` referencing one or more configurations.
     static func activation(identifier: String, configurationIDs: [String]) -> Data {
         declaration(type: "com.apple.activation.simple",

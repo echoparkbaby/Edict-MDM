@@ -67,6 +67,17 @@ struct DDMDeclarationSummary {
                          blurb: "How Macs download, install, and defer software updates (macOS 15+).",
                          rows: rows)
 
+        case "com.apple.configuration.screensharing.host.settings":
+            var rows: [Row] = []
+            if let m = payload["MaximumVirtualDisplays"] as? Int { rows.append(r("Virtual displays", "\(m)")) }
+            if let p = payload["PortBase"] as? Int { rows.append(r("Port base", "\(p)")) }
+            if payload["PreventCopyFilesFromHost"] as? Bool == true { rows.append(r("Copy from this Mac", "Blocked")) }
+            if payload["PreventCopyFilesToHost"] as? Bool == true { rows.append(r("Copy to this Mac", "Blocked")) }
+            if payload["PreventHighPerformanceConnections"] as? Bool == true { rows.append(r("High-performance", "Blocked")) }
+            return .init(title: "Screen sharing",
+                         blurb: "Controls macOS Screen Sharing on the host — file copy, displays, performance (macOS 14+).",
+                         rows: rows)
+
         case "com.apple.configuration.passcode.settings":
             var rows: [Row] = []
             if payload["RequirePasscode"] as? Bool == true { rows.append(r("Login password", "Required")) }

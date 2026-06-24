@@ -20,6 +20,7 @@ struct DeclarationLibraryPane: View {
     @State private var showDiskForm = false
     @State private var showSoftwareUpdateForm = false
     @State private var showPasscodeForm = false
+    @State private var showScreenSharingForm = false
     @State private var pendingChoice: AddChoice?
     @State private var pulling = false
     @State private var setsField = ""
@@ -74,6 +75,11 @@ struct DeclarationLibraryPane: View {
         .sheet(isPresented: $showPasscodeForm) {
             PasscodeSettingsSheet { config, configID, set in
                 addConfig(config, configID: configID, set: set, label: "passcode policy")
+            }
+        }
+        .sheet(isPresented: $showScreenSharingForm) {
+            ScreenSharingSheet { config, configID, set in
+                addConfig(config, configID: configID, set: set, label: "screen sharing")
             }
         }
         .onChange(of: selectedID) { _, _ in
@@ -241,6 +247,7 @@ struct DeclarationLibraryPane: View {
         case .softwareUpdateSettings: showSoftwareUpdateForm = true
         case .statusReporting:        showStatusForm = true
         case .passcodePolicy:         showPasscodeForm = true
+        case .screenSharing:          showScreenSharingForm = true
         case .diskRestrictions:       showDiskForm = true
         case .pasteJSON:              showNewSheet = true
         case .importFiles:            importFiles()

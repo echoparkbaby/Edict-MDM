@@ -304,6 +304,38 @@ struct DDMLibraryTests {
         #expect(iIdentifier < iType)   // sortedKeys: Identifier < Payload < Type
     }
 
+    @Test func screenSharingEmitsOnlyMeaningfulKeys() throws {
+        let data = DDMDeclarations.screenSharing(
+            identifier: "com.x.ss",
+            maxVirtualDisplays: 2, portBase: 0,           // portBase 0 → omitted
+            preventCopyFromHost: true, preventCopyToHost: false,
+            preventHighPerformance: false)
+        let obj = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(obj["Type"] as? String == "com.apple.configuration.screensharing.host.settings")
+        let p = try #require(obj["Payload"] as? [String: Any])
+        #expect(p["MaximumVirtualDisplays"] as? Int == 2)
+        #expect(p["PreventCopyFilesFromHost"] as? Bool == true)
+        #expect(p["PreventCopyFilesToHost"] == nil)        // false → omitted
+        #expect(p["PreventHighPerformanceConnections"] == nil)
+        #expect(p["PortBase"] == nil)
+
+        let summary = DDMDeclarationSummary.make(type: obj["Type"] as! String, payload: p)
+        #expect(summary.title == "Screen sharing")
+        #expect(summary.rows.contains { $0.label == "Virtual displays" && $0.value == "2" })
+        #expect(summary.rows.contains { $0.label == "Copy from this Mac" && $0.value == "Blocked" })
+    }
+
+    @Test func screenSharingClampsOutOfRange() throws {
+        // Out-of-range displays/port are dropped, not emitted.
+        let data = DDMDeclarations.screenSharing(
+            identifier: "com.x.ss", maxVirtualDisplays: 5, portBase: 80,
+            preventCopyFromHost: false, preventCopyToHost: false, preventHighPerformance: true)
+        let p = try #require((try JSONSerialization.jsonObject(with: data) as? [String: Any])?["Payload"] as? [String: Any])
+        #expect(p["MaximumVirtualDisplays"] == nil)   // 5 out of 0...2
+        #expect(p["PortBase"] == nil)                  // 80 out of 1024...65535
+        #expect(p["PreventHighPerformanceConnections"] as? Bool == true)
+    }
+
     @Test func setsMatrixRowsSortedByTitle() {
         let items = [
             DDMLibraryItem(json: decl(type: "com.apple.activation.simple", id: "z"), sets: []),                              // "Activation"
