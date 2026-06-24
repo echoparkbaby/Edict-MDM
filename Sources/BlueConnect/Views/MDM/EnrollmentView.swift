@@ -172,7 +172,7 @@ struct EnrollmentView: View {
     }
 
     private var personalizationCard: some View {
-        card("Personalization", "textformat") {
+        card("Personalization", "person.text.rectangle") {
             LabeledContent("Display name") {
                 TextField("", text: $settings.mdmProfileDisplayName, prompt: Text("Edict MDM Enrollment"))
             }
