@@ -647,6 +647,21 @@ final class SettingsStore: ObservableObject {
     /// True once at least one profile or set is in the baseline.
     var hasOnboardingBaseline: Bool { !mdmOnboardProfileIDs.isEmpty || !mdmOnboardSets.isEmpty }
 
+    /// Enrollment IDs the operator has hidden from the dashboard's grading +
+    /// attention — typically Macs too old for DDM (< macOS 13) that will never
+    /// report status, so flagging them as "not reporting" is just noise.
+    @AppStorage("mdmIgnoredForAttentionRaw") private var mdmIgnoredForAttentionRaw: String = "[]"
+    var mdmIgnoredForAttention: Set<String> {
+        get { Set((try? JSONDecoder().decode([String].self, from: Data(mdmIgnoredForAttentionRaw.utf8))) ?? []) }
+        set { mdmIgnoredForAttentionRaw = String(data: (try? JSONEncoder().encode(Array(newValue))) ?? Data("[]".utf8), encoding: .utf8) ?? "[]" }
+    }
+    func isIgnoredForAttention(_ id: String) -> Bool { mdmIgnoredForAttention.contains(id) }
+    func setIgnoredForAttention(_ id: String, _ ignored: Bool) {
+        var s = mdmIgnoredForAttention
+        if ignored { s.insert(id) } else { s.remove(id) }
+        mdmIgnoredForAttention = s
+    }
+
     /// "<enrollmentID>\u{1}<setName>" pairs already assigned by a smart-group
     /// baseline, so group-policy enforcement assigns each set once per device
     /// instead of every refresh. (Profiles dedupe via the deployment log.)

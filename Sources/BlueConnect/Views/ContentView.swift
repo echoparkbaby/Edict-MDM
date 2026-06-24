@@ -350,6 +350,18 @@ struct ContentView: View {
         }
     }
 
+    /// True when the center pane shows a full-width MDM view that owns the
+    /// whole pane — so the right-hand host inspector is hidden instead of
+    /// sitting empty beside it (the Enrollment/Declarations/… tabs).
+    private var isMDMFullPane: Bool {
+        switch sidebarFilter {
+        case .mdmDeclarations, .mdmProfiles, .mdmEnrollment, .mdmDEP, .mdmScheduling, .mdmDashboard:
+            return true
+        default:
+            return false
+        }
+    }
+
     /// If the target Macs already have a profile with this identifier (per
     /// the deployment log), show the diff first; otherwise deploy straight
     /// away. Shared by the gavel row button and bulk deploy so they get the
@@ -1047,6 +1059,7 @@ struct ContentView: View {
             }
             .frame(minWidth: 540, maxWidth: .infinity, maxHeight: .infinity)
 
+            if !isMDMFullPane {
             PaneCollapser(side: .trailing, visible: $connectPanelVisible) {
                 ConnectPanel(
                     hosts: selectedHosts,
@@ -1082,6 +1095,7 @@ struct ContentView: View {
                 maxWidth: connectPanelVisible ? 360 : 22,
                 maxHeight: .infinity
             )
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

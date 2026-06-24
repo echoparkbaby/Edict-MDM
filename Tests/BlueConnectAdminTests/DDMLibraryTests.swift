@@ -66,6 +66,10 @@ struct DDMLibraryTests {
         #expect(unknown.rows.isEmpty)
         #expect(DDMDeclarationSummary.statusItemLabel("foo.bar-baz") == "Foo bar baz")
         #expect(DDMDeclarationSummary.statusItemLabel("device.operating-system.version") == "macOS version")
+        // Expanded catalog labels.
+        #expect(DDMDeclarationSummary.statusItemLabel("device.power.battery-health") == "Battery health")
+        #expect(DDMDeclarationSummary.statusItemLabel("passcode.is-present") == "Has a passcode")
+        #expect(DDMDeclarationSummary.statusItemLabel("softwareupdate.install-state") == "Update state")
     }
 
     @Test func setsMatrixCountsAndOrphans() throws {

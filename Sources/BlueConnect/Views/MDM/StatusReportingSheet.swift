@@ -30,7 +30,14 @@ struct StatusReportingSheet: View {
         StatusFact(label: "macOS name",      name: "device.operating-system.marketing-name",   on: false),
         StatusFact(label: "Model identifier", name: "device.model.identifier",                  on: false),
         StatusFact(label: "Model family",    name: "device.model.family",                      on: false),
+        StatusFact(label: "Model number",    name: "device.model.number",                      on: false),
         StatusFact(label: "Hardware UDID",   name: "device.identifier.udid",                   on: false),
+        StatusFact(label: "Battery health",  name: "device.power.battery-health",              on: false),
+        StatusFact(label: "macOS RSR build", name: "device.operating-system.supplemental.build-version", on: false),
+        StatusFact(label: "Has a passcode",  name: "passcode.is-present",                      on: false),
+        StatusFact(label: "Passcode compliant", name: "passcode.is-compliant",                 on: false),
+        StatusFact(label: "Pending OS version", name: "softwareupdate.pending-version",        on: false),
+        StatusFact(label: "Update state",    name: "softwareupdate.install-state",             on: false),
     ]
 
     @State private var facts = StatusReportingSheet.catalog

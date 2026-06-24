@@ -157,13 +157,24 @@ struct GroupDashboardView: View {
 
     private func bscHost(for enr: MDMEnrollment) -> BlueSkyHost? { df.bscHost(for: enr) }
 
+    /// Devices the dashboard grades — scoped minus the ones the operator hid
+    /// (e.g. Macs too old for DDM that will never report). They drop out of
+    /// compliance, the attention strip, and the breakdown; the Hidden section
+    /// lists them with an Unhide.
+    private var graded: [MDMEnrollment] {
+        scoped.filter { !settings.isIgnoredForAttention($0.id) }
+    }
+    private var hiddenFromAttention: [MDMEnrollment] {
+        scoped.filter { settings.isIgnoredForAttention($0.id) }
+    }
+
     // MARK: - Rollups
 
     private struct Tally { var compliant = 0, nonCompliant = 0, unknown = 0 }
 
     private var compliance: Tally {
         var t = Tally()
-        for d in scoped {
+        for d in graded {
             switch SmartGroup.compliant(facts(for: d),
                                         requireFileVault: settings.mdmRequireFileVault,
                                         minOS: settings.mdmMinOSVersion) {
@@ -256,7 +267,8 @@ struct GroupDashboardView: View {
                         heroCard
                         attentionStrip
                         if let drillKey, !drillDevices(drillKey).isEmpty { drillList(drillKey) }
-                        PrismChart(devices: scoped, facts: df)
+                        PrismChart(devices: graded, facts: df)
+                        hiddenSection
                     }
                     .padding(18).frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -735,7 +747,7 @@ struct GroupDashboardView: View {
 
     private var heroCard: some View {
         let c = compliance
-        let total = scoped.count
+        let total = graded.count
         return HStack(alignment: .center, spacing: 24) {
             complianceRing(compliant: c.compliant, total: total)
             VStack(alignment: .leading, spacing: 6) {
@@ -802,7 +814,7 @@ struct GroupDashboardView: View {
 
     private var needsOnboardingCount: Int {
         guard settings.hasOnboardingBaseline else { return 0 }
-        return scoped.filter { $0.isEnabled && !settings.isOnboarded($0.id) }.count
+        return graded.filter { $0.isEnabled && !settings.isOnboarded($0.id) }.count
     }
 
     private var dashAlerts: [DashAlert] {
@@ -824,11 +836,38 @@ struct GroupDashboardView: View {
         return a
     }
 
+    /// Macs the operator hid from grading (e.g. too old for DDM) — collapsed,
+    /// with an Unhide each. Only shown when something is hidden.
+    @ViewBuilder
+    private var hiddenSection: some View {
+        let hidden = hiddenFromAttention
+        if !hidden.isEmpty {
+            DisclosureGroup {
+                ForEach(hidden, id: \.id) { d in
+                    HStack(spacing: 8) {
+                        Image(systemName: "laptopcomputer").foregroundStyle(.secondary)
+                        Text(label(for: d)).font(.callout)
+                        Spacer()
+                        Button("Unhide") { settings.setIgnoredForAttention(d.id, false) }
+                            .buttonStyle(.link).font(.caption)
+                    }
+                    .padding(.vertical, 2)
+                }
+            } label: {
+                Label("\(hidden.count) hidden from attention", systemImage: "eye.slash")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .help("Excluded from compliance, attention, and the breakdown — typically Macs too old to report via DDM.")
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color(NSColor.controlBackgroundColor)))
+        }
+    }
+
     @ViewBuilder
     private var attentionStrip: some View {
         let alerts = dashAlerts
         if alerts.isEmpty {
-            Label("Everything looks good across \(scoped.count) device\(scoped.count == 1 ? "" : "s").",
+            Label("Everything looks good across \(graded.count) device\(graded.count == 1 ? "" : "s").",
                   systemImage: "checkmark.circle.fill")
                 .font(.callout).foregroundStyle(.green)
                 .padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -862,9 +901,9 @@ struct GroupDashboardView: View {
     /// Devices matching a summary-card category, for the drill-down list.
     private func drillDevices(_ key: String) -> [MDMEnrollment] {
         switch key {
-        case "all": return scoped
+        case "all": return graded
         case "compliant", "nonCompliant", "unknown":
-            return scoped.filter { d in
+            return graded.filter { d in
                 switch SmartGroup.compliant(facts(for: d),
                                             requireFileVault: settings.mdmRequireFileVault,
                                             minOS: settings.mdmMinOSVersion) {
@@ -895,6 +934,11 @@ struct GroupDashboardView: View {
                     Spacer()
                     if let os = osVersions[d.id] { Text("macOS \(os)").font(.caption).foregroundStyle(.secondary) }
                     fileVaultChip(for: d)
+                    Button { settings.setIgnoredForAttention(d.id, true) } label: {
+                        Image(systemName: "eye.slash").font(.caption)
+                    }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .help("Hide from attention — for a Mac too old to report via DDM")
                 }
                 .padding(.vertical, 2)
                 Divider()

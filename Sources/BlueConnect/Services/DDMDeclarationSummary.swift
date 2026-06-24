@@ -149,6 +149,13 @@ struct DDMDeclarationSummary {
         "device.operating-system.version":      "macOS version",
         "device.operating-system.build-version":"macOS build",
         "device.operating-system.marketing-name":"macOS name",
+        "device.operating-system.supplemental.build-version":"macOS RSR build",
+        "device.model.number":                  "Model number",
+        "device.power.battery-health":          "Battery health",
         "diskmanagement.filevault.enabled":     "FileVault enabled",
+        "passcode.is-present":                  "Has a passcode",
+        "passcode.is-compliant":                "Passcode compliant",
+        "softwareupdate.pending-version":       "Pending OS version",
+        "softwareupdate.install-state":         "Update state",
     ]
 }
