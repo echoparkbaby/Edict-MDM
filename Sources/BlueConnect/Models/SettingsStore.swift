@@ -873,6 +873,7 @@ final class SettingsStore: ObservableObject {
 
     // Sidebar group collapse state — persisted per-Mac.
     @AppStorage("sidebarCategoriesCollapsed")    var sidebarCategoriesCollapsed: Bool = false
+    @AppStorage("sidebarMDMCollapsed")           var sidebarMDMCollapsed: Bool = false
     @AppStorage("sidebarLocalNetworkCollapsed")  var sidebarLocalNetworkCollapsed: Bool = false
     @AppStorage("sidebarTailscaleCollapsed")     var sidebarTailscaleCollapsed: Bool = false
     @AppStorage("sidebarMunkiCollapsed")         var sidebarMunkiCollapsed: Bool = false

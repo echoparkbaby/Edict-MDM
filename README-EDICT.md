@@ -92,6 +92,27 @@ Server-side setup notes (including a NanoDEP compose service) live under [`serve
 
 ---
 
+## Deploying files (certificates and service config files)
+
+Two templates push *files* to Macs: **Install a certificate** and **Service config files** (sshd/sudo/pam/cups…). Apple's DDM never embeds the bytes in the declaration; the device **downloads** them from a URL you host. Edict builds the three declarations for you (a data/credential **asset** holding the URL, the **configuration** that references it, and an **activation**), but you supply the file and the URL.
+
+**To deploy a certificate:**
+
+1. Export the cert as **PEM** (or DER). A public cert only — no private key.
+2. Host it at an **HTTPS URL** the Macs can reach (any static host: an internal web server, object storage, a reverse proxy). It must be reachable by the device, not just the admin.
+3. In Edict: **Declarations → Add → Install a certificate**. Enter a name, the HTTPS URL, the format, and whether the URL needs the device's MDM identity to fetch. Drop it in a set and Sync.
+
+**To replace a service's config files (e.g. `sshd_config`):**
+
+1. Put the service's config files in a folder and **zip** them. The layout must match what the service expects (for `com.apple.sshd` that's the contents of `/etc/ssh`; for `com.apple.sudo`, `/etc/sudoers`; etc.).
+2. Compute the **SHA-256** of the exact zip you'll host (this is required for data assets).
+3. Host the zip at an **HTTPS URL** the Macs can reach.
+4. In Edict: **Declarations → Add → Service config files**. Pick the service, paste the zip URL and its SHA-256, choose whether the URL needs MDM auth, drop it in a set, and Sync.
+
+Both require **macOS 14+**; service config files also require a **supervised** Mac. Built-in `ServiceType`s: `com.apple.sshd`, `com.apple.sudo`, `com.apple.pam`, `com.apple.cups`, `com.apple.apache.httpd`, `com.apple.bash`, `com.apple.zsh`, `com.apple.cryptoTokenKit`, `com.apple.authorization`.
+
+---
+
 ## Building from source
 
 ```sh
@@ -121,4 +142,4 @@ Not affiliated with or endorsed by Apple. Apple, Mac, macOS, and Apple Business 
 
 ## License
 
-_TBD before publishing._
+[MIT](LICENSE). Do what you like; no warranty.

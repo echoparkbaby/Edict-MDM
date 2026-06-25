@@ -50,7 +50,7 @@ struct PrismChart: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Button { selected = isSel ? nil : key } label: {
                         HStack(spacing: 10) {
-                            Text(row.label).font(.caption)
+                            Text(row.label).font(.callout)
                                 .frame(width: labelWidth, alignment: .leading)
                                 .lineLimit(1).truncationMode(.middle)
                             ZStack(alignment: .leading) {
@@ -59,8 +59,8 @@ struct PrismChart: View {
                                 Capsule().fill(Color.accentColor.opacity(isSel ? 0.95 : 0.6))
                                     .frame(width: max(6, barWidth * CGFloat(row.count) / CGFloat(maxCount)), height: 14)
                             }
-                            Text("\(row.count)").font(.caption.monospacedDigit())
-                                .frame(width: 28, alignment: .trailing)
+                            Text("\(row.count)").font(.callout.monospacedDigit())
+                                .frame(width: 32, alignment: .trailing)
                             Spacer(minLength: 0)
                         }
                         .contentShape(Rectangle())

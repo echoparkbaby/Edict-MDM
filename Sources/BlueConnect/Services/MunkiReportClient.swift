@@ -203,11 +203,14 @@ struct MRSecurity: Codable, Hashable {
     let gatekeeper: String?
     let sip: String?
     let activation_lock: String?
-    let firewall_state: Int?
+    // MR stores firewall_state as a string ("Active"/"Disabled"/"Not Supported"),
+    // not an Int — the wrong type here failed the whole inventory parse.
+    let firewall_state: String?
 
     var gatekeeperText: String { Self.clean(gatekeeper) }
     var sipText: String { Self.clean(sip) }
     var activationLockText: String { Self.clean(activation_lock) }
+    var firewallStateText: String { Self.clean(firewall_state) }
     private static func clean(_ s: String?) -> String {
         guard let s, !s.isEmpty else { return "—" }
         if s.lowercased() == "not_supported" { return "Not supported" }

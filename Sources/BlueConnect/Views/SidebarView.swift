@@ -253,15 +253,28 @@ struct SidebarView: View {
     /// host count to show, so this doesn't reuse sidebarRow.
     private var mdmGroup: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("Device Management").font(.caption).bold().foregroundStyle(.secondary)
-                .padding(.bottom, 2)
-            // Alphabetical, with Enrollment pinned to the bottom.
-            mdmRow(.mdmDashboard, label: "Dashboard", icon: "chart.bar.xaxis")
-            mdmRow(.mdmDeclarations, label: "Declarations", icon: "doc.badge.gearshape")
-            mdmRow(.mdmProfiles, label: "Profiles", icon: "doc.text.fill")
-            mdmRow(.mdmScheduling, label: "Scheduling", icon: "clock.badge.checkmark")
-            mdmRow(.mdmEnrollment, label: "Enrollment", icon: "qrcode")
-            mdmRow(.mdmDEP, label: "Auto-Enroll (DEP)", icon: "sparkles.rectangle.stack")
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { settings.sidebarMDMCollapsed.toggle() }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: settings.sidebarMDMCollapsed ? "chevron.right" : "chevron.down")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Text("Device Management").font(.caption).bold().foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.bottom, 2)
+            if !settings.sidebarMDMCollapsed {
+                // Alphabetical, with Enrollment pinned to the bottom.
+                mdmRow(.mdmDashboard, label: "Dashboard", icon: "chart.bar.xaxis")
+                mdmRow(.mdmDeclarations, label: "Declarations", icon: "doc.badge.gearshape")
+                mdmRow(.mdmProfiles, label: "Profiles", icon: "doc.text.fill")
+                mdmRow(.mdmScheduling, label: "Scheduling", icon: "clock.badge.checkmark")
+                mdmRow(.mdmEnrollment, label: "Enrollment", icon: "qrcode")
+                mdmRow(.mdmDEP, label: "Auto-Enroll (DEP)", icon: "sparkles.rectangle.stack")
+            }
         }
     }
 
