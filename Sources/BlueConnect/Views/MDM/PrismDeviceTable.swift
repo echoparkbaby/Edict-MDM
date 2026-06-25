@@ -40,8 +40,12 @@ struct PrismDeviceTable: View {
     /// Width captured at the start of a drag so cumulative translation isn't
     /// re-applied to an already-updated width (which would run away).
     @State private var resizeStart: CGFloat?
+    /// The column being dragged right now + its live width. Kept in memory so
+    /// the drag is smooth (no per-tick disk write); persisted once on release.
+    @State private var liveResize: (key: String, width: CGFloat)?
 
     private func width(for key: String, default def: CGFloat) -> CGFloat {
+        if let lr = liveResize, lr.key == key { return lr.width }
         guard let data = colWidthsRaw.data(using: .utf8),
               let map = try? JSONDecoder().decode([String: Double].self, from: data),
               let w = map[key] else { return def }
@@ -64,12 +68,15 @@ struct PrismDeviceTable: View {
             .overlay(Rectangle().fill(Color.secondary.opacity(0.25)).frame(width: 1))
             .contentShape(Rectangle())
             .onHover { $0 ? NSCursor.resizeLeftRight.push() : NSCursor.pop() }
-            .gesture(DragGesture(minimumDistance: 1)
+            .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
                 .onChanged { v in
                     if resizeStart == nil { resizeStart = currentWidth }
-                    setWidth(key, to: (resizeStart ?? currentWidth) + v.translation.width)
+                    liveResize = (key, max(48, (resizeStart ?? currentWidth) + v.translation.width))
                 }
-                .onEnded { _ in resizeStart = nil })
+                .onEnded { _ in
+                    if let lr = liveResize { setWidth(lr.key, to: lr.width) }
+                    liveResize = nil; resizeStart = nil
+                })
             .accessibilityHidden(true)
     }
 

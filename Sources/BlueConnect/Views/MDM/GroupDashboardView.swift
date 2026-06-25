@@ -92,6 +92,9 @@ struct GroupDashboardView: View {
     @AppStorage("invColWidthsJSON") private var invColWidthsRaw = ""
     /// Column width captured at drag start (see PrismDeviceTable.resizeStart).
     @State private var invResizeStart: CGFloat?
+    /// Live (in-memory) width of the column being dragged, by index — keeps the
+    /// drag smooth without a per-tick disk write; persisted once on release.
+    @State private var invLiveResize: (index: Int, width: CGFloat)?
     /// Searchable "narrow to one Mac" popover state — replaces a flat Picker
     /// that became unusable at fleet scale (100+ Macs in a dropdown).
     @State private var showDevicePicker = false
@@ -285,8 +288,10 @@ struct GroupDashboardView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         savedViewsBar
                         heroCard
-                        attentionStrip
+                        // Drill list sits directly under the hero stats so clicking
+                        // e.g. "Not reporting" reveals exactly which Macs, right there.
                         if let drillKey, !drillDevices(drillKey).isEmpty { drillList(drillKey) }
+                        attentionStrip
                         PrismChart(devices: graded, facts: df,
                                    onSelect: { selection = [df.hostID(for: $0)] })
                         hiddenSection
@@ -315,7 +320,7 @@ struct GroupDashboardView: View {
             case .updates:
                 inventoryTable(columns: [("Device", 180), ("macOS", 84), ("Update state", 150), ("Detail", 260)], rows: updateRows,
                                source: InvSource(name: "DDM status (Edict), MunkiReport fallback", checkedAt: factsAt,
-                                                 note: "subscribe via Enable reporting", coverage: mdmSUCoverage()),
+                                                 note: "“Behind” = older than your fleet’s newest macOS", coverage: mdmSUCoverage()),
                                deviceRows: true)
             case .attention:
                 inventoryTable(columns: [("Device", 180), ("Issues", 400), ("Score", 64)], rows: attentionRows,
@@ -457,20 +462,31 @@ struct GroupDashboardView: View {
         }
     }
 
+    /// The newest macOS any reporting Mac runs — the yardstick for the
+    /// fleet-relative "Behind" verdict. We don't query Apple's release feed, so
+    /// "Behind" means older than the newest macOS in *your* fleet, not absolute.
+    private var fleetNewestOS: String? {
+        osVersions.values.max { df.osRank($0) < df.osRank($1) }
+    }
+
     private var updateRows: [(id: String, cells: [String])] {
-        inventoryScope.compactMap { d -> (id: String, cells: [String])? in
+        let newest = fleetNewestOS
+        return inventoryScope.compactMap { d -> (id: String, cells: [String])? in
             let ddm = mdmSU[d.id]                      // DDM status channel (Edict)
             let mrSU = mr(for: d)?.software_updates    // MunkiReport (fallback)
             let os = osVersions[d.id]
             guard ddm != nil || mrSU != nil || os != nil else { return nil }
+            let behind = os.flatMap { o in newest.map { df.osRank(o) < df.osRank($0) } } ?? false
             let state: String
             if let s = ddm?.installState, !s.isEmpty { state = s }
             else if let pending = mrSU?.recommendedupdates?.value, pending > 0 { state = "\(pending) pending" }
-            else if mrSU != nil { state = "Up to date" }
+            else if behind { state = "Behind" }
+            else if os != nil, newest != nil { state = "Current" }   // newest in fleet — not an absolute "up to date"
             else { state = "—" }
             let detail: String
             if let fr = ddm?.failureReason, !fr.isEmpty { detail = "Failed: \(fr)" }
             else if let pv = ddm?.pendingOS, !pv.isEmpty { detail = "→ macOS \(pv)" }
+            else if behind, let newest { detail = "Fleet newest: \(newest)" }
             else if let last = mrSU?.lastsuccessfuldate, !last.isEmpty { detail = "Checked \(last)" }
             else { detail = "—" }
             return (id: d.id, cells: [label(for: d), os ?? "—", state, detail])
@@ -688,12 +704,14 @@ struct GroupDashboardView: View {
     /// Effective column widths for the current category: dragged overrides if
     /// present (and still matching the column count), else the natural widths.
     private func invWidths(_ columns: [(String, CGFloat)]) -> [CGFloat] {
+        var widths = columns.map(\.1)
         if let data = invColWidthsRaw.data(using: .utf8),
            let map = try? JSONDecoder().decode([String: [Double]].self, from: data),
            let saved = map[category.rawValue], saved.count == columns.count {
-            return saved.map { CGFloat($0) }
+            widths = saved.map { CGFloat($0) }
         }
-        return columns.map(\.1)
+        if let lr = invLiveResize, lr.index < widths.count { widths[lr.index] = lr.width }
+        return widths
     }
 
     private func setInvWidth(_ columns: [(String, CGFloat)], index: Int, to newWidth: CGFloat) {
@@ -760,12 +778,15 @@ struct GroupDashboardView: View {
                 .overlay(Rectangle().fill(Color.secondary.opacity(0.25)).frame(width: 1))
                 .contentShape(Rectangle())
                 .onHover { $0 ? NSCursor.resizeLeftRight.push() : NSCursor.pop() }
-                .gesture(DragGesture(minimumDistance: 1)
+                .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { v in
                         if invResizeStart == nil { invResizeStart = width }
-                        setInvWidth(columns, index: index, to: (invResizeStart ?? width) + v.translation.width)
+                        invLiveResize = (index, max(48, (invResizeStart ?? width) + v.translation.width))
                     }
-                    .onEnded { _ in invResizeStart = nil })
+                    .onEnded { _ in
+                        if let lr = invLiveResize { setInvWidth(columns, index: lr.index, to: lr.width) }
+                        invLiveResize = nil; invResizeStart = nil
+                    })
                 .accessibilityHidden(true)
         }
         .font(.caption.weight(.semibold)).foregroundStyle(.secondary)

@@ -332,17 +332,16 @@ struct ProfilesView: View {
                     ForEach(TargetMode.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .labelsHidden().pickerStyle(.segmented).fixedSize()
-                Spacer()
-                if loadingDevices { ProgressView().controlSize(.small) }
-            }
-            if targetMode == .selected {
-                HStack {
-                    Spacer()
+                if targetMode == .selected {
                     Button(targetIDs.count == devices.count ? "None" : "All") {
                         targetIDs = targetIDs.count == devices.count ? [] : Set(devices.map(\.id))
                     }
                     .font(.caption).buttonStyle(.link)
                 }
+                Spacer()
+                if loadingDevices { ProgressView().controlSize(.small) }
+            }
+            if targetMode == .selected {
                 if devices.isEmpty && !loadingDevices {
                     Text("No enrolled devices. Enroll a Mac first (Devices tab).")
                         .font(.caption).foregroundStyle(.secondary)
