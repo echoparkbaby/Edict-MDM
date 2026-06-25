@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-enum DeviceSortKey { case name, model, os, fileVault, compliance, lastSeen }
+enum DeviceSortKey { case name, serial, model, os, fileVault, compliance, lastSeen }
 
 /// One column of the device table (Device is always shown; the rest are
 /// reorderable per layout and hideable via the column menu).
@@ -57,10 +57,11 @@ struct PrismDeviceTable: View {
         }
     }
 
-    /// A thin draggable divider on a header cell's trailing edge.
+    /// A thin draggable divider on a header cell's trailing edge. Height is
+    /// fixed so the handle can't stretch vertically and inflate the header row.
     private func resizeHandle(key: String, currentWidth: CGFloat) -> some View {
-        Rectangle().fill(Color.clear).frame(width: 8)
-            .overlay(Divider())
+        Color.clear.frame(width: 8, height: 14)
+            .overlay(Rectangle().fill(Color.secondary.opacity(0.25)).frame(width: 1))
             .contentShape(Rectangle())
             .onHover { $0 ? NSCursor.resizeLeftRight.push() : NSCursor.pop() }
             .gesture(DragGesture(minimumDistance: 1)
@@ -136,7 +137,7 @@ struct PrismDeviceTable: View {
 
     /// Every toggleable device column (Device is always shown).
     private var allDeviceColumns: [DeviceColumn] {
-        [DeviceColumn(key: "serial", title: "Serial", width: 116, sort: nil),
+        [DeviceColumn(key: "serial", title: "Serial", width: 116, sort: .serial),
          DeviceColumn(key: "model", title: "Model", width: 138, sort: .model),
          DeviceColumn(key: "os", title: "macOS", width: 66, sort: .os),
          DeviceColumn(key: "fv", title: "FileVault", width: 84, sort: .fileVault),
@@ -275,6 +276,7 @@ struct PrismDeviceTable: View {
             let asc: Bool
             switch sortKey {
             case .name: asc = facts.label(for: a).localizedCaseInsensitiveCompare(facts.label(for: b)) == .orderedAscending
+            case .serial: asc = (a.serialNumber ?? "").localizedCaseInsensitiveCompare(b.serialNumber ?? "") == .orderedAscending
             case .model: asc = (facts.models[a.id] ?? "~").localizedCaseInsensitiveCompare(facts.models[b.id] ?? "~") == .orderedAscending
             case .os: asc = facts.osRank(facts.osVersions[a.id]) < facts.osRank(facts.osVersions[b.id])
             case .fileVault: asc = fvRank(a) < fvRank(b)

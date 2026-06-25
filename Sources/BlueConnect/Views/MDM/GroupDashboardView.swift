@@ -565,8 +565,8 @@ struct GroupDashboardView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            Rectangle().fill(Color.clear).frame(width: 8)
-                .overlay(Divider())
+            Color.clear.frame(width: 8, height: 14)
+                .overlay(Rectangle().fill(Color.secondary.opacity(0.25)).frame(width: 1))
                 .contentShape(Rectangle())
                 .onHover { $0 ? NSCursor.resizeLeftRight.push() : NSCursor.pop() }
                 .gesture(DragGesture(minimumDistance: 1)
