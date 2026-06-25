@@ -115,6 +115,13 @@ struct GroupDashboardView: View {
     @State private var mdmSU: [String: KMFDDMService.DDMSoftwareUpdate] = [:]
     /// When the DDM facts (OS/FileVault/model/software-update) were last read.
     @State private var factsAt: Date?
+    /// Live `DeviceName` pulled from each Mac via MDM DeviceInformation, cached
+    /// persistently so an MDM-only Mac with no hostname reads as its real name.
+    @State private var mdmNames: [String: String] = [:]
+    @State private var mdmNamesAt: [String: Date] = [:]
+    /// Guards the one automatic name pull per view session (the cache makes it
+    /// a one-time cost per device thereafter).
+    @State private var namesPulled = false
     @State private var pullingSecurity = false
     @State private var enablingAll = false
     @State private var editingGroup: SmartGroup?
@@ -154,18 +161,22 @@ struct GroupDashboardView: View {
 
     private func rebuildFacts() {
         df = DashboardFacts(osVersions: osVersions, fileVault: fileVault, models: models,
-                            hosts: hostStore.hosts, deviceLabels: deviceLabels, mrNames: mrComputerNames,
+                            hosts: hostStore.hosts, deviceLabels: deviceLabels, mrNames: knownDeviceNames,
                             requireFileVault: settings.mdmRequireFileVault, minOS: settings.mdmMinOSVersion,
                             driftMissing: driftMissing, deploymentCounts: deploymentCounts)
     }
-    /// enrollmentID → MunkiReport computer name, so an MDM-only Mac without a
-    /// hostname reads as its real name instead of a bare serial.
-    private var mrComputerNames: [String: String] {
+    /// enrollmentID → best non-hostname name, so an MDM-only Mac reads as its
+    /// real name instead of a bare serial: MunkiReport computer name preferred,
+    /// else the live MDM `DeviceName` we pulled and cached.
+    private var knownDeviceNames: [String: String] {
         var names: [String: String] = [:]
         for d in allDevices {
-            guard let s = d.serialNumber?.trimmingCharacters(in: .whitespaces), !s.isEmpty,
-                  let name = mrInventory.bySerial[s]?.machine?.computer_name, !name.isEmpty else { continue }
-            names[d.id] = name
+            if let s = d.serialNumber?.trimmingCharacters(in: .whitespaces), !s.isEmpty,
+               let mr = mrInventory.bySerial[s]?.machine?.computer_name, !mr.isEmpty {
+                names[d.id] = mr
+            } else if let live = mdmNames[d.id], !live.isEmpty {
+                names[d.id] = live
+            }
         }
         return names
     }
@@ -585,6 +596,58 @@ struct GroupDashboardView: View {
         let url = Self.securityCacheURL
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         if let data = try? JSONEncoder().encode(map) { try? data.write(to: url) }
+    }
+
+    // MARK: - Live device names (MDM DeviceInformation, cached)
+
+    private struct CachedName: Codable { var name: String; var at: Date }
+    private static var namesCacheURL: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return base.appendingPathComponent("EdictMDM", isDirectory: true)
+            .appendingPathComponent("mdm-names-cache.json")
+    }
+    private func loadNamesCache() {
+        guard let data = try? Data(contentsOf: Self.namesCacheURL),
+              let map = try? JSONDecoder().decode([String: CachedName].self, from: data) else { return }
+        for (id, c) in map where mdmNames[id] == nil { mdmNames[id] = c.name; mdmNamesAt[id] = c.at }
+    }
+    private func saveNamesCache() {
+        var map: [String: CachedName] = [:]
+        for (id, n) in mdmNames { map[id] = CachedName(name: n, at: mdmNamesAt[id] ?? Date()) }
+        let url = Self.namesCacheURL
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let data = try? JSONEncoder().encode(map) { try? data.write(to: url) }
+    }
+
+    /// Pull the live computer name from each Mac that still reads as a bare
+    /// serial (no hostname, no MunkiReport name, no cached name) via an MDM
+    /// DeviceInformation query. One-time per device — the result is cached.
+    @MainActor
+    private func pullDeviceNames() async {
+        let targets = allDevices.filter { d in
+            knownDeviceNames[d.id] == nil
+                && bscHost(for: d) == nil
+                && (deviceLabels[d.id]?.isEmpty ?? true)
+        }
+        guard !targets.isEmpty else { return }
+        let nano = NanoMDMService(settings: settings)
+        let api = EnrollmentsAPI(settings: settings)
+        for d in targets {
+            guard let uuid = try? await nano.requestDeviceInformation(enrollmentID: d.id) else { continue }
+            _ = try? await nano.push(enrollmentIDs: d.id)
+            for _ in 0..<10 {
+                try? await Task.sleep(for: .seconds(2))
+                if let res = try? await api.commandResult(uuid: uuid) {
+                    if let name = res.dict("QueryResponses")["DeviceName"] as? String,
+                       !name.trimmingCharacters(in: .whitespaces).isEmpty {
+                        mdmNames[d.id] = name; mdmNamesAt[d.id] = Date()
+                    }
+                    break
+                }
+            }
+        }
+        saveNamesCache()
+        rebuildFacts()
     }
 
     // MARK: - Source + freshness, per category
@@ -1499,6 +1562,7 @@ struct GroupDashboardView: View {
     private func refresh() async {
         savedViews = settings.prismViews
         loadSecurityCache()
+        loadNamesCache()
         let log = DeploymentLog.load()
         deploymentLog = log
         deploymentCounts = log.mapValues { $0.count }
@@ -1533,6 +1597,9 @@ struct GroupDashboardView: View {
                     }
                 }
             }
+            // One-time per session: name the Macs that still read as serials by
+            // pulling their live MDM DeviceName in the background.
+            if !namesPulled { namesPulled = true; Task { await pullDeviceNames() } }
         } catch {
             loadError = error.localizedDescription
         }
