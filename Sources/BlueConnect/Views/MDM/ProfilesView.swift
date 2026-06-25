@@ -174,14 +174,14 @@ struct ProfilesView: View {
                 Section("Templates") {
                     ForEach(sortedTemplates) { t in
                         Label {
-                            VStack(alignment: .leading, spacing: 1) {
-                                HStack(spacing: 4) {
-                                    Text(t.rawValue)
-                                    Text(t.platforms).font(.caption2)
-                                        .padding(.horizontal, 4).padding(.vertical, 1)
-                                        .background(Capsule().fill(Color.secondary.opacity(0.15)))
-                                        .foregroundStyle(.secondary)
-                                }
+                            VStack(alignment: .leading, spacing: 2) {
+                                // Name on its own line so a long type can't get
+                                // clipped by the platform badge sitting beside it.
+                                Text(t.rawValue).fixedSize(horizontal: false, vertical: true)
+                                Text(t.platforms).font(.caption2)
+                                    .padding(.horizontal, 4).padding(.vertical, 1)
+                                    .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                                    .foregroundStyle(.secondary)
                                 Text(t.blurb).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                             }
                         } icon: { Image(systemName: t.icon) }

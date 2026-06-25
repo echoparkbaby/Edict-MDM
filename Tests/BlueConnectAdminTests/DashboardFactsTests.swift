@@ -85,4 +85,20 @@ struct DashboardFactsTests {
         #expect(r.issues.contains("FileVault off"))
         #expect(r.issues.contains("Checked out of MDM"))
     }
+
+    /// A Mac that reports no DDM facts (too old for DDM, e.g. macOS 12, or not
+    /// yet subscribed) must NOT land in Needs Attention on that basis alone —
+    /// otherwise legacy Macs sit there forever. It's noted as context only when
+    /// the Mac is already flagged for a real reason.
+    @Test func notReportingFactsDoesNotScoreAlone() {
+        let d = enrollment()                       // enrolled, recent, no os/fv reported
+        let r = facts().attentionScore(d)
+        #expect(r.score == 0)
+        #expect(r.issues.contains("not reporting DDM facts") == false)
+        // But when a real issue exists, the not-reporting note is added as context.
+        let flagged = enrollment(enabled: false)
+        let r2 = facts().attentionScore(flagged)
+        #expect(r2.score >= 3)
+        #expect(r2.issues.contains("not reporting DDM facts"))
+    }
 }

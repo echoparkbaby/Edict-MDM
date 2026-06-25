@@ -89,7 +89,6 @@ struct DashboardFacts {
         if let os = f.osVersion, !minOSt.isEmpty, !SmartGroup.atLeast(os, minOSt) {
             score += 2; issues.append("macOS \(os) < \(minOSt)")
         }
-        if f.osVersion == nil { score += 1; issues.append("Not reporting facts") }
         if let seen = d.lastSeenDate {
             let days = Int(Date().timeIntervalSince(seen) / 86400)
             if days >= 7 { score += 2; issues.append("No check-in \(days)d") }
@@ -97,6 +96,12 @@ struct DashboardFacts {
         if let missing = driftMissing[d.id], !missing.isEmpty {
             score += 2; issues.append("\(missing.count) profile(s) drifted")
         }
+        // Not reporting DDM facts is an onboarding/reporting state, not a risk:
+        // a Mac too old for DDM (e.g. macOS 12), or one not yet subscribed to
+        // status reporting, will always look this way and would otherwise sit
+        // in Needs Attention forever. Note it only as context when the Mac is
+        // already flagged for a real reason — it no longer scores on its own.
+        if f.osVersion == nil && score > 0 { issues.append("not reporting DDM facts") }
         return (score, issues)
     }
 
