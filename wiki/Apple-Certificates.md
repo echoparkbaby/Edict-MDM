@@ -1,12 +1,15 @@
 # Apple Certificates
 
-Three pieces of cryptographic identity are in play. Only the first is unavoidable.
+Four certificates are in play, and people routinely confuse them. Three you provision once; the fourth — your web-server TLS cert — is the one most folks just call "the SSL cert," and it isn't from Apple.
 
 | What | Who issues it | Needed for | Renewal |
 |---|---|---|---|
 | **APNs MDM push certificate** | Apple (via a vendor-signed CSR) | Waking devices — without it nothing works | **Yearly** |
 | **SCEP CA** | Self-generated on the host | Device identity during enrollment | Set your own lifetime |
 | **DEP / ABM server token** | Apple Business Manager | Zero-touch enrollment (optional) | Yearly |
+| **Web-server TLS (SSL) cert** | A public CA (e.g. Let's Encrypt) | The HTTPS your Macs connect to | ~90 days (auto) |
+
+> **Don't mix these up.** The push cert wakes devices. The SCEP CA proves device identity. The **TLS cert** is the ordinary HTTPS certificate on your `mdm.example.com` hostname — it's what makes the enrollment URL trusted. It's covered on the **[Networking & Remote Access](Networking-and-Remote-Access.md#tls--ssl-certificate-device-facing)** page, and it bites more people than the other three combined.
 
 ## 1. APNs MDM push certificate (required)
 

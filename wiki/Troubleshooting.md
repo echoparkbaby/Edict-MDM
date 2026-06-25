@@ -12,6 +12,7 @@ The common ways the stack goes sideways, and what actually fixes them.
 
 - **Public reachability:** the device must reach `https://mdm.example.com/mdm` from wherever it is. Test from off-LAN. DNS must resolve publicly and the route must hit your proxy.
 - **Certificate trust:** Apple rejects self-signed certs during enrollment. The proxy must serve a **publicly trusted** cert (Let's Encrypt is fine). Check with `curl -v https://mdm.example.com/mdm` — no TLS warnings.
+- **Incomplete TLS chain (the classic "works on my Mac, fails on a fresh one"):** if the proxy serves only the leaf cert and not its intermediates, an already-warmed Mac connects but a freshly-wiped device fails enrollment silently. Serve the **full chain**. Verify from off-network: `openssl s_client -connect mdm.example.com:443 -servername mdm.example.com -showcerts` should show the leaf *and* intermediate(s) with no "unable to get local issuer" error. See [Networking → TLS / SSL certificate](Networking-and-Remote-Access.md#tls--ssl-certificate-device-facing).
 - **SCEP challenge mismatch:** the challenge in the enrollment profile must equal `SCEP_CHALLENGE` in `.env`. Rebuild the profile if you rotated it.
 - **Profile not approved:** on modern macOS the user must approve the profile in System Settings → Device Management. It won't enroll silently unless it came via DEP.
 

@@ -32,6 +32,29 @@ mdm.example.com {
 
 These two URLs are what your **enrollment profile** points devices at (see [Connecting Edict](Connecting-Edict.md)). Nothing else is published.
 
+## TLS / SSL certificate (device-facing)
+
+This is the ordinary HTTPS certificate on your MDM hostname — not the Apple push cert, not the SCEP CA. It's the single most common reason enrollment "works on my machine but fails on a fresh Mac," so get it right.
+
+**Requirements Apple actually enforces:**
+
+- **Publicly trusted CA.** Let's Encrypt, ZeroSSL, or any commercial CA. **Self-signed will not work** for over-the-air enrollment — the device has no way to trust it yet. (You *can* enroll with a self-signed cert only if you also push its root as a trusted certificate inside the enrollment profile, which is a chicken-and-egg most people shouldn't attempt.)
+- **Serve the full chain — leaf + all intermediates.** This is the big one. If your proxy serves only the leaf certificate, *your* Mac may still connect (it already cached the intermediate from browsing) while a freshly-wiped Mac fails enrollment silently. Apple devices do **not** reliably fetch missing intermediates during enrollment. Always serve `fullchain`, never just `cert`.
+- **CN / SAN must match** the hostname in the enrollment profile (`mdm.example.com`).
+- **TLS 1.2 or newer.**
+
+**Let's Encrypt makes this easy.** Caddy and Traefik fetch and renew automatically and serve the full chain by default. With nginx, point `ssl_certificate` at `fullchain.pem` (not `cert.pem`). Certs last ~90 days and auto-renew; if you issue manually, don't let it lapse — an expired cert stops every device at once.
+
+**Verify before you enroll anything** — check the chain is complete from *outside* your network:
+
+```
+openssl s_client -connect mdm.example.com:443 -servername mdm.example.com -showcerts
+```
+
+You should see your leaf **and** the intermediate(s) up to a trusted root, with no "unable to get local issuer certificate" error. SSL Labs (`ssllabs.com/ssltest`) flags a broken chain as "Chain issues: incomplete" — fix that before going further.
+
+**Admin APIs and TLS.** The admin services (KMFDDM, the sidecar, NanoDEP) run plain HTTP in this stack — which is fine **only because** the private path carrying them is already encrypted (a tailnet, WireGuard, or an SSH tunnel). If your private path is *not* encrypted (e.g. a flat LAN), either accept LAN-local trust, or put the admin APIs behind their own internal TLS proxy. Never expose them over plain HTTP on an untrusted network.
+
 ## Admin: keep it private
 
 The app reaches KMFDDM, the enrollments sidecar, and NanoDEP directly. In `compose.yml` these bind to `${ADMIN_BIND}` — a **private** interface, not `0.0.0.0`. You have a few ways to make that private interface reachable from your Mac:
