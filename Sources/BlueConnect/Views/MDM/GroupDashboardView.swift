@@ -834,14 +834,20 @@ struct GroupDashboardView: View {
                     devicePickerQuery = ""
                     showDevicePicker = true
                 } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "laptopcomputer").font(.caption2).foregroundStyle(.secondary)
+                    HStack(spacing: 5) {
+                        Image(systemName: "laptopcomputer").font(.caption).foregroundStyle(.secondary)
                         Text(inventoryDeviceID.flatMap { id in scoped.first { $0.id == id }.map { label(for: $0) } } ?? "All Macs")
                             .lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 4)
                         Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
                     }
-                    .frame(maxWidth: 190, alignment: .leading)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .frame(width: 190)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.controlBackgroundColor)))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.secondary.opacity(0.25)))
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
                 .help("Roll up every Mac, or search to narrow to just one")
                 .popover(isPresented: $showDevicePicker, arrowEdge: .bottom) { devicePickerPopover }
                 Button {
