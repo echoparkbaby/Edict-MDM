@@ -79,7 +79,7 @@ The app talks to the **admin** APIs over a private network (e.g. Tailscale); onl
 - A public HTTPS endpoint for the device-facing `/mdm` and `/scep` paths.
 - Optional: a **BlueSkyConnect** server for the SSH/VNC remote-support side, and **MunkiReport** for extra inventory.
 
-Server-side setup notes (including a NanoDEP compose service) live under [`server/mdm/`](server/mdm/).
+**Standing up the servers:** the full **[setup wiki](wiki/Home.md)** walks through the Docker stack, the Apple push certificate, the network layout, and connecting the app. NanoDEP / DEP specifics live under [`server/mdm/`](server/mdm/).
 
 ---
 

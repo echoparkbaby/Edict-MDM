@@ -48,7 +48,7 @@ it never needs public/LAN exposure.
       - "-listen"
       - ":9001"
     ports:
-      - "192.0.2.10:9001:9001"   # tailnet-only (replace with your tailnet IP)
+      - "${ADMIN_BIND}:9001:9001"   # admin-only — private/tailnet interface (see .env)
     depends_on:
       mdm-db:
         condition: service_healthy
