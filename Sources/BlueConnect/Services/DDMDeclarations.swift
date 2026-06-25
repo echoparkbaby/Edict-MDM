@@ -182,6 +182,29 @@ enum DDMDeclarations {
                     payload: ["CredentialAssetReference": assetReference])
     }
 
+    /// `com.apple.asset.data` (macOS 14+) — a generic data asset the device
+    /// downloads from `dataURL`. Used by services.configuration-files (a zip of
+    /// config files), where `ContentType` + `Hash-SHA-256` are required.
+    static func dataAsset(identifier: String, dataURL: String,
+                          contentType: String, sha256: String, mdmAuth: Bool) -> Data {
+        var reference: [String: Any] = ["DataURL": dataURL, "ContentType": contentType]
+        if !sha256.isEmpty { reference["Hash-SHA-256"] = sha256 }
+        var payload: [String: Any] = ["Reference": reference]
+        if mdmAuth { payload["Authentication"] = ["Type": "MDM"] }
+        return declaration(type: "com.apple.asset.data", identifier: identifier, payload: payload)
+    }
+
+    /// `com.apple.configuration.services.configuration-files` (macOS 14+,
+    /// supervised) — manages a system service's config files (sshd, sudo, pam,
+    /// …). `serviceType` is the reverse-DNS service id; `dataAssetReference`
+    /// points to a com.apple.asset.data zip of the files.
+    static func serviceConfigFiles(identifier: String, serviceType: String,
+                                   dataAssetReference: String) -> Data {
+        declaration(type: "com.apple.configuration.services.configuration-files",
+                    identifier: identifier,
+                    payload: ["ServiceType": serviceType, "DataAssetReference": dataAssetReference])
+    }
+
     /// `com.apple.activation.simple` referencing one or more configurations,
     /// with an optional NSPredicate-format `Predicate` that gates activation:
     /// the configuration installs only on devices where the predicate is true

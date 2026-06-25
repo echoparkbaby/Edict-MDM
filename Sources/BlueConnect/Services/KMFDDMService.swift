@@ -31,6 +31,35 @@ struct DDMStatusValue: Decodable, Hashable {
     }
 }
 
+/// One declaration-apply error a device reported, from KMFDDM's status-errors
+/// log. The exact JSON shape isn't pinned by Apple's schema, so this decodes
+/// leniently: `path` + `timestamp` plus the first human-ish detail field found
+/// (`error` / `reason` / `description` / `value`). Empty detail degrades to a
+/// path/time entry rather than failing.
+struct DDMStatusError: Decodable, Hashable {
+    let path: String
+    let detail: String
+    let timestamp: String?
+
+    enum CodingKeys: String, CodingKey {
+        case path, timestamp, error, reason, description, value, message
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        path = (try? c.decode(String.self, forKey: .path)) ?? "—"
+        timestamp = try? c.decode(String.self, forKey: .timestamp)
+        var found = ""
+        for key: CodingKeys in [.error, .reason, .description, .message, .value] {
+            if let s = try? c.decode(String.self, forKey: key), !s.trimmingCharacters(in: .whitespaces).isEmpty {
+                found = s
+                break
+            }
+        }
+        detail = found
+    }
+}
+
 struct KMFDDMService {
     let baseURL: String
     let apiKey: String
@@ -137,6 +166,19 @@ struct KMFDDMService {
         guard let decoded = try? JSONDecoder().decode([String: [DDMStatusValue]].self, from: data)
         else { return [] }
         return decoded.values.first ?? []
+    }
+
+    /// `GET /v1/status-errors/<enrollmentID>` — errors the device reported
+    /// applying declarations (a declaration that failed to install, etc.).
+    /// NOTE: KMFDDM keeps this as a HISTORICAL log — it does not purge when a
+    /// later clean report supersedes it, so treat entries as history (newest
+    /// first), not necessarily live state.
+    func statusErrors(enrollmentID: String) async throws -> [DDMStatusError] {
+        let (data, _) = try await request("v1/status-errors/\(pathEsc(enrollmentID))")
+        guard let decoded = try? JSONDecoder().decode([String: [DDMStatusError]].self, from: data)
+        else { return [] }
+        let list = decoded.values.first ?? []
+        return list.sorted { ($0.timestamp ?? "") > ($1.timestamp ?? "") }
     }
 
     /// The facts the device list, dashboard, and smart groups all need —

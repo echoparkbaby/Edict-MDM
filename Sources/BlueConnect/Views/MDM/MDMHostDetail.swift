@@ -24,6 +24,12 @@ struct MDMHostDetail: View {
     @State private var enablingReporting = false
     @State private var onboarding = false
 
+    // DDM status channel (what the device reports back + declaration errors).
+    @State private var ddmValues: [DDMStatusValue] = []
+    @State private var ddmErrors: [DDMStatusError] = []
+    @State private var ddmStatusLoading = false
+    @State private var ddmStatusLoaded = false
+
     // Live inventory pulled straight from the Mac.
     enum InvKind: String { case hardware = "Hardware", security = "Security", profiles = "Profiles", apps = "Apps" }
     @State private var invKind: InvKind?
@@ -62,6 +68,8 @@ struct MDMHostDetail: View {
             statusGrid
             Divider()
             inventorySection
+            Divider()
+            ddmStatusSection
             Divider()
             profilesSection
             Divider()
@@ -338,6 +346,91 @@ struct MDMHostDetail: View {
         deployed = DeploymentLog.entries(for: entry.enrollmentID)
         notice = "Onboarded — \(r.profiles) profile\(r.profiles == 1 ? "" : "s"), \(r.sets) set\(r.sets == 1 ? "" : "s")"
             + (r.failures > 0 ? ", \(r.failures) failed" : "") + ". The Mac applies them on its next sync."
+    }
+
+    // MARK: - DDM status channel
+
+    /// What the device reports back over the DDM status channel (the facts it
+    /// streams) plus any declaration-apply errors. This is the "did it actually
+    /// work?" view — the most valuable, most-skipped part of DDM.
+    @ViewBuilder
+    private var ddmStatusSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label("DDM status", systemImage: "dot.radiowaves.left.and.right").font(.subheadline.bold())
+                Spacer()
+                Button { Task { await loadDDMStatus() } } label: {
+                    if ddmStatusLoading { ProgressView().controlSize(.small) }
+                    else { Label(ddmStatusLoaded ? "Refresh" : "Load", systemImage: "arrow.clockwise") }
+                }
+                .buttonStyle(.bordered).controlSize(.small).disabled(ddmStatusLoading)
+                .help("Read back what this Mac reports over DDM, and any declaration errors.")
+            }
+            if ddmStatusLoaded {
+                let rows = ddmValues.filter { isRealStatusValue($0.value) }
+                if rows.isEmpty && ddmErrors.isEmpty {
+                    Text("Nothing reported yet. Add “Status reporting” to a set this Mac is in (Declarations) so it streams facts back over DDM.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ForEach(rows, id: \.path) { v in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(friendlyStatusLabel(v.path)).font(.caption).foregroundStyle(.secondary)
+                                .frame(width: 150, alignment: .leading)
+                            Text(v.value).font(.callout).textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    if !ddmErrors.isEmpty {
+                        Text("Errors — history (KMFDDM keeps a running log; newest first)")
+                            .font(.caption.weight(.medium)).foregroundStyle(.orange).padding(.top, 4)
+                        ForEach(Array(ddmErrors.prefix(8)), id: \.self) { e in
+                            VStack(alignment: .leading, spacing: 1) {
+                                HStack {
+                                    Text(friendlyStatusLabel(e.path)).font(.caption).foregroundStyle(.orange)
+                                    Spacer()
+                                    if let t = e.timestamp { Text(t).font(.caption2).foregroundStyle(.secondary) }
+                                }
+                                if !e.detail.isEmpty {
+                                    Text(e.detail).font(.caption2).foregroundStyle(.secondary)
+                                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .padding(.vertical, 1)
+                        }
+                    }
+                }
+            } else {
+                Text("Read back what this Mac reports — OS, FileVault, software-update state/failure — and any declaration errors.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func loadDDMStatus() async {
+        ddmStatusLoading = true; errorText = nil
+        defer { ddmStatusLoading = false }
+        let kmf = KMFDDMService(settings: settings)
+        ddmValues = (try? await kmf.statusValues(enrollmentID: entry.enrollmentID)) ?? []
+        ddmErrors = (try? await kmf.statusErrors(enrollmentID: entry.enrollmentID)) ?? []
+        ddmStatusLoaded = true
+    }
+
+    /// Friendly label for a reported status-item path (strips the leading
+    /// `.StatusItems.` and prettifies the reverse-DNS name).
+    private func friendlyStatusLabel(_ path: String) -> String {
+        var p = path
+        if let r = p.range(of: "StatusItems.") { p = String(p[r.upperBound...]) }
+        p = p.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        return DDMDeclarationSummary.statusItemLabel(p)
+    }
+
+    /// A reported value is "real" only when it isn't a capability path echoed
+    /// back as a value (devices that only advertise capabilities do this).
+    private func isRealStatusValue(_ v: String) -> Bool {
+        let t = v.trimmingCharacters(in: .whitespaces)
+        return !(t.isEmpty || t.hasPrefix(".") || t.hasPrefix("device.")
+                 || t.hasPrefix("management.") || t.hasPrefix("StatusItems"))
     }
 
     /// Query live inventory from the Mac (DeviceInformation / ProfileList /

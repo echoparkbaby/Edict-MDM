@@ -9,6 +9,7 @@ enum AddChoice {
     case passcodePolicy
     case screenSharing
     case certificate
+    case serviceConfigFiles
     case diskRestrictions
     case pasteJSON
     case importFiles
@@ -56,6 +57,12 @@ struct AddDeclarationGallery: View {
                              title: "Screen sharing",
                              icon: "menubar.dock.rectangle",
                              blurb: "Control macOS Screen Sharing — block file copy to/from the Mac, virtual displays, and high-performance connections. macOS 14+.")
+                    }
+                    group("System services") {
+                        card(.serviceConfigFiles,
+                             title: "Service config files",
+                             icon: "terminal",
+                             blurb: "Manage a service's config files (sshd, sudo, pam…) from a hosted zip. macOS 14+, supervised.")
                     }
                     group("Security & storage") {
                         card(.certificate,

@@ -402,6 +402,31 @@ struct DDMLibraryTests {
         #expect(cItem.summary.rows.contains { $0.label == "From asset" && $0.value == "com.x.cert.asset" })
     }
 
+    @Test func serviceConfigFilesAssetAndConfig() throws {
+        let asset = DDMDeclarations.dataAsset(
+            identifier: "com.x.svc.asset", dataURL: "https://cfg.example.com/sshd.zip",
+            contentType: "application/zip", sha256: "abc123", mdmAuth: false)
+        let aObj = try #require(try JSONSerialization.jsonObject(with: asset) as? [String: Any])
+        #expect(aObj["Type"] as? String == "com.apple.asset.data")
+        let ref = try #require((aObj["Payload"] as? [String: Any])?["Reference"] as? [String: Any])
+        #expect(ref["DataURL"] as? String == "https://cfg.example.com/sshd.zip")
+        #expect(ref["ContentType"] as? String == "application/zip")
+        #expect(ref["Hash-SHA-256"] as? String == "abc123")
+        #expect(DDMLibraryItem(json: asset).kind == "asset")
+        #expect(DDMLibraryItem(json: asset).summary.title == "Data file")
+
+        let config = DDMDeclarations.serviceConfigFiles(
+            identifier: "com.x.svc", serviceType: "com.apple.sshd", dataAssetReference: "com.x.svc.asset")
+        let cObj = try #require(try JSONSerialization.jsonObject(with: config) as? [String: Any])
+        #expect(cObj["Type"] as? String == "com.apple.configuration.services.configuration-files")
+        let p = try #require(cObj["Payload"] as? [String: Any])
+        #expect(p["ServiceType"] as? String == "com.apple.sshd")
+        #expect(p["DataAssetReference"] as? String == "com.x.svc.asset")
+        let summary = DDMLibraryItem(json: config).summary
+        #expect(summary.title == "Service config files")
+        #expect(summary.rows.contains { $0.label == "Service" && $0.value == "SSH (/etc/ssh)" })
+    }
+
     @Test func certificateAssetOmitsAuthWhenAnonymous() throws {
         let asset = DDMDeclarations.certificateAsset(
             identifier: "a", dataURL: "https://x/c.pem", contentType: nil, sha256: nil, mdmAuth: false)

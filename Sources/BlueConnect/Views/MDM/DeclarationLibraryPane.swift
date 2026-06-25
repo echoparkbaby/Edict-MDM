@@ -22,6 +22,7 @@ struct DeclarationLibraryPane: View {
     @State private var showPasscodeForm = false
     @State private var showScreenSharingForm = false
     @State private var showCertificateForm = false
+    @State private var showServiceConfigForm = false
     @State private var pendingChoice: AddChoice?
     @State private var pulling = false
     @State private var setsField = ""
@@ -88,6 +89,12 @@ struct DeclarationLibraryPane: View {
             CertificateSheet { asset, config, configID, set in
                 library.add(asset, sets: [set])
                 addConfig(config, configID: configID, set: set, label: "certificate")
+            }
+        }
+        .sheet(isPresented: $showServiceConfigForm) {
+            ServiceConfigFilesSheet { asset, config, configID, set in
+                library.add(asset, sets: [set])
+                addConfig(config, configID: configID, set: set, label: "service config files")
             }
         }
         .onChange(of: selectedID) { _, _ in
@@ -290,6 +297,7 @@ struct DeclarationLibraryPane: View {
         case .passcodePolicy:         showPasscodeForm = true
         case .screenSharing:          showScreenSharingForm = true
         case .certificate:            showCertificateForm = true
+        case .serviceConfigFiles:     showServiceConfigForm = true
         case .diskRestrictions:       showDiskForm = true
         case .pasteJSON:              showNewSheet = true
         case .importFiles:            importFiles()

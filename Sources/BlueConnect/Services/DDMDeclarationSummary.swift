@@ -113,6 +113,23 @@ struct DDMDeclarationSummary {
                          blurb: "The certificate the device downloads (PEM/PKCS1, hosted over HTTPS). Referenced by a certificate configuration.",
                          rows: rows)
 
+        case "com.apple.configuration.services.configuration-files":
+            var rows: [Row] = []
+            if let s = payload["ServiceType"] as? String { rows.append(r("Service", serviceLabel(s))) }
+            if let a = payload["DataAssetReference"] as? String { rows.append(r("Files from", a)) }
+            return .init(title: "Service config files",
+                         blurb: "Manages a system service's config files from a downloaded zip (macOS 14+, supervised).",
+                         rows: rows)
+
+        case "com.apple.asset.data":
+            let ref = payload["Reference"] as? [String: Any]
+            var rows: [Row] = []
+            if let url = ref?["DataURL"] as? String { rows.append(r("Download URL", url)) }
+            if let ct = ref?["ContentType"] as? String { rows.append(r("Format", ct)) }
+            return .init(title: "Data file",
+                         blurb: "A data file the device downloads (e.g. a zip of service config files), hosted over HTTPS.",
+                         rows: rows)
+
         case "com.apple.configuration.legacy":
             return .init(title: "Legacy profile",
                          blurb: "Installs a configuration profile the Mac downloads from a URL.",
@@ -135,6 +152,22 @@ struct DDMDeclarationSummary {
         case "Disallowed": return "Blocked"
         default:           return value
         }
+    }
+
+    /// services.configuration-files ServiceType → plain English.
+    static func serviceLabel(_ value: String) -> String {
+        let known: [String: String] = [
+            "com.apple.sshd": "SSH (/etc/ssh)",
+            "com.apple.sudo": "sudo (/etc/sudoers)",
+            "com.apple.pam": "PAM (/etc/pam.d)",
+            "com.apple.cups": "CUPS printing (/etc/cups)",
+            "com.apple.apache.httpd": "Apache (/etc/apache2)",
+            "com.apple.bash": "bash (/etc/profile)",
+            "com.apple.zsh": "zsh (/etc/zsh*)",
+            "com.apple.cryptoTokenKit": "Smartcard login",
+            "com.apple.authorization": "Authorization (/Library/Security)",
+        ]
+        return known[value] ?? value
     }
 
     /// Software-update AutomaticActions enum → plain English.
