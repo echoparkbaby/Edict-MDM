@@ -38,6 +38,7 @@ struct StatusReportingSheet: View {
         StatusFact(label: "Passcode compliant", name: "passcode.is-compliant",                 on: false),
         StatusFact(label: "Pending OS version", name: "softwareupdate.pending-version",        on: false),
         StatusFact(label: "Update state",    name: "softwareupdate.install-state",             on: false),
+        StatusFact(label: "Update failure reason", name: "softwareupdate.failure-reason",      on: false),
     ]
 
     @State private var facts = StatusReportingSheet.catalog

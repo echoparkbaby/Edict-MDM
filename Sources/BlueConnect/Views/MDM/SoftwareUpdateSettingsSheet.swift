@@ -31,7 +31,7 @@ struct SoftwareUpdateSettingsSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Software Update Settings").font(.headline)
-            Text("Set how Macs download and install updates, and how long they can be deferred. Requires macOS 15 or newer.")
+            Text("Set how Macs download and install updates, and how long they can be deferred. Requires macOS 15 or newer. This is the recommended everyday default — let macOS schedule installs (Always on). A 90-day deferral isn't a target: aim lower and re-assess regularly, and pair this with “Enforce a macOS update” only to hit a hard deadline.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 

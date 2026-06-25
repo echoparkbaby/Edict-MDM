@@ -174,5 +174,6 @@ struct DDMDeclarationSummary {
         "passcode.is-compliant":                "Passcode compliant",
         "softwareupdate.pending-version":       "Pending OS version",
         "softwareupdate.install-state":         "Update state",
+        "softwareupdate.failure-reason":        "Update failure",
     ]
 }

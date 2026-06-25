@@ -36,7 +36,7 @@ struct UpdateEnforcementSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Enforce a macOS Update").font(.headline)
-            Text("Every Mac in the set is told to install the target version by the deadline. macOS handles the nagging, download, and forced install itself — including for users who never click anything. Requires macOS 14 or newer on the device.")
+            Text("Every Mac in the set is told to install the target version by the deadline. macOS handles the nagging, download, and forced install itself — including for users who never click anything. Requires macOS 14 or newer on the device. Use this to hit a hard compliance deadline, not as your everyday default — pair it with “Software update settings” (automatic installs) for day-to-day patching.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 

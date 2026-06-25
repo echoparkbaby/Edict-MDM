@@ -70,6 +70,7 @@ struct DDMLibraryTests {
         #expect(DDMDeclarationSummary.statusItemLabel("device.power.battery-health") == "Battery health")
         #expect(DDMDeclarationSummary.statusItemLabel("passcode.is-present") == "Has a passcode")
         #expect(DDMDeclarationSummary.statusItemLabel("softwareupdate.install-state") == "Update state")
+        #expect(DDMDeclarationSummary.statusItemLabel("softwareupdate.failure-reason") == "Update failure")
     }
 
     @Test func setsMatrixCountsAndOrphans() throws {
