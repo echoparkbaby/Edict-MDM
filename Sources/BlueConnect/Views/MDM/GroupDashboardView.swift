@@ -108,6 +108,10 @@ struct GroupDashboardView: View {
     /// "checked Xm ago" line and persists with the facts so firewall/SIP
     /// survive relaunch (cached until the next Pull via MDM).
     @State private var mdmSecAt: [String: Date] = [:]
+    /// Software-update posture from the DDM status channel, by device id.
+    @State private var mdmSU: [String: KMFDDMService.DDMSoftwareUpdate] = [:]
+    /// When the DDM facts (OS/FileVault/model/software-update) were last read.
+    @State private var factsAt: Date?
     @State private var pullingSecurity = false
     @State private var enablingAll = false
     @State private var editingGroup: SmartGroup?
@@ -283,7 +287,8 @@ struct GroupDashboardView: View {
                         heroCard
                         attentionStrip
                         if let drillKey, !drillDevices(drillKey).isEmpty { drillList(drillKey) }
-                        PrismChart(devices: graded, facts: df)
+                        PrismChart(devices: graded, facts: df,
+                                   onSelect: { selection = [df.hostID(for: $0)] })
                         hiddenSection
                     }
                     .padding(18).frame(maxWidth: .infinity, alignment: .leading)
@@ -308,9 +313,9 @@ struct GroupDashboardView: View {
                                                  coverage: mrCoverage()),
                                deviceRows: true)
             case .updates:
-                inventoryTable(columns: [("Device", 180), ("Pending", 90), ("Last check", 170)], rows: updateRows,
-                               source: InvSource(name: "MunkiReport", checkedAt: mrOldestFetch(), note: nil,
-                                                 coverage: mrCoverage()),
+                inventoryTable(columns: [("Device", 180), ("macOS", 84), ("Update state", 150), ("Detail", 260)], rows: updateRows,
+                               source: InvSource(name: "DDM status (Edict), MunkiReport fallback", checkedAt: factsAt,
+                                                 note: "subscribe via Enable reporting", coverage: mdmSUCoverage()),
                                deviceRows: true)
             case .attention:
                 inventoryTable(columns: [("Device", 180), ("Issues", 400), ("Score", 64)], rows: attentionRows,
@@ -453,11 +458,27 @@ struct GroupDashboardView: View {
     }
 
     private var updateRows: [(id: String, cells: [String])] {
-        inventoryScope.compactMap { d in
-            guard let su = mr(for: d)?.software_updates else { return nil }
-            let pending = su.recommendedupdates?.value.map(String.init) ?? "—"
-            return (id: d.id, cells: [label(for: d), pending, su.lastsuccessfuldate ?? "—"])
+        inventoryScope.compactMap { d -> (id: String, cells: [String])? in
+            let ddm = mdmSU[d.id]                      // DDM status channel (Edict)
+            let mrSU = mr(for: d)?.software_updates    // MunkiReport (fallback)
+            let os = osVersions[d.id]
+            guard ddm != nil || mrSU != nil || os != nil else { return nil }
+            let state: String
+            if let s = ddm?.installState, !s.isEmpty { state = s }
+            else if let pending = mrSU?.recommendedupdates?.value, pending > 0 { state = "\(pending) pending" }
+            else if mrSU != nil { state = "Up to date" }
+            else { state = "—" }
+            let detail: String
+            if let fr = ddm?.failureReason, !fr.isEmpty { detail = "Failed: \(fr)" }
+            else if let pv = ddm?.pendingOS, !pv.isEmpty { detail = "→ macOS \(pv)" }
+            else if let last = mrSU?.lastsuccessfuldate, !last.isEmpty { detail = "Checked \(last)" }
+            else { detail = "—" }
+            return (id: d.id, cells: [label(for: d), os ?? "—", state, detail])
         }
+    }
+    /// How many scoped Macs report software-update status via the DDM channel.
+    private func mdmSUCoverage() -> (have: Int, total: Int) {
+        (inventoryScope.filter { mdmSU[$0.id] != nil }.count, inventoryScope.count)
     }
 
     private var firewallRows: [(id: String, cells: [String])] {
@@ -810,26 +831,28 @@ struct GroupDashboardView: View {
                 }
                 .frame(maxWidth: .infinity, minHeight: 160)
             } else {
-                // Fixed-width columns, left-packed with a trailing spacer so
-                // the slack lands on the right edge (a clean Mac list look)
-                // instead of inflating one column and leaving an interior gap.
-                VStack(spacing: 0) {
-                    HStack(spacing: 12) {
-                        // Keep header aligned with the rows' disclosure chevron.
-                        if drillDevices != nil { Color.clear.frame(width: 12, height: 1) }
-                        ForEach(columns.indices, id: \.self) { i in
-                            invHeaderCell(columns[i].0, width: widths[i], index: i, columns: columns)
+                // Wrap in a horizontal scroll so wide columns scroll *within*
+                // the pane instead of overflowing and shoving the whole window
+                // layout sideways. (No trailing Spacer: inside a horizontal
+                // scroll it would expand to infinite width.)
+                ScrollView(.horizontal, showsIndicators: true) {
+                    VStack(spacing: 0) {
+                        HStack(spacing: 12) {
+                            // Keep header aligned with the rows' disclosure chevron.
+                            if drillDevices != nil { Color.clear.frame(width: 12, height: 1) }
+                            ForEach(columns.indices, id: \.self) { i in
+                                invHeaderCell(columns[i].0, width: widths[i], index: i, columns: columns)
+                            }
                         }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 18).padding(.vertical, 5)
-                    Divider()
-                    ScrollView(.vertical, showsIndicators: true) {
-                        LazyVStack(spacing: 0) {
-                            ForEach(filtered, id: \.id) { row in
-                                inventoryRow(row, columns: columns, widths: widths,
-                                             deviceRows: deviceRows, drillDevices: drillDevices)
-                                Divider().opacity(0.4)
+                        .padding(.horizontal, 18).padding(.vertical, 5)
+                        Divider()
+                        ScrollView(.vertical, showsIndicators: true) {
+                            LazyVStack(spacing: 0) {
+                                ForEach(filtered, id: \.id) { row in
+                                    inventoryRow(row, columns: columns, widths: widths,
+                                                 deviceRows: deviceRows, drillDevices: drillDevices)
+                                    Divider().opacity(0.4)
+                                }
                             }
                         }
                     }
@@ -858,7 +881,6 @@ struct GroupDashboardView: View {
                 ForEach(columns.indices, id: \.self) { i in
                     invCell(i < row.cells.count ? row.cells[i] : "", widths[i], header: false, first: i == 0)
                 }
-                Spacer(minLength: 0)
             }
             .padding(.horizontal, 18).padding(.vertical, 5)
             .background(selected ? Color.accentColor.opacity(0.18) : Color.clear)
@@ -879,7 +901,6 @@ struct GroupDashboardView: View {
                     }
                 }
                 .padding(.leading, 48).padding(.trailing, 18).padding(.vertical, 5)
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.accentColor.opacity(0.05))
             }
         }
@@ -1214,8 +1235,15 @@ struct GroupDashboardView: View {
             }
             ForEach(drillDevices(key), id: \.id) { d in
                 HStack(spacing: 8) {
-                    Image(systemName: "laptopcomputer").foregroundStyle(.secondary)
-                    Text(label(for: d)).font(.callout)
+                    Button { selection = [df.hostID(for: d)] } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "laptopcomputer").foregroundStyle(.secondary)
+                            Text(label(for: d)).font(.callout)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Show \(label(for: d)) in the inspector")
                     Spacer()
                     if let os = osVersions[d.id] { Text("macOS \(os)").font(.caption).foregroundStyle(.secondary) }
                     fileVaultChip(for: d)
@@ -1308,46 +1336,64 @@ struct GroupDashboardView: View {
         var nameByID: [String: String] = [:]
         for d in scoped { for e in (log[d.id] ?? []) where nameByID[e.identifier] == nil { nameByID[e.identifier] = e.name } }
         let columns = nameByID.sorted { $0.value.localizedCaseInsensitiveCompare($1.value) == .orderedAscending }
-        return VStack(alignment: .leading, spacing: 8) {
-            Text("Profile assignments").font(.headline)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Label("Profile assignments", systemImage: "doc.on.doc").font(.headline)
+                Spacer()
+                if !rows.isEmpty {
+                    Text("\(columns.count) profile\(columns.count == 1 ? "" : "s") · \(rows.count) device\(rows.count == 1 ? "" : "s")")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             if rows.isEmpty {
                 Text("Edict hasn't deployed any profiles to these devices yet. Deploys you make from the Profiles tab show up here.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             } else {
                 ScrollView(.horizontal, showsIndicators: true) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        // Header row of profile names (rotated would be nicer
-                        // but vertical text is fiddly — keep them readable).
+                    VStack(alignment: .leading, spacing: 0) {
                         HStack(spacing: 0) {
-                            Text("Device").font(.caption2.bold()).frame(width: 150, alignment: .leading)
+                            Text("Device").font(.caption2.bold()).foregroundStyle(.secondary)
+                                .frame(width: 160, alignment: .leading)
                             ForEach(columns, id: \.key) { col in
-                                Text(col.value).font(.caption2).frame(width: 84, alignment: .center)
-                                    .lineLimit(2).truncationMode(.tail)
+                                Text(col.value).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                                    .frame(width: 132, alignment: .center).lineLimit(1).truncationMode(.tail)
+                                    .help(col.value)
                             }
                         }
+                        .padding(.vertical, 6)
                         Divider()
-                        ForEach(rows, id: \.enr.id) { row in
-                            HStack(spacing: 0) {
-                                Text(label(for: row.enr)).font(.caption).frame(width: 150, alignment: .leading)
-                                    .lineLimit(1).truncationMode(.middle)
-                                ForEach(columns, id: \.key) { col in
-                                    Image(systemName: row.ids.contains(col.key) ? "checkmark.circle.fill" : "minus")
-                                        .font(.caption)
-                                        .foregroundStyle(row.ids.contains(col.key) ? Color.green : Color.secondary.opacity(0.3))
-                                        .frame(width: 84, alignment: .center)
+                        ForEach(Array(rows.enumerated()), id: \.element.enr.id) { idx, row in
+                            let sel = selection.contains(df.hostID(for: row.enr))
+                            Button { selection = [df.hostID(for: row.enr)] } label: {
+                                HStack(spacing: 0) {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "laptopcomputer").font(.caption2).foregroundStyle(.secondary)
+                                        Text(label(for: row.enr)).font(.caption).lineLimit(1).truncationMode(.middle)
+                                    }
+                                    .frame(width: 160, alignment: .leading)
+                                    ForEach(columns, id: \.key) { col in
+                                        Image(systemName: row.ids.contains(col.key) ? "checkmark.circle.fill" : "minus")
+                                            .font(.caption)
+                                            .foregroundStyle(row.ids.contains(col.key) ? Color.green : Color.secondary.opacity(0.3))
+                                            .frame(width: 132, alignment: .center)
+                                    }
                                 }
+                                .padding(.vertical, 5)
+                                .background(sel ? Color.accentColor.opacity(0.16)
+                                            : (idx.isMultiple(of: 2) ? Color.clear : Color.secondary.opacity(0.04)))
+                                .contentShape(Rectangle())
                             }
-                            .padding(.vertical, 1)
+                            .buttonStyle(.plain)
                         }
                     }
                 }
-                Text("A ✓ means Edict deployed that profile to the device. Run a drift check below to confirm it's still installed.")
+                Text("A ✓ means Edict deployed that profile. Click a device to inspect it; run a drift check to confirm it's still installed.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(NSColor.controlBackgroundColor)))
+        .padding(16)
+        .frame(maxWidth: 820, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(NSColor.controlBackgroundColor)))
     }
 
     private func label(for enr: MDMEnrollment) -> String { df.label(for: enr) }
@@ -1423,13 +1469,15 @@ struct GroupDashboardView: View {
             pushCert = try? await api.pushCert()
             let svc = KMFDDMService(settings: settings)
             var os: [String: String] = [:], fv: [String: String] = [:], mdl: [String: String] = [:]
+            var su: [String: KMFDDMService.DDMSoftwareUpdate] = [:]
             for d in allDevices {
-                let f = await svc.deviceFacts(enrollmentID: d.id)
+                let f = await svc.fullStatus(enrollmentID: d.id)
                 if let v = f.os { os[d.id] = v }
                 if let v = f.model { mdl[d.id] = v }
                 if let v = f.fileVault { fv[d.id] = v ? "true" : "false" }
+                if f.su.hasData { su[d.id] = f.su }
             }
-            osVersions = os; fileVault = fv; models = mdl
+            osVersions = os; fileVault = fv; models = mdl; mdmSU = su; factsAt = Date()
             rebuildFacts()
             // Pull MunkiReport inventory for the category tables (Apps,
             // Users, Storage, Updates). loadIfNeeded dedupes.

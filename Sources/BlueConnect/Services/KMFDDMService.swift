@@ -188,6 +188,25 @@ struct KMFDDMService {
     /// rejected here so callers see nil ("not reported"), never a path
     /// masquerading as an OS version or model.
     func deviceFacts(enrollmentID: String) async -> (os: String?, fileVault: Bool?, model: String?) {
+        let s = await fullStatus(enrollmentID: enrollmentID)
+        return (os: s.os, fileVault: s.fileVault, model: s.model)
+    }
+
+    /// Software-update posture from the DDM status channel: the device reports
+    /// these once subscribed (see `DDMDeclarations.defaultStatusItems`) and/or
+    /// when a software-update enforcement declaration is active. Surfacing the
+    /// failure reason is the underused-status-channel win (Mac Admins #416).
+    struct DDMSoftwareUpdate: Equatable {
+        var installState: String?
+        var pendingOS: String?
+        var failureReason: String?
+        var hasData: Bool { installState != nil || pendingOS != nil || failureReason != nil }
+    }
+
+    /// OS / FileVault / model / software-update — all from ONE status query, so
+    /// the dashboard refresh doesn't pay two round-trips per device.
+    func fullStatus(enrollmentID: String) async
+        -> (os: String?, fileVault: Bool?, model: String?, su: DDMSoftwareUpdate) {
         let items = (try? await statusValues(enrollmentID: enrollmentID,
                                              pathPrefix: ".StatusItems")) ?? []
         func leaf(_ suffix: String) -> String? {
@@ -195,14 +214,18 @@ struct KMFDDMService {
             let v = raw.trimmingCharacters(in: .whitespaces)
             // Reject capability paths that come back as values.
             if v.isEmpty || v.hasPrefix(".") || v.hasPrefix("device.")
-                || v.hasPrefix("management.") || v.hasPrefix("StatusItems") { return nil }
+                || v.hasPrefix("softwareupdate.") || v.hasPrefix("management.")
+                || v.hasPrefix("StatusItems") { return nil }
             return v
         }
         let os = leaf("operating-system.version")
         let model = leaf("model.marketing-name") ?? leaf("model.identifier")
         let fv = (items.first { $0.path.hasSuffix("filevault.enabled") })?.value
         let fileVault: Bool? = fv.map { $0 == "true" || $0 == "1" }
-        return (os: os, fileVault: fileVault, model: model)
+        let su = DDMSoftwareUpdate(installState: leaf("install-state"),
+                                   pendingOS: leaf("pending-version.os-version"),
+                                   failureReason: leaf("failure-reason"))
+        return (os: os, fileVault: fileVault, model: model, su: su)
     }
 
     // MARK: - HTTP

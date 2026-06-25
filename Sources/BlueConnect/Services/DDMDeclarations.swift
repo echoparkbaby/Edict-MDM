@@ -45,6 +45,12 @@ enum DDMDeclarations {
         "device.operating-system.build-version",
         "device.operating-system.marketing-name",
         "diskmanagement.filevault.enabled",
+        // Software-update status (macOS 14+). Surfaces install state, the
+        // pending target version, and — the underused win — the failure
+        // reason, feeding the Software Updates table from Edict's own channel.
+        "softwareupdate.install-state",
+        "softwareupdate.pending-version.os-version",
+        "softwareupdate.failure-reason",
     ]
 
     /// `com.apple.configuration.management.status-subscriptions` — asks

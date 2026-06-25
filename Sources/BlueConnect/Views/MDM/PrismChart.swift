@@ -10,6 +10,9 @@ struct PrismChart: View {
     /// Devices in scope (a smart group's members, or everything).
     let devices: [MDMEnrollment]
     let facts: DashboardFacts
+    /// Tapping a device in a drilled-open bucket selects it in the main
+    /// window so the right-hand inspector shows it.
+    var onSelect: ((MDMEnrollment) -> Void)? = nil
 
     @State private var selected: BucketKey?
 
@@ -79,14 +82,19 @@ struct PrismChart: View {
         let matches = devicesInBucket(attr, label)
         VStack(alignment: .leading, spacing: 4) {
             ForEach(matches, id: \.id) { d in
-                HStack(spacing: 6) {
-                    Image(systemName: "laptopcomputer").foregroundStyle(.secondary)
-                    Text(facts.label(for: d)).font(.caption)
-                    Spacer()
-                    if let os = facts.osVersions[d.id] {
-                        Text("macOS \(os)").font(.caption2).foregroundStyle(.secondary)
+                Button { onSelect?(d) } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "laptopcomputer").foregroundStyle(.secondary)
+                        Text(facts.label(for: d)).font(.caption)
+                        Spacer()
+                        if let os = facts.osVersions[d.id] {
+                            Text("macOS \(os)").font(.caption2).foregroundStyle(.secondary)
+                        }
                     }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .help("Show \(facts.label(for: d)) in the inspector")
             }
         }
         .padding(10)
