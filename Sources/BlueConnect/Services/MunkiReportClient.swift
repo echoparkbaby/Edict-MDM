@@ -203,8 +203,11 @@ struct MRSecurity: Codable, Hashable {
     let gatekeeper: String?
     let sip: String?
     let activation_lock: String?
-    // MR stores firewall_state as a string ("Active"/"Disabled"/"Not Supported"),
-    // not an Int — the wrong type here failed the whole inventory parse.
+    // MR's `firewall_state` is a string ("Active"/"Disabled"/"Not Supported")
+    // on most collectors but an integer on some — a fixed type for either one
+    // failed the whole inventory parse on the other (the Image-14 bug). All
+    // four fields decode leniently (string OR number) so one odd value can't
+    // nuke the fetch. See the custom `init(from:)` below.
     let firewall_state: String?
 
     var gatekeeperText: String { Self.clean(gatekeeper) }
@@ -215,6 +218,30 @@ struct MRSecurity: Codable, Hashable {
         guard let s, !s.isEmpty else { return "—" }
         if s.lowercased() == "not_supported" { return "Not supported" }
         return s
+    }
+}
+
+extension MRSecurity {
+    enum CodingKeys: String, CodingKey { case gatekeeper, sip, activation_lock, firewall_state }
+
+    // Defined in an extension so the memberwise initializer (used by tests and
+    // call sites) is preserved alongside this custom decoder.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        gatekeeper = Self.flexible(c, .gatekeeper)
+        sip = Self.flexible(c, .sip)
+        activation_lock = Self.flexible(c, .activation_lock)
+        firewall_state = Self.flexible(c, .firewall_state)
+    }
+
+    /// Decode a value that the server may send as a string, int, double, or
+    /// bool, always yielding a string (or nil). Missing/null → nil.
+    private static func flexible(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> String? {
+        if let s = try? c.decodeIfPresent(String.self, forKey: key) { return s }
+        if let i = try? c.decodeIfPresent(Int.self, forKey: key) { return String(i) }
+        if let d = try? c.decodeIfPresent(Double.self, forKey: key) { return String(d) }
+        if let b = try? c.decodeIfPresent(Bool.self, forKey: key) { return b ? "1" : "0" }
+        return nil
     }
 }
 

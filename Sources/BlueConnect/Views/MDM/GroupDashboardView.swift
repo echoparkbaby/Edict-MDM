@@ -84,6 +84,14 @@ struct GroupDashboardView: View {
     }
     @State private var category: Category = .devices
     @State private var tableSearch = ""
+    /// Inventory-table sort: which column index, ascending or not. nil keeps
+    /// the rows' natural (pre-sorted) order.
+    @State private var invSortCol: Int?
+    @State private var invSortAsc = true
+    /// Per-category dragged column widths ({category: [width]}), persisted.
+    @AppStorage("invColWidthsJSON") private var invColWidthsRaw = ""
+    /// Column width captured at drag start (see PrismDeviceTable.resizeStart).
+    @State private var invResizeStart: CGFloat?
     /// Which Mac the category tables (Apps, Local Users, …) are scoped to.
     /// nil = all Macs, rolled up; a value = just that machine's rows.
     @State private var inventoryDeviceID: String?
@@ -111,7 +119,7 @@ struct GroupDashboardView: View {
         .onChange(of: settings.mdmRequireFileVault) { _, _ in rebuildFacts() }
         .onChange(of: settings.mdmMinOSVersion) { _, _ in rebuildFacts() }
         .onChange(of: selectedGroupID) { _, _ in inventoryDeviceID = nil; expandedInventoryRow = nil }
-        .onChange(of: category) { _, _ in expandedInventoryRow = nil }
+        .onChange(of: category) { _, _ in expandedInventoryRow = nil; invSortCol = nil }
         .onChange(of: inventoryDeviceID) { _, _ in expandedInventoryRow = nil }
     }
 
@@ -484,13 +492,102 @@ struct GroupDashboardView: View {
         return rows.filter { row in row.cells.contains { $0.localizedCaseInsensitiveContains(q) } }
     }
 
+    // MARK: - Inventory-table sort + resizable columns
+
+    /// Effective column widths for the current category: dragged overrides if
+    /// present (and still matching the column count), else the natural widths.
+    private func invWidths(_ columns: [(String, CGFloat)]) -> [CGFloat] {
+        if let data = invColWidthsRaw.data(using: .utf8),
+           let map = try? JSONDecoder().decode([String: [Double]].self, from: data),
+           let saved = map[category.rawValue], saved.count == columns.count {
+            return saved.map { CGFloat($0) }
+        }
+        return columns.map(\.1)
+    }
+
+    private func setInvWidth(_ columns: [(String, CGFloat)], index: Int, to newWidth: CGFloat) {
+        var widths = invWidths(columns)
+        guard index < widths.count else { return }
+        widths[index] = max(48, newWidth)
+        var map: [String: [Double]] = [:]
+        if let data = invColWidthsRaw.data(using: .utf8),
+           let m = try? JSONDecoder().decode([String: [Double]].self, from: data) { map = m }
+        map[category.rawValue] = widths.map { Double($0) }
+        if let data = try? JSONEncoder().encode(map), let s = String(data: data, encoding: .utf8) {
+            invColWidthsRaw = s
+        }
+    }
+
+    private func toggleInvSort(_ i: Int) {
+        if invSortCol == i { invSortAsc.toggle() } else { invSortCol = i; invSortAsc = true }
+    }
+
+    /// Sort the (already filtered) rows by the active column. Numeric when the
+    /// cell starts with a number ("12 of 30", "45.2 GB"), else case-insensitive
+    /// text. nil sort column leaves the rows in their incoming order.
+    private func sortedRows(_ rows: [(id: String, cells: [String])]) -> [(id: String, cells: [String])] {
+        guard let col = invSortCol else { return rows }
+        func cell(_ r: (id: String, cells: [String])) -> String { col < r.cells.count ? r.cells[col] : "" }
+        func leadingNumber(_ s: String) -> Double? {
+            var n = ""
+            for ch in s.trimmingCharacters(in: .whitespaces) {
+                if ch.isNumber || ch == "." { n.append(ch) }
+                else if n.isEmpty && ch == "-" { n.append(ch) }
+                else { break }
+            }
+            return n.isEmpty ? nil : Double(n)
+        }
+        return rows.sorted { a, b in
+            let ka = cell(a), kb = cell(b)
+            let asc: Bool
+            if let na = leadingNumber(ka), let nb = leadingNumber(kb), na != nb {
+                asc = na < nb
+            } else {
+                asc = ka.localizedCaseInsensitiveCompare(kb) == .orderedAscending
+            }
+            return invSortAsc ? asc : !asc
+        }
+    }
+
+    /// A sortable, drag-to-resize header cell for the inventory tables.
+    @ViewBuilder
+    private func invHeaderCell(_ title: String, width: CGFloat, index: Int,
+                               columns: [(String, CGFloat)]) -> some View {
+        HStack(spacing: 0) {
+            Button { toggleInvSort(index) } label: {
+                HStack(spacing: 3) {
+                    Text(title)
+                    if invSortCol == index {
+                        Image(systemName: invSortAsc ? "chevron.up" : "chevron.down").font(.system(size: 8))
+                    }
+                }
+                .frame(width: max(40, width) - 8, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            Rectangle().fill(Color.clear).frame(width: 8)
+                .overlay(Divider())
+                .contentShape(Rectangle())
+                .onHover { $0 ? NSCursor.resizeLeftRight.push() : NSCursor.pop() }
+                .gesture(DragGesture(minimumDistance: 1)
+                    .onChanged { v in
+                        if invResizeStart == nil { invResizeStart = width }
+                        setInvWidth(columns, index: index, to: (invResizeStart ?? width) + v.translation.width)
+                    }
+                    .onEnded { _ in invResizeStart = nil })
+                .accessibilityHidden(true)
+        }
+        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+    }
+
     /// Generic Kandji-style category table: a toolbar with title + filter,
     /// then a horizontally-scrolling sortable-width table. Column width 0
     /// means "flexible".
     private func inventoryTable(columns: [(String, CGFloat)], rows: [(id: String, cells: [String])],
                                 drillDevices: ((String) -> [String])? = nil,
                                 onPullMDM: (() -> Void)? = nil) -> some View {
-        let filtered = filteredRows(rows)
+        let widths = invWidths(columns)
+        let filtered = sortedRows(filteredRows(rows))
         return VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Text(category.rawValue).font(.title3.bold())
@@ -541,16 +638,17 @@ struct GroupDashboardView: View {
                     HStack(spacing: 12) {
                         // Keep header aligned with the rows' disclosure chevron.
                         if drillDevices != nil { Color.clear.frame(width: 12, height: 1) }
-                        ForEach(columns.indices, id: \.self) { i in invCell(columns[i].0, columns[i].1, header: true) }
+                        ForEach(columns.indices, id: \.self) { i in
+                            invHeaderCell(columns[i].0, width: widths[i], index: i, columns: columns)
+                        }
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 18).padding(.vertical, 5)
-                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     Divider()
                     ScrollView(.vertical, showsIndicators: true) {
                         LazyVStack(spacing: 0) {
                             ForEach(filtered, id: \.id) { row in
-                                inventoryRow(row, columns: columns, drillDevices: drillDevices)
+                                inventoryRow(row, columns: columns, widths: widths, drillDevices: drillDevices)
                                 Divider().opacity(0.4)
                             }
                         }
@@ -565,6 +663,7 @@ struct GroupDashboardView: View {
     /// Apps / Local Users), the row is tappable to reveal which Macs it's on.
     @ViewBuilder
     private func inventoryRow(_ row: (id: String, cells: [String]), columns: [(String, CGFloat)],
+                             widths: [CGFloat],
                              drillDevices: ((String) -> [String])?) -> some View {
         let expandable = drillDevices != nil
         let isOpen = expandedInventoryRow == row.id
@@ -575,7 +674,7 @@ struct GroupDashboardView: View {
                         .font(.caption2).foregroundStyle(.secondary).frame(width: 12)
                 }
                 ForEach(columns.indices, id: \.self) { i in
-                    invCell(i < row.cells.count ? row.cells[i] : "", columns[i].1, header: false, first: i == 0)
+                    invCell(i < row.cells.count ? row.cells[i] : "", widths[i], header: false, first: i == 0)
                 }
                 Spacer(minLength: 0)
             }

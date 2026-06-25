@@ -353,9 +353,14 @@ struct ContentView: View {
     /// True when the center pane shows a full-width MDM view that owns the
     /// whole pane — so the right-hand host inspector is hidden instead of
     /// sitting empty beside it (the Enrollment/Declarations/… tabs).
+    ///
+    /// The Dashboard is intentionally *not* here: clicking a Mac in its
+    /// Devices/Security table selects that host, and we want the same
+    /// right-hand inspector the All-Hosts table gives — so the ConnectPanel
+    /// stays visible beside the dashboard.
     private var isMDMFullPane: Bool {
         switch sidebarFilter {
-        case .mdmDeclarations, .mdmProfiles, .mdmEnrollment, .mdmDEP, .mdmScheduling, .mdmDashboard:
+        case .mdmDeclarations, .mdmProfiles, .mdmEnrollment, .mdmDEP, .mdmScheduling:
             return true
         default:
             return false

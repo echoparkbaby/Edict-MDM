@@ -33,6 +33,44 @@ struct PrismDeviceTable: View {
     @State private var sortAsc = true
     @State private var hoveredRow: String?
     @AppStorage("prismHiddenColumns") private var hiddenColumnsRaw = ""
+    /// User-dragged column widths, keyed by column key ("device" is the name
+    /// column). Persisted so a resized layout survives relaunch. Columns not
+    /// in the map fall back to their natural width.
+    @AppStorage("prismColWidthsJSON") private var colWidthsRaw = ""
+    /// Width captured at the start of a drag so cumulative translation isn't
+    /// re-applied to an already-updated width (which would run away).
+    @State private var resizeStart: CGFloat?
+
+    private func width(for key: String, default def: CGFloat) -> CGFloat {
+        guard let data = colWidthsRaw.data(using: .utf8),
+              let map = try? JSONDecoder().decode([String: Double].self, from: data),
+              let w = map[key] else { return def }
+        return CGFloat(w)
+    }
+    private func setWidth(_ key: String, to newWidth: CGFloat) {
+        var map: [String: Double] = [:]
+        if let data = colWidthsRaw.data(using: .utf8),
+           let m = try? JSONDecoder().decode([String: Double].self, from: data) { map = m }
+        map[key] = Double(max(48, newWidth))
+        if let data = try? JSONEncoder().encode(map), let s = String(data: data, encoding: .utf8) {
+            colWidthsRaw = s
+        }
+    }
+
+    /// A thin draggable divider on a header cell's trailing edge.
+    private func resizeHandle(key: String, currentWidth: CGFloat) -> some View {
+        Rectangle().fill(Color.clear).frame(width: 8)
+            .overlay(Divider())
+            .contentShape(Rectangle())
+            .onHover { $0 ? NSCursor.resizeLeftRight.push() : NSCursor.pop() }
+            .gesture(DragGesture(minimumDistance: 1)
+                .onChanged { v in
+                    if resizeStart == nil { resizeStart = currentWidth }
+                    setWidth(key, to: (resizeStart ?? currentWidth) + v.translation.width)
+                }
+                .onEnded { _ in resizeStart = nil })
+            .accessibilityHidden(true)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -124,11 +162,19 @@ struct PrismDeviceTable: View {
 
     private var tableHeader: some View {
         HStack(spacing: 12) {
-            sortHeader("Device", .name).frame(width: 230, alignment: .leading)
+            let deviceW = width(for: "device", default: 230)
+            HStack(spacing: 0) {
+                sortHeader("Device", .name).frame(width: max(40, deviceW) - 8, alignment: .leading)
+                resizeHandle(key: "device", currentWidth: deviceW)
+            }
             ForEach(visibleColumns) { col in
-                Group {
-                    if let s = col.sort { sortHeader(col.title, s) } else { Text(col.title) }
-                }.frame(width: col.width, alignment: .leading)
+                let w = width(for: col.key, default: col.width)
+                HStack(spacing: 0) {
+                    Group {
+                        if let s = col.sort { sortHeader(col.title, s) } else { Text(col.title) }
+                    }.frame(width: max(40, w) - 8, alignment: .leading)
+                    resizeHandle(key: col.key, currentWidth: w)
+                }
             }
         }
         .padding(.horizontal, 18).padding(.vertical, 5)
@@ -144,9 +190,9 @@ struct PrismDeviceTable: View {
                 Image(systemName: facts.deviceIcon(d)).font(.caption).foregroundStyle(Color.accentColor).frame(width: 16)
                 Text(facts.label(for: d)).font(.callout.weight(.medium)).lineLimit(1).truncationMode(.tail)
             }
-            .frame(width: 230, alignment: .leading)
+            .frame(width: width(for: "device", default: 230), alignment: .leading)
             ForEach(visibleColumns) { col in
-                deviceCell(col, d).frame(width: col.width, alignment: .leading)
+                deviceCell(col, d).frame(width: width(for: col.key, default: col.width), alignment: .leading)
             }
         }
         .padding(.horizontal, 18).padding(.vertical, 5)

@@ -21,10 +21,11 @@ struct MunkiReportSecurityTests {
     }
 
     @Test func securityValuesPassThroughExceptNotSupported() {
-        let s = MRSecurity(gatekeeper: "Active", sip: "Disabled", activation_lock: "Enabled", firewall_state: 1)
+        let s = MRSecurity(gatekeeper: "Active", sip: "Disabled", activation_lock: "Enabled", firewall_state: "Active")
         #expect(s.gatekeeperText == "Active")
         #expect(s.sipText == "Disabled")
         #expect(s.activationLockText == "Enabled")
+        #expect(s.firewallStateText == "Active")
         // The collector's "not_supported" sentinel is prettified; empty → dash.
         #expect(MRSecurity(gatekeeper: nil, sip: "not_supported", activation_lock: "", firewall_state: nil).sipText == "Not supported")
         #expect(MRSecurity(gatekeeper: nil, sip: "", activation_lock: nil, firewall_state: nil).gatekeeperText == "—")
