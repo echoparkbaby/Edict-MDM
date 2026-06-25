@@ -5,7 +5,7 @@ import Foundation
 /// override MunkiReport for the Macs it can reach live. (Gatekeeper has no
 /// MDM source, and the dashboard skips the second DeviceInformation command
 /// for Activation Lock, so those stay MunkiReport-sourced.)
-struct MDMSecurityFacts: Equatable {
+struct MDMSecurityFacts: Equatable, Codable {
     var firewallEnabled: Bool?
     var firewallBlockAll: Bool?
     var firewallStealth: Bool?

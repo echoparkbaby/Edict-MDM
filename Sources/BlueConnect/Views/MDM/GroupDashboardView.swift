@@ -100,6 +100,10 @@ struct GroupDashboardView: View {
     /// Live firewall + SIP pulled from MDM (enrollmentID → facts), overriding
     /// MunkiReport for those Macs. Populated by the "Pull via MDM" action.
     @State private var mdmSec: [String: MDMSecurityFacts] = [:]
+    /// When each device's MDM SecurityInfo was last pulled — drives the
+    /// "checked Xm ago" line and persists with the facts so firewall/SIP
+    /// survive relaunch (cached until the next Pull via MDM).
+    @State private var mdmSecAt: [String: Date] = [:]
     @State private var pullingSecurity = false
     @State private var enablingAll = false
     @State private var editingGroup: SmartGroup?
@@ -286,21 +290,33 @@ struct GroupDashboardView: View {
                 ScrollView { driftCard.padding(18) }
             case .apps:
                 inventoryTable(columns: appColumns, rows: appRows,
+                               source: InvSource(name: "MunkiReport", checkedAt: mrOldestFetch(), note: nil,
+                                                 coverage: mrCoverage()),
                                drillDevices: inventoryDeviceID == nil ? { macsWithApp($0) } : nil)
             case .users:
                 inventoryTable(columns: userColumns, rows: userRows,
+                               source: InvSource(name: "MunkiReport", checkedAt: mrOldestFetch(),
+                                                 note: "MDM can't enumerate local accounts", coverage: mrCoverage()),
                                drillDevices: inventoryDeviceID == nil ? { macsWithUser($0) } : nil)
             case .storage:
-                inventoryTable(columns: [("Device", 180), ("Free", 100), ("Total", 100), ("Encrypted", 100), ("SMART", 90)], rows: storageRows)
+                inventoryTable(columns: [("Device", 180), ("Free", 100), ("Total", 100), ("Encrypted", 100), ("SMART", 90)], rows: storageRows,
+                               source: InvSource(name: "MunkiReport", checkedAt: mrOldestFetch(), note: nil,
+                                                 coverage: mrCoverage()))
             case .updates:
-                inventoryTable(columns: [("Device", 180), ("Pending", 90), ("Last check", 170)], rows: updateRows)
+                inventoryTable(columns: [("Device", 180), ("Pending", 90), ("Last check", 170)], rows: updateRows,
+                               source: InvSource(name: "MunkiReport", checkedAt: mrOldestFetch(), note: nil,
+                                                 coverage: mrCoverage()))
             case .attention:
                 inventoryTable(columns: [("Device", 180), ("Issues", 400), ("Score", 64)], rows: attentionRows)
             case .appFirewall:
                 inventoryTable(columns: [("Device", 180), ("State", 150), ("Stealth", 90), ("Logging", 90)], rows: firewallRows,
+                               source: InvSource(name: "MDM live, MunkiReport fallback", checkedAt: mdmNewestPull(),
+                                                 note: "Pull via MDM to refresh", coverage: mdmSecCoverage()),
                                onPullMDM: { Task { await pullSecurityViaMDM() } })
             case .gatekeeper:
                 inventoryTable(columns: [("Device", 180), ("Gatekeeper", 130), ("SIP", 130), ("Activation Lock", 140)], rows: gatekeeperRows,
+                               source: InvSource(name: "SIP via MDM; Gatekeeper/Lock MunkiReport", checkedAt: mdmNewestPull(),
+                                                 note: "Pull via MDM to refresh", coverage: mdmSecCoverage()),
                                onPullMDM: { Task { await pullSecurityViaMDM() } })
             }
         }
@@ -479,11 +495,84 @@ struct GroupDashboardView: View {
                 try? await Task.sleep(for: .seconds(2))
                 if let res = try? await api.commandResult(uuid: uuid) {
                     let facts = MDMSecurityFacts(securityInfo: res.dict("SecurityInfo"))
-                    if facts.hasData { mdmSec[d.id] = facts }
+                    if facts.hasData { mdmSec[d.id] = facts; mdmSecAt[d.id] = Date() }
                     break
                 }
             }
         }
+        saveSecurityCache()
+    }
+
+    // MARK: - MDM security cache (persistent + timestamped)
+
+    private struct CachedSecurity: Codable { var facts: MDMSecurityFacts; var at: Date }
+    private static var securityCacheURL: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return base.appendingPathComponent("EdictMDM", isDirectory: true)
+            .appendingPathComponent("mdm-security-cache.json")
+    }
+    /// Rehydrate firewall/SIP from disk so the tables show last-known posture
+    /// immediately on launch (cached until a fresh Pull via MDM).
+    private func loadSecurityCache() {
+        guard let data = try? Data(contentsOf: Self.securityCacheURL),
+              let map = try? JSONDecoder().decode([String: CachedSecurity].self, from: data)
+        else { return }
+        for (id, c) in map where mdmSec[id] == nil { mdmSec[id] = c.facts; mdmSecAt[id] = c.at }
+    }
+    private func saveSecurityCache() {
+        var map: [String: CachedSecurity] = [:]
+        for (id, f) in mdmSec { map[id] = CachedSecurity(facts: f, at: mdmSecAt[id] ?? Date()) }
+        let url = Self.securityCacheURL
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let data = try? JSONEncoder().encode(map) { try? data.write(to: url) }
+    }
+
+    // MARK: - Source + freshness, per category
+
+    /// What sources a category table and how fresh that data is, shown as a
+    /// caption under the toolbar so the user always knows where a value came
+    /// from and whether it's stale.
+    private struct InvSource { let name: String; let checkedAt: Date?; let note: String?
+        var coverage: (have: Int, total: Int)? = nil }
+
+    /// Oldest MunkiReport fetch across the current scope — the most
+    /// conservative freshness (flags the stalest Mac, e.g. wiped-but-cached).
+    private func mrOldestFetch() -> Date? {
+        inventoryScope.compactMap { mrInventory.lastFetched($0.serialNumber) }.min()
+    }
+    /// Most recent MDM SecurityInfo pull across the current scope.
+    private func mdmNewestPull() -> Date? {
+        inventoryScope.compactMap { mdmSecAt[$0.id] }.max()
+    }
+    /// How many scoped Macs actually have MunkiReport data — answers "why does
+    /// only one Mac show up here" (the rest aren't MunkiReport clients).
+    private func mrCoverage() -> (have: Int, total: Int) {
+        (inventoryScope.filter { mr(for: $0) != nil }.count, inventoryScope.count)
+    }
+    /// How many scoped Macs have answered an MDM SecurityInfo pull.
+    private func mdmSecCoverage() -> (have: Int, total: Int) {
+        (inventoryScope.filter { mdmSec[$0.id] != nil }.count, inventoryScope.count)
+    }
+
+    @ViewBuilder
+    private func sourceCaption(_ s: InvSource) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "info.circle").font(.caption2)
+            Text("Source: \(s.name)")
+            if let d = s.checkedAt {
+                Text("· checked \(d.formatted(.relative(presentation: .named)))")
+            } else {
+                Text("· not checked yet")
+            }
+            if let c = s.coverage {
+                Text("· \(c.have) of \(c.total) Mac\(c.total == 1 ? "" : "s") reporting")
+                    .foregroundStyle(c.have < c.total ? Color.orange : .secondary)
+            }
+            if let n = s.note { Text("· \(n)").foregroundStyle(.tertiary) }
+            Spacer(minLength: 0)
+        }
+        .font(.caption2).foregroundStyle(.secondary)
+        .padding(.horizontal, 18).padding(.bottom, 6)
     }
 
     private func filteredRows(_ rows: [(id: String, cells: [String])]) -> [(id: String, cells: [String])] {
@@ -584,6 +673,7 @@ struct GroupDashboardView: View {
     /// then a horizontally-scrolling sortable-width table. Column width 0
     /// means "flexible".
     private func inventoryTable(columns: [(String, CGFloat)], rows: [(id: String, cells: [String])],
+                                source: InvSource? = nil,
                                 drillDevices: ((String) -> [String])? = nil,
                                 onPullMDM: (() -> Void)? = nil) -> some View {
         let widths = invWidths(columns)
@@ -623,6 +713,7 @@ struct GroupDashboardView: View {
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.controlBackgroundColor)))
             }
             .padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 8)
+            if let source { sourceCaption(source) }
             if filtered.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "tray").font(.system(size: 28)).foregroundStyle(.secondary)
@@ -1221,6 +1312,7 @@ struct GroupDashboardView: View {
     @MainActor
     private func refresh() async {
         savedViews = settings.prismViews
+        loadSecurityCache()
         let log = DeploymentLog.load()
         deploymentLog = log
         deploymentCounts = log.mapValues { $0.count }

@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import BlueConnectAdmin
 
 /// The dashboard's "Pull via MDM" action parses the MDM SecurityInfo
@@ -36,5 +37,19 @@ struct MDMSecurityFactsTests {
         #expect(f.firewallStateText == "—")
         #expect(f.stealthText == "—")
         #expect(f.sipText == "—")
+    }
+
+    /// The facts are persisted (with a timestamp) so firewall/SIP survive
+    /// relaunch as "checked Xm ago" — Codable must round-trip exactly.
+    @Test func codableRoundTrip() throws {
+        let original = MDMSecurityFacts(securityInfo: [
+            "SystemIntegrityProtectionEnabled": false,
+            "FirewallSettings": ["FirewallEnabled": true, "BlockAllIncoming": false, "StealthMode": true],
+        ])
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(MDMSecurityFacts.self, from: data)
+        #expect(decoded == original)
+        #expect(decoded.firewallStateText == "On")
+        #expect(decoded.sipText == "Off")
     }
 }
