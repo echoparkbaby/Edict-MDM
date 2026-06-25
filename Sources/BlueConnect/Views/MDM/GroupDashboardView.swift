@@ -1396,8 +1396,12 @@ struct GroupDashboardView: View {
                             Text("Device").font(.caption2.bold()).foregroundStyle(.secondary)
                                 .frame(width: 160, alignment: .leading)
                             ForEach(columns, id: \.key) { col in
+                                // Wrap, don't truncate — it's in a horizontal scroll
+                                // with room to spare; a clipped profile name is useless.
                                 Text(col.value).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                                    .frame(width: 132, alignment: .center).lineLimit(1).truncationMode(.tail)
+                                    .multilineTextAlignment(.center)
+                                    .frame(width: 150, alignment: .center)
+                                    .fixedSize(horizontal: false, vertical: true)
                                     .help(col.value)
                             }
                         }
@@ -1416,7 +1420,7 @@ struct GroupDashboardView: View {
                                         Image(systemName: row.ids.contains(col.key) ? "checkmark.circle.fill" : "minus")
                                             .font(.caption)
                                             .foregroundStyle(row.ids.contains(col.key) ? Color.green : Color.secondary.opacity(0.3))
-                                            .frame(width: 132, alignment: .center)
+                                            .frame(width: 150, alignment: .center)
                                     }
                                 }
                                 .padding(.vertical, 5)
