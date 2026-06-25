@@ -14,6 +14,9 @@ struct DashboardFacts {
     var hosts: [BlueSkyHost]
     /// enrollmentID → operator label (non-empty only).
     var deviceLabels: [String: String]
+    /// enrollmentID → computer name reported by MunkiReport, so an MDM-only Mac
+    /// with no hostname reads as its real name instead of a raw serial.
+    var mrNames: [String: String] = [:]
     var requireFileVault: Bool
     var minOS: String
     var driftMissing: [String: [DeploymentLog.Entry]]
@@ -58,6 +61,7 @@ struct DashboardFacts {
     func label(for enr: MDMEnrollment) -> String {
         if let stored = deviceLabels[enr.id], !stored.isEmpty { return stored }
         if let host = bscHost(for: enr) { return host.displayName }
+        if let name = mrNames[enr.id], !name.isEmpty { return name }
         return enr.serialNumber ?? String(enr.id.prefix(8))
     }
 

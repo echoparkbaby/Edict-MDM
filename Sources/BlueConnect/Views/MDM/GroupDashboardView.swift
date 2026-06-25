@@ -136,6 +136,9 @@ struct GroupDashboardView: View {
         .onChange(of: selectedGroupID) { _, _ in inventoryDeviceID = nil; expandedInventoryRow = nil }
         .onChange(of: category) { _, _ in expandedInventoryRow = nil; invSortCol = nil }
         .onChange(of: inventoryDeviceID) { _, _ in expandedInventoryRow = nil }
+        // When MunkiReport inventory lands, rebuild facts so computer names
+        // (and anything else MR-derived) refresh into the labels.
+        .onChange(of: mrInventory.bySerial.count) { _, _ in rebuildFacts() }
     }
 
     // MARK: - Membership / facts
@@ -151,9 +154,20 @@ struct GroupDashboardView: View {
 
     private func rebuildFacts() {
         df = DashboardFacts(osVersions: osVersions, fileVault: fileVault, models: models,
-                            hosts: hostStore.hosts, deviceLabels: deviceLabels,
+                            hosts: hostStore.hosts, deviceLabels: deviceLabels, mrNames: mrComputerNames,
                             requireFileVault: settings.mdmRequireFileVault, minOS: settings.mdmMinOSVersion,
                             driftMissing: driftMissing, deploymentCounts: deploymentCounts)
+    }
+    /// enrollmentID → MunkiReport computer name, so an MDM-only Mac without a
+    /// hostname reads as its real name instead of a bare serial.
+    private var mrComputerNames: [String: String] {
+        var names: [String: String] = [:]
+        for d in allDevices {
+            guard let s = d.serialNumber?.trimmingCharacters(in: .whitespaces), !s.isEmpty,
+                  let name = mrInventory.bySerial[s]?.machine?.computer_name, !name.isEmpty else { continue }
+            names[d.id] = name
+        }
+        return names
     }
     private var deviceLabels: [String: String] {
         var m: [String: String] = [:]

@@ -70,25 +70,32 @@ struct SmartGroupEditor: View {
 
     private var baselineSection: some View {
         DisclosureGroup(isExpanded: $showBaseline) {
-            Text("Edict ensures every Mac matching this group has these — applied once per Mac, automatically on refresh. A Mac that starts matching later (once it reports OS/FileVault) is covered then.")
-                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            // Left-align everything: the default DisclosureGroup content stack
+            // centers its children, which staggered the checkbox column.
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Edict ensures every Mac matching this group has these — applied once per Mac, automatically on refresh. A Mac that starts matching later (once it reports OS/FileVault) is covered then.")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
 
-            Text("Profiles").font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 4)
-            if savedProfiles.isEmpty {
-                Text("No saved profiles — create them in the Profiles tab.").font(.caption).foregroundStyle(.secondary)
-            } else {
-                ForEach(savedProfiles) { p in
-                    Toggle(p.name, isOn: profileBinding(p.id)).font(.callout)
+                Text("Profiles").font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 4)
+                if savedProfiles.isEmpty {
+                    Text("No saved profiles — create them in the Profiles tab.").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(savedProfiles) { p in
+                        Toggle(p.name, isOn: profileBinding(p.id)).font(.callout)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                Text("Declaration sets").font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 4)
+                if ddmLibrary.setNames.isEmpty {
+                    Text("No sets — create them in Declarations → Sets.").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(ddmLibrary.setNames, id: \.self) { set in
+                        Toggle(set, isOn: setBinding(set)).font(.callout)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
-            Text("Declaration sets").font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 4)
-            if ddmLibrary.setNames.isEmpty {
-                Text("No sets — create them in Declarations → Sets.").font(.caption).foregroundStyle(.secondary)
-            } else {
-                ForEach(ddmLibrary.setNames, id: \.self) { set in
-                    Toggle(set, isOn: setBinding(set)).font(.callout)
-                }
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
             HStack {
                 Label("Onboarding baseline", systemImage: "shippingbox")
