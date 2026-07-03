@@ -44,6 +44,12 @@ final class AuthGate: ObservableObject {
         ctx.localizedFallbackTitle = "Use password…"
         var err: NSError?
         guard ctx.canEvaluatePolicy(.deviceOwnerAuthentication, error: &err) else {
+            // No biometrics AND no device password: the Mac has no OS-level
+            // auth, so the app-lock is moot and failing closed would strand the
+            // operator on the lock screen with no way in. Unlock, but log why —
+            // unlike the destructive gate, blocking access here helps no one.
+            Log.warn("Auth", "App-lock bypassed — cannot evaluate auth policy "
+                + "(\(err?.localizedDescription ?? "unknown"))")
             state = .unlocked
             lastError = err?.localizedDescription
             return
@@ -70,16 +76,44 @@ final class AuthGate: ObservableObject {
         state = .needsLogin
     }
 
-    /// Touch ID gate for destructive actions (unchanged).
+    /// The destructive-gate decision, factored out so the fail-closed logic
+    /// is unit-testable without a live biometric prompt.
+    enum DestructiveGate: Equatable { case allow, promptUser, denyNoAuth }
+    nonisolated static func destructiveGate(required: Bool, canEvaluate: Bool) -> DestructiveGate {
+        guard required else { return .allow }
+        return canEvaluate ? .promptUser : .denyNoAuth
+    }
+
+    /// Touch ID / device-password gate for destructive fleet actions (erase,
+    /// unenroll, unblock). Fails CLOSED: if the operator required this gate but
+    /// the Mac can't evaluate biometrics OR a device password — no auth method
+    /// available, or a transient LAContext error — the action is blocked
+    /// instead of silently allowed (the old fail-open). The escape hatch is the
+    /// Settings toggle "Confirm destructive actions with Touch ID".
     func confirmDestructive(reason: String) async -> Bool {
-        guard requireTouchIDForDestructive else { return true }
         let ctx = LAContext()
         ctx.localizedFallbackTitle = "Use password…"
         var err: NSError?
-        guard ctx.canEvaluatePolicy(.deviceOwnerAuthentication, error: &err) else { return true }
-        do {
-            return try await ctx.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
-        } catch { return false }
+        let canEvaluate = ctx.canEvaluatePolicy(.deviceOwnerAuthentication, error: &err)
+        switch Self.destructiveGate(required: requireTouchIDForDestructive, canEvaluate: canEvaluate) {
+        case .allow:
+            return true
+        case .denyNoAuth:
+            lastError = "Couldn't verify your identity — this Mac has no Touch ID or "
+                + "device password available, so the action was blocked. Turn off "
+                + "“Confirm destructive actions with Touch ID” in Settings to proceed "
+                + "without it."
+            Log.warn("Auth", "Destructive action blocked — no evaluable auth policy "
+                + "(\(err?.localizedDescription ?? "unknown")). reason=\(reason)")
+            return false
+        case .promptUser:
+            do {
+                return try await ctx.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
+            } catch {
+                // User cancelled or auth failed — the action does not run.
+                return false
+            }
+        }
     }
 
     /// Mark login successful and persist preferences.
