@@ -37,9 +37,12 @@ final class PackageCatalogStore {
         case "ftp":
             Log.info("Packages", "ftp upload \(localFile.lastPathComponent) → \(redact(path))")
             let cmd = "curl --upload-file \(localFile.lastPathComponent) \(redact(path))"
-            let r = await runUpload(executable: "/usr/bin/curl",
-                                    arguments: ["--silent", "--show-error", "--fail",
-                                                "--upload-file", localFile.path, path])
+            let (cleanURL, config) = Self.curlUploadCreds(from: path)
+            var args = ["--silent", "--show-error", "--fail", "--upload-file", localFile.path]
+            if !config.isEmpty { args += ["--config", "-"] }
+            args.append(cleanURL)
+            let r = await runUpload(executable: "/usr/bin/curl", arguments: args,
+                                    stdin: config.isEmpty ? nil : config)
             result = (r.0, r.1, cmd)
 
         case "nextcloud":
@@ -48,9 +51,12 @@ final class PackageCatalogStore {
             // <url>/<localFilename> when the URL has trailing slash; for
             // explicit URLs we leave it alone.
             let cmd = "curl -T \(localFile.lastPathComponent) \(redact(path))"
-            let r = await runUpload(executable: "/usr/bin/curl",
-                                    arguments: ["--silent", "--show-error", "--fail",
-                                                "--upload-file", localFile.path, path])
+            let (cleanURL, config) = Self.curlUploadCreds(from: path)
+            var args = ["--silent", "--show-error", "--fail", "--upload-file", localFile.path]
+            if !config.isEmpty { args += ["--config", "-"] }
+            args.append(cleanURL)
+            let r = await runUpload(executable: "/usr/bin/curl", arguments: args,
+                                    stdin: config.isEmpty ? nil : config)
             result = (r.0, r.1, cmd)
 
         case "ssh", "":
@@ -88,7 +94,8 @@ final class PackageCatalogStore {
     }
 
     /// Run any external command and capture stderr for error reporting.
-    private func runUpload(executable: String, arguments: [String]) async -> (Int32, String) {
+    private func runUpload(executable: String, arguments: [String],
+                           stdin: String? = nil) async -> (Int32, String) {
         await Task.detached(priority: .userInitiated) {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: executable)
@@ -96,8 +103,17 @@ final class PackageCatalogStore {
             let err = Pipe()
             p.standardError = err
             p.standardOutput = Pipe()  // discard stdout
+            var inPipe: Pipe?
+            if stdin != nil {
+                let ip = Pipe(); p.standardInput = ip; inPipe = ip
+            }
             do {
                 try p.run()
+                // Feed the secret config (e.g. curl `--config -`) then close.
+                if let s = stdin, let ip = inPipe, let data = s.data(using: .utf8) {
+                    ip.fileHandleForWriting.write(data)
+                    try? ip.fileHandleForWriting.close()
+                }
                 p.waitUntilExit()
                 let errData = err.fileHandleForReading.readDataToEndOfFile()
                 return (p.terminationStatus, String(data: errData, encoding: .utf8) ?? "")
@@ -105,6 +121,21 @@ final class PackageCatalogStore {
                 return (-1, error.localizedDescription)
             }
         }.value
+    }
+
+    /// Pull any `user:pass@` userinfo out of an upload URL so curl receives the
+    /// credential via a stdin config (`--config -`) instead of on argv, where
+    /// `ps -ww` would expose it. Returns the cred-free URL and the config
+    /// (empty when the URL carried no userinfo). Pure/testable.
+    nonisolated static func curlUploadCreds(from uploadURL: String) -> (cleanURL: String, config: String) {
+        guard var comps = URLComponents(string: uploadURL),
+              let user = comps.user, !user.isEmpty else {
+            return (uploadURL, "")
+        }
+        let config = CurlConfig.userLine(user: user, password: comps.password ?? "")
+        comps.user = nil
+        comps.password = nil
+        return (comps.string ?? uploadURL, config)
     }
 
     /// sftp takes `user@host` + a batch script via stdin. Parse `sftp://`

@@ -125,12 +125,12 @@ final class MunkiRepoStore {
                                   bucket: settings.munkiRepoBucket,
                                   prefix: settings.munkiRepoPrefix,
                                   key: key)
-        let args = Self.curlArgs(url: url, destination: destination, settings: settings)
+        let inv = Self.curlInvocation(url: url, destination: destination, settings: settings)
 
         // Hop off the main actor — Process.waitUntilExit() would otherwise
         // beachball the UI for the full duration of the download.
         let result = try await Task.detached(priority: .userInitiated) {
-            try Self.runCurl(args: args)
+            try Self.runCurl(args: inv.args, config: inv.config)
         }.value
 
         if result.status != 0 {
@@ -162,56 +162,83 @@ final class MunkiRepoStore {
     /// MainActor-isolated SettingsStore fields so it must stay on the
     /// main actor; the resulting `[String]` is Sendable and crosses
     /// the actor boundary into `Task.detached` cleanly.
-    private static func curlArgs(
+    /// Non-secret extra argv + the stdin config for the chosen auth mode.
+    /// Credentials (Basic password, S3 secret key, Authorization header) go in
+    /// the config so they never appear in the process arg list (`ps -ww`).
+    /// Pure/testable — takes plain values, not the store.
+    nonisolated static func curlAuth(
+        mode: String, basicUser: String, basicPassword: String,
+        accessKey: String, secretKey: String, region: String
+    ) -> (args: [String], config: String) {
+        var args: [String] = []
+        var config = ""
+        switch mode {
+        case "none":
+            break // plain HTTPS GET, no auth — public/firewalled web repos
+        case "basic":
+            config += CurlConfig.userLine(user: basicUser, password: basicPassword)
+        case "both":
+            // `--aws-sigv4` flips `--user` from Basic to S3 signing, so when we
+            // need BOTH, `--user` carries S3 and Basic goes in an Authorization
+            // header. The region string isn't secret; the creds/header are.
+            args += ["--aws-sigv4", "aws:amz:\(region):s3"]
+            config += CurlConfig.userLine(user: accessKey, password: secretKey)
+            config += CurlConfig.headerLine("Authorization: Basic "
+                + basicAuthB64(user: basicUser, password: basicPassword))
+        default: // "s3"
+            args += ["--aws-sigv4", "aws:amz:\(region):s3"]
+            config += CurlConfig.userLine(user: accessKey, password: secretKey)
+        }
+        return (args, config)
+    }
+
+    /// Build the full curl invocation: non-secret argv (with `--config -` when
+    /// there are secrets) + the stdin config carrying the credentials. Reads
+    /// MainActor-isolated SettingsStore fields, so it stays on the main actor;
+    /// the returned tuple is Sendable and crosses into `Task.detached` cleanly.
+    private static func curlInvocation(
         url: String, destination: URL, settings: SettingsStore
-    ) -> [String] {
+    ) -> (args: [String], config: String) {
         var args: [String] = [
             "--silent", "--show-error", "--fail-with-body", "--location",
             "--write-out", "%{http_code}",
             "--output", destination.path,
         ]
-        // Auth: SigV4, Basic, both, or none. curl supports stacking `--user`
-        // for both kinds: `--aws-sigv4` flips `--user` from Basic Auth to S3
-        // signing for this request, so when we need BOTH we have to send
-        // Basic Auth in a literal Authorization header AND keep `--user`
-        // for SigV4.
-        switch settings.munkiRepoAuthMode {
-        case "none":
-            break // plain HTTPS GET, no auth — public/firewalled web repos
-        case "basic":
-            args += ["--user", "\(settings.munkiRepoBasicUser):\(settings.munkiRepoBasicPassword)"]
-        case "both":
-            args += [
-                "--aws-sigv4", "aws:amz:\(settings.munkiRepoRegion):s3",
-                "--user", "\(settings.munkiRepoAccessKey):\(settings.munkiRepoSecretKey)",
-                "--header", "Authorization: Basic " + basicAuthB64(
-                    user: settings.munkiRepoBasicUser,
-                    password: settings.munkiRepoBasicPassword)
-            ]
-        default: // "s3"
-            args += [
-                "--aws-sigv4", "aws:amz:\(settings.munkiRepoRegion):s3",
-                "--user", "\(settings.munkiRepoAccessKey):\(settings.munkiRepoSecretKey)",
-            ]
-        }
+        let auth = curlAuth(mode: settings.munkiRepoAuthMode,
+                            basicUser: settings.munkiRepoBasicUser,
+                            basicPassword: settings.munkiRepoBasicPassword,
+                            accessKey: settings.munkiRepoAccessKey,
+                            secretKey: settings.munkiRepoSecretKey,
+                            region: settings.munkiRepoRegion)
+        args += auth.args
+        if !auth.config.isEmpty { args += ["--config", "-"] }
         args.append(url)
-        return args
+        return (args, auth.config)
     }
 
     /// Run curl and collect its termination status, --write-out body
     /// (HTTP code), and stderr. Throws Process spawn errors; HTTP-level
     /// errors come through as non-zero `status`.
     nonisolated private static func runCurl(
-        args: [String]
+        args: [String], config: String
     ) throws -> (status: Int32, statusCode: String, stderrMsg: String) {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
         proc.arguments = args
         let stderr = Pipe()
         let stdout = Pipe()
+        let stdin = Pipe()
         proc.standardError = stderr
         proc.standardOutput = stdout
+        proc.standardInput = stdin
         try proc.run()
+        // Feed the secret config (if any) via stdin for `--config -`, then
+        // close it so curl sees EOF. It's a few short lines, well under the
+        // pipe buffer, so a straight write + close won't deadlock.
+        if !config.isEmpty, let data = config.data(using: .utf8) {
+            stdin.fileHandleForWriting.write(data)
+        }
+        try? stdin.fileHandleForWriting.close()
         proc.waitUntilExit()
         let statusData = stdout.fileHandleForReading.readDataToEndOfFile()
         let statusCode = String(data: statusData, encoding: .utf8)?
@@ -224,7 +251,7 @@ final class MunkiRepoStore {
 
     /// "user:password" → base64, for stamping a literal Authorization
     /// header when --user is already claimed by --aws-sigv4.
-    private static func basicAuthB64(user: String, password: String) -> String {
+    nonisolated private static func basicAuthB64(user: String, password: String) -> String {
         let combo = "\(user):\(password)"
         return Data(combo.utf8).base64EncodedString()
     }
