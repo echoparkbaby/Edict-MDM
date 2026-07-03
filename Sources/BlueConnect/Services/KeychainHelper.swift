@@ -9,6 +9,13 @@ enum KeychainHelper {
     // BlueConnect Admin build, so existing users' stored secrets survive.
     static let service = Bundle.main.bundleIdentifier ?? "xyz.hellocomputer.BlueConnectAdmin"
 
+    /// Admin secrets are device-only: readable after the first unlock (so the
+    /// app works after a reboot without the screen being unlocked) but never
+    /// included in an encrypted backup and never restored onto a different Mac
+    /// via Migration Assistant. Prevents fleet-admin credentials from leaving
+    /// this machine.
+    private static let accessible: CFString = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+
     /// Update-in-place if the item exists, else add. Never deletes first
     /// (a failed re-add used to silently drop the old secret). Returns
     /// whether the write succeeded.
@@ -34,13 +41,47 @@ enum KeychainHelper {
         }
         var add = query
         add[kSecValueData as String] = data
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        add[kSecAttrAccessible as String] = accessible
         let addStatus = SecItemAdd(add as CFDictionary, nil)
         if addStatus != errSecSuccess {
             Log.error("Keychain", "Couldn't store “\(account)”: OSStatus \(addStatus). It won't persist to next launch.")
             return false
         }
         return true
+    }
+
+    /// One-time upgrade of every stored secret's accessibility to
+    /// `…ThisDeviceOnly` (see `accessible`). Older builds wrote secrets with
+    /// plain `AfterFirstUnlock`, which stayed eligible for encrypted-backup
+    /// migration to another Mac. Updates each item **in place** (never
+    /// deletes — a failed re-add would drop the secret), is idempotent, and
+    /// only marks itself done once every item upgrades, so a transiently
+    /// locked keychain retries on the next launch. Cheap to call every start.
+    static func migrateAccessibilityToThisDeviceOnlyIfNeeded() {
+        let flag = "keychainThisDeviceOnlyMigrated.v1"
+        guard !UserDefaults.standard.bool(forKey: flag) else { return }
+        let names = accounts(inService: service)
+        guard !names.isEmpty else {
+            UserDefaults.standard.set(true, forKey: flag)   // nothing to migrate
+            return
+        }
+        var allUpgraded = true
+        for account in names {
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: account,
+            ]
+            let status = SecItemUpdate(
+                query as CFDictionary,
+                [kSecAttrAccessible as String: accessible] as CFDictionary
+            )
+            if status != errSecSuccess {
+                allUpgraded = false
+                Log.warn("Keychain", "Couldn't set device-only accessibility on “\(account)”: OSStatus \(status)")
+            }
+        }
+        if allUpgraded { UserDefaults.standard.set(true, forKey: flag) }
     }
 
     static func read(account: String) -> String? {

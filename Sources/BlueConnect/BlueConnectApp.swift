@@ -78,6 +78,9 @@ struct BlueConnectAdminApp: App {
             .environment(mdmScheduler)
             .task {
                 Log.info("App", "BlueConnect Admin starting")
+                // Upgrade any pre-existing secrets to device-only accessibility
+                // (one-time; before we read them below).
+                KeychainHelper.migrateAccessibilityToThisDeviceOnlyIfNeeded()
                 auth.bootstrap(settings: settings)
                 idleLock.start(auth: auth, settings: settings)
                 settings.loadRepoPasswordsFromKeychain()
