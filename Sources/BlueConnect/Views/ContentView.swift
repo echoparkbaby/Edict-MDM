@@ -373,7 +373,7 @@ struct ContentView: View {
     /// same "what's about to change" confirmation as the Profiles tab.
     private func attemptProfileDeploy(_ data: Data, name: String, to ids: [String], label: String) async {
         guard !ids.isEmpty else { return }
-        if let newID = DeploymentLog.payloadIdentifier(data) {
+        if let newID = await DeploymentLog.payloadIdentifier(data) {
             let log = DeploymentLog.load()
             var newest: DeploymentLog.Entry?
             for id in ids {
@@ -405,8 +405,8 @@ struct ContentView: View {
                 }
             }
             if !delivered.isEmpty {
-                DeploymentLog.record(profileData: data, name: name, to: delivered,
-                                     nowEpoch: Date().timeIntervalSince1970)
+                await DeploymentLog.record(profileData: data, name: name, to: delivered,
+                                           nowEpoch: Date().timeIntervalSince1970)
             }
             let failed = ids.count - delivered.count
             activity.record(.category, title: "Deployed \(name)",

@@ -527,8 +527,8 @@ struct MDMHostDetail: View {
         await act("Deployed \(p.name)") {
             let data = try await nano.installProfile(enrollmentID: entry.enrollmentID, profile: p.data)
             _ = try? await nano.push(enrollmentIDs: entry.enrollmentID)
-            DeploymentLog.record(profileData: p.data, name: p.name, to: [entry.enrollmentID],
-                                 nowEpoch: Date().timeIntervalSince1970)
+            await DeploymentLog.record(profileData: p.data, name: p.name, to: [entry.enrollmentID],
+                                       nowEpoch: Date().timeIntervalSince1970)
             deployed = DeploymentLog.entries(for: entry.enrollmentID)
             return data
         }

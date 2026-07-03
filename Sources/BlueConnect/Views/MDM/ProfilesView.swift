@@ -505,7 +505,7 @@ struct ProfilesView: View {
     /// ones, so the operator sees exactly what this push will change.
     @MainActor
     private func attemptDeploy(data: Data, name: String) async {
-        guard let newID = DeploymentLog.payloadIdentifier(data) else {
+        guard let newID = await DeploymentLog.payloadIdentifier(data) else {
             await deploy(data: data, name: name); return
         }
         let log = DeploymentLog.load()
@@ -608,8 +608,8 @@ struct ProfilesView: View {
             } catch { failed += 1 }
         }
         // Track for drift detection in the device detail.
-        DeploymentLog.record(profileData: data, name: name, to: deployedTo,
-                             nowEpoch: Date().timeIntervalSince1970)
+        await DeploymentLog.record(profileData: data, name: name, to: deployedTo,
+                                   nowEpoch: Date().timeIntervalSince1970)
         result = failed == 0
             ? "Deployed \(name) to \(ok) device\(ok == 1 ? "" : "s")"
             : "Deployed to \(ok), failed \(failed)"

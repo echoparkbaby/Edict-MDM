@@ -35,8 +35,8 @@ enum DeploymentLog {
 
     /// Record a deploy of `profileData` to `deviceIDs`, keyed by the
     /// profile's PayloadIdentifier (so re-deploys replace the entry).
-    static func record(profileData: Data, name: String, to deviceIDs: [String], nowEpoch: Double) {
-        guard let id = payloadIdentifier(profileData) else { return }
+    static func record(profileData: Data, name: String, to deviceIDs: [String], nowEpoch: Double) async {
+        guard let id = await payloadIdentifier(profileData) else { return }
         var map = load()
         for d in deviceIDs {
             var list = map[d] ?? []
@@ -58,21 +58,27 @@ enum DeploymentLog {
         save(map)
     }
 
-    /// Top-level PayloadIdentifier of a profile (signed or plain).
-    static func payloadIdentifier(_ data: Data) -> String? {
+    /// Top-level PayloadIdentifier of a profile (signed or plain). Signed
+    /// profiles are stripped via `security cms -D` on a detached task so the
+    /// subprocess never blocks the main actor (this runs on the deploy and
+    /// fleet-refresh paths).
+    static func payloadIdentifier(_ data: Data) async -> String? {
         let plistData: Data
         if data.first == 0x30 {
-            // signed — strip via security cms -D
-            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("edict-\(UUID().uuidString).mobileconfig")
-            defer { try? FileManager.default.removeItem(at: tmp) }
-            guard (try? data.write(to: tmp)) != nil else { return nil }
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-            p.arguments = ["cms", "-D", "-i", tmp.path]
-            let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
-            do { try p.run() } catch { return nil }
-            p.waitUntilExit()
-            plistData = out.fileHandleForReading.readDataToEndOfFile()
+            let decoded = await Task.detached(priority: .userInitiated) { () -> Data in
+                let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("edict-\(UUID().uuidString).mobileconfig")
+                defer { try? FileManager.default.removeItem(at: tmp) }
+                guard (try? data.write(to: tmp)) != nil else { return Data() }
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+                p.arguments = ["cms", "-D", "-i", tmp.path]
+                let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
+                do { try p.run() } catch { return Data() }
+                p.waitUntilExit()
+                return out.fileHandleForReading.readDataToEndOfFile()
+            }.value
+            if decoded.isEmpty { return nil }
+            plistData = decoded
         } else {
             plistData = data
         }

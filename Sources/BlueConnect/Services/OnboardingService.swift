@@ -44,8 +44,8 @@ struct OnboardingService {
             do {
                 _ = try await nano.installProfile(enrollmentID: enrollmentID, profile: sp.data)
                 _ = try? await nano.push(enrollmentIDs: enrollmentID)
-                DeploymentLog.record(profileData: sp.data, name: sp.name, to: [enrollmentID],
-                                     nowEpoch: Date().timeIntervalSince1970)
+                await DeploymentLog.record(profileData: sp.data, name: sp.name, to: [enrollmentID],
+                                           nowEpoch: Date().timeIntervalSince1970)
                 profiles += 1
             } catch { failures += 1 }
         }
@@ -90,9 +90,14 @@ struct OnboardingService {
         let saved = SavedProfilesStore.load()
         let deployed = DeploymentLog.load()
         var payloadCache: [UUID: String?] = [:]
-        func payloadID(_ pid: UUID) -> String? {
+        func payloadID(_ pid: UUID) async -> String? {
             if let c = payloadCache[pid] { return c }
-            let v = saved.first { $0.id == pid }.flatMap { DeploymentLog.payloadIdentifier($0.data) }
+            let v: String?
+            if let sp = saved.first(where: { $0.id == pid }) {
+                v = await DeploymentLog.payloadIdentifier(sp.data)
+            } else {
+                v = nil
+            }
             payloadCache[pid] = v
             return v
         }
@@ -114,13 +119,14 @@ struct OnboardingService {
             }
             let already = Set((deployed[id] ?? []).map(\.identifier))
             for pid in bl.profiles {
-                guard let payload = payloadID(pid), !already.contains(payload),
+                let payload = await payloadID(pid)
+                guard let payload, !already.contains(payload),
                       let sp = saved.first(where: { $0.id == pid }) else { continue }
                 do {
                     _ = try await nano.installProfile(enrollmentID: id, profile: sp.data)
                     _ = try? await nano.push(enrollmentIDs: id)
-                    DeploymentLog.record(profileData: sp.data, name: sp.name, to: [id],
-                                         nowEpoch: Date().timeIntervalSince1970)
+                    await DeploymentLog.record(profileData: sp.data, name: sp.name, to: [id],
+                                               nowEpoch: Date().timeIntervalSince1970)
                     did = true
                 } catch {}
             }
