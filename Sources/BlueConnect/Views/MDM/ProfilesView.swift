@@ -192,7 +192,7 @@ struct ProfilesView: View {
             .listStyle(.sidebar)
             Divider()
             HStack {
-                Button { importProfiles() } label: { Label("Import…", systemImage: "square.and.arrow.down") }
+                Button { Task { await importProfiles() } } label: { Label("Import…", systemImage: "square.and.arrow.down") }
                     .buttonStyle(.borderless).font(.caption)
                     .help("Import .mobileconfig files (signed or plain) as saved profiles")
                 Spacer()
@@ -307,7 +307,7 @@ struct ProfilesView: View {
             HStack {
                 Spacer()
                 Button("Cancel") { showingSaveSheet = false }.keyboardShortcut(.cancelAction)
-                Button("Save") { saveCurrent() }
+                Button("Save") { Task { await saveCurrent() } }
                     .keyboardShortcut(.defaultAction)
                     .disabled(saveName.trimmingCharacters(in: .whitespaces).isEmpty)
             }
@@ -517,7 +517,7 @@ struct ProfilesView: View {
             if newest == nil || prior.epoch > newest!.epoch { newest = prior }
         }
         if let newest, !newest.dataBase64.isEmpty {
-            let changes = ProfileDiff.compare(old: newest.data, new: data)
+            let changes = await ProfileDiff.compare(old: newest.data, new: data)
             if !changes.isEmpty {
                 pendingDeploy = PendingDeploy(data: data, name: name, changes: changes, deviceCount: affected)
                 return
@@ -619,11 +619,11 @@ struct ProfilesView: View {
 
     // MARK: - Saved profiles
 
-    private func saveCurrent() {
+    private func saveCurrent() async {
         showingSaveSheet = false
         let built: (data: Data, name: String)
         do { built = try form.build(for: template) } catch { result = "Couldn't build: \(error.localizedDescription)"; return }
-        let desc = SavedProfilesStore.describe(built.data, fallbackName: saveName)
+        let desc = await SavedProfilesStore.describe(built.data, fallbackName: saveName)
         let sp = SavedProfile(name: saveName.trimmingCharacters(in: .whitespaces),
                               data: built.data, favorite: saveFavorite, summary: desc.summary)
         saved.append(sp)
@@ -644,7 +644,7 @@ struct ProfilesView: View {
         selected = .template(.fileVault)
     }
 
-    private func importProfiles() {
+    private func importProfiles() async {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
@@ -663,7 +663,7 @@ struct ProfilesView: View {
         var added = 0
         for url in urls {
             guard let data = try? Data(contentsOf: url) else { continue }
-            let desc = SavedProfilesStore.describe(data, fallbackName: url.deletingPathExtension().lastPathComponent)
+            let desc = await SavedProfilesStore.describe(data, fallbackName: url.deletingPathExtension().lastPathComponent)
             saved.append(SavedProfile(name: desc.name, data: data, favorite: true, summary: desc.summary))
             added += 1
         }

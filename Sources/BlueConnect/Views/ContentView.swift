@@ -323,14 +323,14 @@ struct ContentView: View {
 
     private func bulkMDMDeploy(_ p: SavedProfile, to hosts: [BlueSkyHost]) {
         let ids = enrollmentIDs(hosts).map(\.id)
-        attemptProfileDeploy(p.data, name: p.name, to: ids,
-                             label: "\(ids.count) Mac\(ids.count == 1 ? "" : "s")")
+        Task { await attemptProfileDeploy(p.data, name: p.name, to: ids,
+                                          label: "\(ids.count) Mac\(ids.count == 1 ? "" : "s")") }
     }
 
     /// Deploy a saved configuration profile to the Mac via MDM, from the
     /// gavel row button.
     private func deployProfileFromRow(_ p: SavedProfile, to h: BlueSkyHost, enrollmentID: String) {
-        attemptProfileDeploy(p.data, name: p.name, to: [enrollmentID], label: h.displayName)
+        Task { await attemptProfileDeploy(p.data, name: p.name, to: [enrollmentID], label: h.displayName) }
     }
 
     /// An enrolled Mac that should have the onboarding baseline but hasn't
@@ -371,7 +371,7 @@ struct ContentView: View {
     /// the deployment log), show the diff first; otherwise deploy straight
     /// away. Shared by the gavel row button and bulk deploy so they get the
     /// same "what's about to change" confirmation as the Profiles tab.
-    private func attemptProfileDeploy(_ data: Data, name: String, to ids: [String], label: String) {
+    private func attemptProfileDeploy(_ data: Data, name: String, to ids: [String], label: String) async {
         guard !ids.isEmpty else { return }
         if let newID = DeploymentLog.payloadIdentifier(data) {
             let log = DeploymentLog.load()
@@ -382,7 +382,7 @@ struct ContentView: View {
                 }
             }
             if let newest, !newest.dataBase64.isEmpty {
-                let changes = ProfileDiff.compare(old: newest.data, new: data)
+                let changes = await ProfileDiff.compare(old: newest.data, new: data)
                 if !changes.isEmpty {
                     pendingProfileDeploy = PendingProfileDeploy(data: data, name: name,
                                                                enrollmentIDs: ids, label: label, changes: changes)

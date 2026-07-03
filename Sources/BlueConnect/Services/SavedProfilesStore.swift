@@ -29,17 +29,22 @@ enum SavedProfilesStore {
 
     /// Read a profile's display name + payload-type summary, handling both
     /// plain-XML and CMS-signed profiles (the latter via `security cms -D`).
-    static func describe(_ data: Data, fallbackName: String) -> (name: String, summary: String) {
-        let plistData = data.first == 0x30 ? (decodeSigned(data) ?? data) : data
-        guard let obj = try? PropertyListSerialization.propertyList(from: plistData, format: nil) as? [String: Any]
-        else { return (fallbackName, data.first == 0x30 ? "signed" : "") }
-        let name = (obj["PayloadDisplayName"] as? String) ?? fallbackName
-        var types: [String] = []
-        if let content = obj["PayloadContent"] as? [[String: Any]] {
-            types = content.compactMap { friendlyType($0["PayloadType"] as? String) }
-        }
-        let summary = Array(NSOrderedSet(array: types)).compactMap { $0 as? String }.prefix(4).joined(separator: ", ")
-        return (name, summary)
+    static func describe(_ data: Data, fallbackName: String) async -> (name: String, summary: String) {
+        await Task.detached(priority: .userInitiated) {
+            // Signed profiles decode via `security cms -D` (a subprocess) —
+            // keep it off the main actor so importing signed .mobileconfigs
+            // doesn't stall the UI once per file.
+            let plistData = data.first == 0x30 ? (decodeSigned(data) ?? data) : data
+            guard let obj = try? PropertyListSerialization.propertyList(from: plistData, format: nil) as? [String: Any]
+            else { return (fallbackName, data.first == 0x30 ? "signed" : "") }
+            let name = (obj["PayloadDisplayName"] as? String) ?? fallbackName
+            var types: [String] = []
+            if let content = obj["PayloadContent"] as? [[String: Any]] {
+                types = content.compactMap { friendlyType($0["PayloadType"] as? String) }
+            }
+            let summary = Array(NSOrderedSet(array: types)).compactMap { $0 as? String }.prefix(4).joined(separator: ", ")
+            return (name, summary)
+        }.value
     }
 
     /// Strip a CMS signature to recover the inner plist via /usr/bin/security.

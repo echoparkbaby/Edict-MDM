@@ -36,24 +36,28 @@ enum ProfileDiff {
         return (try? PropertyListSerialization.propertyList(from: plistData, format: nil)) as? [String: Any]
     }
 
-    /// The diff between an already-deployed profile and a new one.
-    static func compare(old: Data, new: Data) -> [Change] {
-        let o = flatten(decode(old))
-        let n = flatten(decode(new))
-        var changes: [Change] = []
-        for key in Set(o.keys).union(n.keys).sorted() {
-            switch (o[key], n[key]) {
-            case let (a?, b?) where a != b:
-                changes.append(Change(kind: .changed, path: key, before: a, after: b))
-            case let (a?, nil):
-                changes.append(Change(kind: .removed, path: key, before: a, after: nil))
-            case let (nil, b?):
-                changes.append(Change(kind: .added, path: key, before: nil, after: b))
-            default:
-                break
+    /// The diff between an already-deployed profile and a new one. Runs off
+    /// the main actor — `decode` shells out to `security cms -D` for signed
+    /// profiles, and this is called from MainActor deploy paths.
+    static func compare(old: Data, new: Data) async -> [Change] {
+        await Task.detached(priority: .userInitiated) {
+            let o = flatten(decode(old))
+            let n = flatten(decode(new))
+            var changes: [Change] = []
+            for key in Set(o.keys).union(n.keys).sorted() {
+                switch (o[key], n[key]) {
+                case let (a?, b?) where a != b:
+                    changes.append(Change(kind: .changed, path: key, before: a, after: b))
+                case let (a?, nil):
+                    changes.append(Change(kind: .removed, path: key, before: a, after: nil))
+                case let (nil, b?):
+                    changes.append(Change(kind: .added, path: key, before: nil, after: b))
+                default:
+                    break
+                }
             }
-        }
-        return changes
+            return changes
+        }.value
     }
 
     // Per-payload keys that change every build — never meaningful policy.
