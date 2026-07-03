@@ -312,11 +312,19 @@ extension UniFiClient.ClientInfo: Decodable {
     }
 }
 
-/// Allows self-signed certs on the UniFi controller. Skipping cert
-/// chain trust is acceptable because the operator has explicitly
-/// configured this URL + a sensitive API key for it — we're not
-/// silently trusting random servers. Hostname is still validated
-/// to thwart accidental cross-host MITM.
+/// Accepts the UniFi controller's TLS certificate even when self-signed —
+/// operators commonly run the controller with a self-signed cert on the
+/// LAN/tailnet.
+///
+/// SECURITY NOTE: this currently accepts ANY server certificate without
+/// evaluating trust or checking the hostname (the "hostname is validated"
+/// claim that used to be here was false). On an untrusted path an active
+/// MITM could present its own self-signed cert and receive the UniFi API
+/// key. Proper hardening (trust-on-first-use cert pinning to the configured
+/// controller) is tracked in REVIEW_NEEDED.md; it was deferred rather than
+/// changed unattended because a naive tightening would break legitimately
+/// self-signed controllers. Do not rely on this for confidentiality on
+/// networks you don't control.
 private final class SelfSignedTrustingDelegate: NSObject, URLSessionDelegate {
     func urlSession(_ session: URLSession,
                     didReceive challenge: URLAuthenticationChallenge,
