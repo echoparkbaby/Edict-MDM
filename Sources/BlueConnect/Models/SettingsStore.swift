@@ -500,6 +500,14 @@ final class SettingsStore: ObservableObject {
         KeychainHelper.save(unifiAPIKey, account: Self.unifiAPIKeyAccount)
     }
 
+    /// Forget the trust-on-first-use TLS pins for every UniFi controller.
+    /// Use after legitimately reinstalling/upgrading a controller so its new
+    /// self-signed cert re-pins on the next connection. Non-secret data, so
+    /// it lives in UserDefaults (see `UniFiCertPinStore`), not the keychain.
+    func clearUnifiCertPins() {
+        UniFiCertPinStore.clearAll()
+    }
+
     // MARK: - Edict MDM (NanoMDM + KMFDDM admin APIs)
 
     /// Master toggle. Gates the Device Management features so a v1.5-style

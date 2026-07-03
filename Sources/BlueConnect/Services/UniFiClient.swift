@@ -10,11 +10,12 @@ import Foundation
 /// active clients per site (so each scanned IP gets a hostname,
 /// MAC, link speed, and wired/wireless flag).
 ///
-/// Trusts self-signed certs via a custom URLSessionDelegate — most
-/// home UniFis use the default-installed self-signed cert and
-/// strict TLS would block every request. The cert is still
-/// verified for hostname + chain via the system trust evaluation;
-/// only the "trusted root" check is relaxed.
+/// Self-signed controller certs (the common home case) are handled by
+/// trust-on-first-use pinning: the leaf cert seen on the first connection to
+/// a host is remembered, and later connections must present the same cert or
+/// the request is rejected as a possible machine-in-the-middle. Certs that
+/// chain to a system-trusted root validate normally. See `PinningTrustDelegate`
+/// / `UniFiCertPinStore`.
 struct UniFiClient {
     let baseURL: String
     let apiKey: String
@@ -75,6 +76,7 @@ struct UniFiClient {
         case http(Int, String)
         case decode(Error)
         case network(Error)
+        case certMismatch(String)
         var errorDescription: String? {
             switch self {
             case .badBaseURL:        return "Bad UniFi base URL"
@@ -82,6 +84,12 @@ struct UniFiClient {
                 return "UniFi HTTP \(code): \(body.prefix(160))"
             case .decode(let e):     return "UniFi decode: \(e.localizedDescription)"
             case .network(let e):    return "UniFi network: \(e.localizedDescription)"
+            case .certMismatch(let host):
+                return "The UniFi controller at \(host) presented a different TLS "
+                    + "certificate than the one first trusted. If you reinstalled or "
+                    + "upgraded the controller, choose “Forget pinned certificate” in "
+                    + "UniFi settings and reconnect — otherwise this may be a "
+                    + "machine-in-the-middle, and the connection was blocked."
             }
         }
     }
@@ -157,15 +165,19 @@ struct UniFiClient {
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.timeoutInterval = 5
 
+        let pinDelegate = PinningTrustDelegate()
         let session = URLSession(
             configuration: .ephemeral,
-            delegate: SelfSignedTrustingDelegate(),
+            delegate: pinDelegate,
             delegateQueue: nil
         )
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try await session.data(for: req)
         } catch {
+            if pinDelegate.sawCertMismatch {
+                throw UniFiError.certMismatch(components.host ?? baseURL)
+            }
             throw UniFiError.network(error)
         }
         guard let http = response as? HTTPURLResponse else {
@@ -312,20 +324,23 @@ extension UniFiClient.ClientInfo: Decodable {
     }
 }
 
-/// Accepts the UniFi controller's TLS certificate even when self-signed —
-/// operators commonly run the controller with a self-signed cert on the
-/// LAN/tailnet.
-///
-/// SECURITY NOTE: this currently accepts ANY server certificate without
-/// evaluating trust or checking the hostname (the "hostname is validated"
-/// claim that used to be here was false). On an untrusted path an active
-/// MITM could present its own self-signed cert and receive the UniFi API
-/// key. Proper hardening (trust-on-first-use cert pinning to the configured
-/// controller) is tracked in REVIEW_NEEDED.md; it was deferred rather than
-/// changed unattended because a naive tightening would break legitimately
-/// self-signed controllers. Do not rely on this for confidentiality on
-/// networks you don't control.
-private final class SelfSignedTrustingDelegate: NSObject, URLSessionDelegate {
+/// TLS trust for the UniFi controller. Certs that already chain to a
+/// system-trusted root are validated normally (so a real CA cert keeps
+/// working across rotation). Self-signed certs — the common home-controller
+/// case — are trust-on-first-use pinned: the leaf fingerprint is recorded on
+/// the first connection to a host and every later connection must match it.
+/// A mismatch (a swapped cert or a machine-in-the-middle) is rejected, and
+/// `get()` surfaces `UniFiError.certMismatch`. This replaces the old
+/// "accept any cert" delegate, which let a MITM harvest the API key. See
+/// `UniFiCertPinStore`; clear pins via UniFi settings after a legitimate
+/// cert change.
+private final class PinningTrustDelegate: NSObject, URLSessionDelegate {
+    private let lock = NSLock()
+    private var _sawMismatch = false
+    /// True if a request was rejected because the presented cert didn't match
+    /// the pinned one — read after the request to raise a clear error.
+    var sawCertMismatch: Bool { lock.lock(); defer { lock.unlock() }; return _sawMismatch }
+
     func urlSession(_ session: URLSession,
                     didReceive challenge: URLAuthenticationChallenge,
                     completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
@@ -335,7 +350,31 @@ private final class SelfSignedTrustingDelegate: NSObject, URLSessionDelegate {
             completionHandler(.performDefaultHandling, nil)
             return
         }
-        let cred = URLCredential(trust: trust)
-        completionHandler(.useCredential, cred)
+        // A cert that passes system trust (real CA) uses normal validation —
+        // don't pin it, so legitimate CA rotation keeps working.
+        if SecTrustEvaluateWithError(trust, nil) {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+        // Self-signed / untrusted: trust-on-first-use pin to the leaf cert.
+        guard let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
+              let leaf = chain.first
+        else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        let fingerprint = UniFiCertPinStore.sha256Hex(SecCertificateCopyData(leaf) as Data)
+        let host = challenge.protectionSpace.host
+        if let pinned = UniFiCertPinStore.pin(forHost: host) {
+            if pinned == fingerprint {
+                completionHandler(.useCredential, URLCredential(trust: trust))
+            } else {
+                lock.lock(); _sawMismatch = true; lock.unlock()
+                completionHandler(.cancelAuthenticationChallenge, nil)
+            }
+        } else {
+            UniFiCertPinStore.setPin(fingerprint, forHost: host)
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        }
     }
 }

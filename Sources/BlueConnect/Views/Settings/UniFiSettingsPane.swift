@@ -195,6 +195,18 @@ struct UniFiSettingsPane: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+
+            // Escape hatch for TLS pinning: the app remembers the controller's
+            // self-signed cert on first connect and blocks a changed one. If
+            // the controller was legitimately reinstalled/upgraded, forget the
+            // pin so the new cert is trusted on the next connection.
+            Button("Forget pinned certificate") {
+                settings.clearUnifiCertPins()
+                testResult = nil
+            }
+            .buttonStyle(.link)
+            .font(.caption)
+            .help("Use only after you reinstalled or upgraded the controller and it now presents a new TLS certificate. The next connection re-pins it. If you didn't change anything, a certificate change could be a machine-in-the-middle.")
         }
     }
 
