@@ -812,27 +812,7 @@ struct GroupDashboardView: View {
     /// cell starts with a number ("12 of 30", "45.2 GB"), else case-insensitive
     /// text. nil sort column leaves the rows in their incoming order.
     private func sortedRows(_ rows: [(id: String, cells: [String])]) -> [(id: String, cells: [String])] {
-        guard let col = invSortCol else { return rows }
-        func cell(_ r: (id: String, cells: [String])) -> String { col < r.cells.count ? r.cells[col] : "" }
-        func leadingNumber(_ s: String) -> Double? {
-            var n = ""
-            for ch in s.trimmingCharacters(in: .whitespaces) {
-                if ch.isNumber || ch == "." { n.append(ch) }
-                else if n.isEmpty && ch == "-" { n.append(ch) }
-                else { break }
-            }
-            return n.isEmpty ? nil : Double(n)
-        }
-        return rows.sorted { a, b in
-            let ka = cell(a), kb = cell(b)
-            let asc: Bool
-            if let na = leadingNumber(ka), let nb = leadingNumber(kb), na != nb {
-                asc = na < nb
-            } else {
-                asc = ka.localizedCaseInsensitiveCompare(kb) == .orderedAscending
-            }
-            return invSortAsc ? asc : !asc
-        }
+        InventoryRowSort.sorted(rows, column: invSortCol, ascending: invSortAsc)
     }
 
     /// A sortable, drag-to-resize header cell for the inventory tables.
