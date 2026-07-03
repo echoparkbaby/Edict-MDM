@@ -148,9 +148,9 @@ struct MDMSettingsPane: View {
                 profileIdentifier: settings.mdmEnrollmentProfileID
             ))
             var signedNote = "unsigned"
-            if let identity = EnrollmentProfileExporter.developerIDIdentity() {
+            if let identity = await EnrollmentProfileExporter.developerIDIdentity() {
                 do {
-                    data = try EnrollmentProfileExporter.sign(data, identity: identity)
+                    data = try await EnrollmentProfileExporter.sign(data, identity: identity)
                     signedNote = "signed (\(identity))"
                 } catch {
                     signedNote = "unsigned — signing failed: \(error.localizedDescription)"

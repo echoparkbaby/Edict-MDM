@@ -48,7 +48,7 @@ struct EnrollmentView: View {
         .frame(maxWidth: .infinity)
         .task {
             challengeBuffer = settings.scepChallenge
-            signingIdentity = EnrollmentProfileExporter.developerIDIdentity()
+            signingIdentity = await EnrollmentProfileExporter.developerIDIdentity()
             savedProfiles = SavedProfilesStore.load()
             await loadTopic()
         }
@@ -249,7 +249,7 @@ struct EnrollmentView: View {
             ))
             var note = "unsigned"
             if signProfile, let id = signingIdentity {
-                data = try EnrollmentProfileExporter.sign(data, identity: id)
+                data = try await EnrollmentProfileExporter.sign(data, identity: id)
                 note = "signed"
             }
             let panel = NSSavePanel()

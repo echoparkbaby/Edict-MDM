@@ -152,48 +152,57 @@ enum EnrollmentProfileExporter {
 
     /// First "Developer ID Application" identity in the login keychain,
     /// if any — used to sign the profile so it installs as Verified.
-    static func developerIDIdentity() -> String? {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        p.arguments = ["find-identity", "-v", "-p", "codesigning"]
-        let pipe = Pipe()
-        p.standardOutput = pipe
-        p.standardError = Pipe()
-        do { try p.run() } catch { return nil }
-        p.waitUntilExit()
-        let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        // Lines look like:  1) ABC123 "Developer ID Application: Name (TEAMID)"
-        for line in out.split(separator: "\n") {
-            if line.contains("Developer ID Application"),
-               let open = line.firstIndex(of: "\""),
-               let close = line.lastIndex(of: "\""), open < close {
-                return String(line[line.index(after: open)..<close])
+    ///
+    /// Runs off the main actor: `security find-identity` spawns a
+    /// subprocess and `waitUntilExit()` would otherwise stall the UI (this
+    /// is called from the Enrollment view's `.task`, i.e. on every appear).
+    static func developerIDIdentity() async -> String? {
+        await Task.detached(priority: .userInitiated) {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+            p.arguments = ["find-identity", "-v", "-p", "codesigning"]
+            let pipe = Pipe()
+            p.standardOutput = pipe
+            p.standardError = Pipe()
+            do { try p.run() } catch { return nil }
+            p.waitUntilExit()
+            let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            // Lines look like:  1) ABC123 "Developer ID Application: Name (TEAMID)"
+            for line in out.split(separator: "\n") {
+                if line.contains("Developer ID Application"),
+                   let open = line.firstIndex(of: "\""),
+                   let close = line.lastIndex(of: "\""), open < close {
+                    return String(line[line.index(after: open)..<close])
+                }
             }
-        }
-        return nil
+            return nil
+        }.value
     }
 
     /// CMS-sign `profile` with `identity` via `/usr/bin/security cms -S`.
-    /// Returns the signed `.mobileconfig` bytes.
-    static func sign(_ profile: Data, identity: String) throws -> Data {
-        let tmp = FileManager.default.temporaryDirectory
-        let inURL = tmp.appendingPathComponent("edict-\(UUID().uuidString).mobileconfig")
-        let outURL = tmp.appendingPathComponent("edict-\(UUID().uuidString)-signed.mobileconfig")
-        defer { try? FileManager.default.removeItem(at: inURL)
-                try? FileManager.default.removeItem(at: outURL) }
-        try profile.write(to: inURL)
+    /// Returns the signed `.mobileconfig` bytes. Runs off the main actor —
+    /// the subprocess `waitUntilExit()` must not block the UI.
+    static func sign(_ profile: Data, identity: String) async throws -> Data {
+        try await Task.detached(priority: .userInitiated) {
+            let tmp = FileManager.default.temporaryDirectory
+            let inURL = tmp.appendingPathComponent("edict-\(UUID().uuidString).mobileconfig")
+            let outURL = tmp.appendingPathComponent("edict-\(UUID().uuidString)-signed.mobileconfig")
+            defer { try? FileManager.default.removeItem(at: inURL)
+                    try? FileManager.default.removeItem(at: outURL) }
+            try profile.write(to: inURL)
 
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        p.arguments = ["cms", "-S", "-N", identity, "-i", inURL.path, "-o", outURL.path]
-        let err = Pipe()
-        p.standardError = err
-        try p.run()
-        p.waitUntilExit()
-        guard p.terminationStatus == 0 else {
-            let msg = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "exit \(p.terminationStatus)"
-            throw ExportError.signing(msg.trimmingCharacters(in: .whitespacesAndNewlines))
-        }
-        return try Data(contentsOf: outURL)
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+            p.arguments = ["cms", "-S", "-N", identity, "-i", inURL.path, "-o", outURL.path]
+            let err = Pipe()
+            p.standardError = err
+            try p.run()
+            p.waitUntilExit()
+            guard p.terminationStatus == 0 else {
+                let msg = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "exit \(p.terminationStatus)"
+                throw ExportError.signing(msg.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+            return try Data(contentsOf: outURL)
+        }.value
     }
 }
