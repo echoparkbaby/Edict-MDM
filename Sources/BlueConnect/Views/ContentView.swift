@@ -1132,6 +1132,211 @@ struct ContentView: View {
     /// many sheets and onChange observers.
     // alertView(for:) + bulkMessage(hosts:base:) live in ContentView+Alerts.swift.
 
+    // Host-row right-click menu, extracted from the view body for readability.
+    @ViewBuilder
+    private func hostRowContextMenu(_ sel: Set<BlueSkyHost.ID>) -> some View {
+            let menuTargets: [BlueSkyHost] = {
+                let setForMenu = sel.isEmpty ? selection : sel
+                return filteredAndSorted.filter { setForMenu.contains($0.id) }
+            }()
+            if menuTargets.count == 1, let h = menuTargets.first {
+                // Order requested by user: Quick Actions → divider →
+                // SSH/VNC/SCP (open in Terminal.app) → divider → Open
+                // Chat → divider → Set Category → rest (Install,
+                // Software Inventory, Rename, Danger Zone).
+                Menu("Quick Actions") {
+                    let enabled = quickActionStore.allEnabled
+                    let recents = enabled.recents
+                    if !recents.isEmpty {
+                        Section("Recent") {
+                            ForEach(recents) { action in
+                                Button(action.label) {
+                                    quickActionTarget = QuickActionTarget(host: h, action: action)
+                                }
+                            }
+                        }
+                        Divider()
+                    }
+                    let favorites = enabled.favorites
+                    if !favorites.isEmpty {
+                        Section("Favorites") {
+                            ForEach(favorites) { action in
+                                Button(action.label) {
+                                    quickActionTarget = QuickActionTarget(host: h, action: action)
+                                }
+                            }
+                        }
+                        Divider()
+                    }
+                    ForEach(Array(enabled.grouped.enumerated()),
+                            id: \.offset) { entry in
+                        Menu(entry.element.0) {
+                            ForEach(entry.element.1) { action in
+                                Button(action.label) {
+                                    quickActionTarget = QuickActionTarget(host: h, action: action)
+                                }
+                            }
+                        }
+                    }
+                }
+                .disabled(!h.active)
+                Divider()
+                // Connection commands — flat top-level instead of an
+                // "Open in Terminal" submenu. They route through
+                // `openInTerminal(host:kind:)` which dispatches to
+                // macOS Terminal.app, not the in-app bottom-pane
+                // terminal drawer (the row icons already cover that).
+                // SCP intentionally omitted from the context menu —
+                // file uploads are driven by the row icon + drag-and-
+                // drop on the host row.
+                Button("SSH (Remote Shell)") { openInTerminal(host: h, kind: .ssh) }
+                    .disabled(!h.active)
+                Button("VNC (Screen Share)")  { openInTerminal(host: h, kind: .vnc) }
+                    .disabled(!h.active)
+                // Install — flat single button (no submenu). Opens the
+                // picker window with all three source tabs (Munki /
+                // Remote / Local), so all install paths are reachable
+                // without nesting menus in the context menu. Sits
+                // directly under the connection items because Install
+                // is the next-most-common destructive-ish action after
+                // SSH / VNC.
+                Button("Install…") {
+                    Task { @MainActor in openPackagePicker(for: [h]) }
+                }
+                .disabled(!h.active)
+                Divider()
+                // Single Chat button — defaults to "whoever's at the
+                // screen". "With specific user…" lives in the menu
+                // bar's Connect → Chat submenu instead, keeping the
+                // host context menu compact.
+                Button("Chat") {
+                    chatController.present(
+                        ChatService(host: h, settings: settings, targetUser: "", launcher: quickActionLauncher),
+                        openWindow: { openWindow(id: "blueconnect-chat") }
+                    )
+                }
+                .disabled(!h.active)
+                Divider()
+                Button("Rename…") { renameTarget = h }
+                Button("Set Username…") {
+                    setUsernameTargets = [h]
+                    showingSetUsernameSheet = true
+                }
+                Menu("Set Category") {
+                    if !categories.categories.isEmpty {
+                        ForEach(categories.categories, id: \.self) { cat in
+                            Button(cat) { assignCategoryDirect(cat, to: [h]) }
+                        }
+                        Divider()
+                    }
+                    Button("Clear Category") { assignCategoryDirect(nil, to: [h]) }
+                    Divider()
+                    Button("New Category…") {
+                        categoryTargets = [h]
+                        showingCategorySheet = true
+                    }
+                }
+                Divider()
+                // (Install moved up — see the flat "Install…" button
+                // just under SSH / VNC. Source picking (Munki /
+                // Remote / Local) happens inside the picker window
+                // now, not via a nested menu here.)
+                Menu("Danger Zone") {
+                    Button("Erase / Reinstall macOS…", role: .destructive) {
+                        eraseInstallTarget = h
+                    }
+                    .disabled(!h.active)
+                    Divider()
+                    Button("Send Delete Command (selfdestruct)") {
+                        alert = .singleAction(host: h, action: .selfdestruct)
+                    }
+                    Button("Delete from Database…", role: .destructive) {
+                        alert = .singleAction(host: h, action: .delete)
+                    }
+                    Button("Block Host Permanently…", role: .destructive) {
+                        alert = .singleAction(host: h, action: .block)
+                    }
+                    .disabled((h.serialnum ?? "").isEmpty)
+                }
+                // MDM features at the very bottom — only when this Mac is
+                // matched to an MDM enrollment (by serial). Navigation +
+                // safe one-shot actions; lock/erase/profile-push live in
+                // the inspector's MDM tab with their confirmation sheets.
+                if settings.mdmEnabled {
+                    if let e = mdmFleet.entry(forSerial: h.serialnum) {
+                        Divider()
+                        Menu("MDM") {
+                            Button("Open MDM Details") { openMDMDetails(h) }
+                            Divider()
+                            Button("Check In Now") { mdmCheckIn(h, enrollmentID: e.enrollmentID) }
+                            if e.os == nil || e.fileVault == nil {
+                                Button("Enable Reporting") { mdmEnableReporting(h, enrollmentID: e.enrollmentID) }
+                            }
+                        }
+                    } else if !(h.serialnum ?? "").isEmpty {
+                        // Not enrolled — offer to hand-deliver the enrollment
+                        // profile to the Mac's Desktop over the BSC tunnel.
+                        Divider()
+                        Button("Send MDM Enrollment Profile to Desktop…") { sendEnrollmentProfile(h) }
+                            .disabled(!h.active)
+                    }
+                }
+                // (Quick Actions + Open Chat moved to the top of the
+                // menu per user spec — see the block above the
+                // Connections section.)
+            } else if menuTargets.count > 1 {
+                Button("Set Username for \(menuTargets.count) Hosts…") {
+                    setUsernameTargets = menuTargets
+                    showingSetUsernameSheet = true
+                }
+                Menu("Set Category for \(menuTargets.count) Hosts") {
+                    if !categories.categories.isEmpty {
+                        ForEach(categories.categories, id: \.self) { cat in
+                            Button(cat) { assignCategoryDirect(cat, to: menuTargets) }
+                        }
+                        Divider()
+                    }
+                    Button("Clear Category") { assignCategoryDirect(nil, to: menuTargets) }
+                    Divider()
+                    Button("New Category…") {
+                        categoryTargets = menuTargets
+                        showingCategorySheet = true
+                    }
+                }
+                if let cat = packageCatalog.catalog, !cat.packages.isEmpty {
+                    Button("Install Package on \(menuTargets.count) Hosts…") {
+                        openPackagePicker(for: menuTargets)
+                    }
+                    .disabled(!menuTargets.contains(where: \.active))
+                }
+                Divider()
+                Button("Send Delete Command to \(menuTargets.count) Hosts") {
+                    alert = .bulkAction(hosts: menuTargets, action: .selfdestruct)
+                }
+                Button("Delete \(menuTargets.count) Hosts from Database…", role: .destructive) {
+                    alert = .bulkAction(hosts: menuTargets, action: .delete)
+                }
+                // Bulk MDM — operates on the enrolled subset of the selection.
+                let enrolled = menuTargets.filter { mdmFleet.entry(forSerial: $0.serialnum) != nil }
+                if settings.mdmEnabled, !enrolled.isEmpty {
+                    Divider()
+                    Menu("MDM (\(enrolled.count) enrolled)") {
+                        Button("Check In \(enrolled.count)") { bulkMDMCheckIn(enrolled) }
+                        Button("Enable Reporting on \(enrolled.count)") { bulkMDMEnableReporting(enrolled) }
+                        let saved = SavedProfilesStore.load()
+                        if !saved.isEmpty {
+                            Divider()
+                            Menu("Deploy profile to \(enrolled.count)") {
+                                ForEach(saved) { p in
+                                    Button(p.name) { bulkMDMDeploy(p, to: enrolled) }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+    }
+
     /// The MDM columns, grouped so they count as a single child of the
     /// Table's column builder (which caps at 10 top-level columns).
     @TableColumnBuilder<BlueSkyHost, KeyPathComparator<BlueSkyHost>>
@@ -1413,206 +1618,7 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contextMenu(forSelectionType: BlueSkyHost.ID.self) { sel in
-            let menuTargets: [BlueSkyHost] = {
-                let setForMenu = sel.isEmpty ? selection : sel
-                return filteredAndSorted.filter { setForMenu.contains($0.id) }
-            }()
-            if menuTargets.count == 1, let h = menuTargets.first {
-                // Order requested by user: Quick Actions → divider →
-                // SSH/VNC/SCP (open in Terminal.app) → divider → Open
-                // Chat → divider → Set Category → rest (Install,
-                // Software Inventory, Rename, Danger Zone).
-                Menu("Quick Actions") {
-                    let enabled = quickActionStore.allEnabled
-                    let recents = enabled.recents
-                    if !recents.isEmpty {
-                        Section("Recent") {
-                            ForEach(recents) { action in
-                                Button(action.label) {
-                                    quickActionTarget = QuickActionTarget(host: h, action: action)
-                                }
-                            }
-                        }
-                        Divider()
-                    }
-                    let favorites = enabled.favorites
-                    if !favorites.isEmpty {
-                        Section("Favorites") {
-                            ForEach(favorites) { action in
-                                Button(action.label) {
-                                    quickActionTarget = QuickActionTarget(host: h, action: action)
-                                }
-                            }
-                        }
-                        Divider()
-                    }
-                    ForEach(Array(enabled.grouped.enumerated()),
-                            id: \.offset) { entry in
-                        Menu(entry.element.0) {
-                            ForEach(entry.element.1) { action in
-                                Button(action.label) {
-                                    quickActionTarget = QuickActionTarget(host: h, action: action)
-                                }
-                            }
-                        }
-                    }
-                }
-                .disabled(!h.active)
-                Divider()
-                // Connection commands — flat top-level instead of an
-                // "Open in Terminal" submenu. They route through
-                // `openInTerminal(host:kind:)` which dispatches to
-                // macOS Terminal.app, not the in-app bottom-pane
-                // terminal drawer (the row icons already cover that).
-                // SCP intentionally omitted from the context menu —
-                // file uploads are driven by the row icon + drag-and-
-                // drop on the host row.
-                Button("SSH (Remote Shell)") { openInTerminal(host: h, kind: .ssh) }
-                    .disabled(!h.active)
-                Button("VNC (Screen Share)")  { openInTerminal(host: h, kind: .vnc) }
-                    .disabled(!h.active)
-                // Install — flat single button (no submenu). Opens the
-                // picker window with all three source tabs (Munki /
-                // Remote / Local), so all install paths are reachable
-                // without nesting menus in the context menu. Sits
-                // directly under the connection items because Install
-                // is the next-most-common destructive-ish action after
-                // SSH / VNC.
-                Button("Install…") {
-                    Task { @MainActor in openPackagePicker(for: [h]) }
-                }
-                .disabled(!h.active)
-                Divider()
-                // Single Chat button — defaults to "whoever's at the
-                // screen". "With specific user…" lives in the menu
-                // bar's Connect → Chat submenu instead, keeping the
-                // host context menu compact.
-                Button("Chat") {
-                    chatController.present(
-                        ChatService(host: h, settings: settings, targetUser: "", launcher: quickActionLauncher),
-                        openWindow: { openWindow(id: "blueconnect-chat") }
-                    )
-                }
-                .disabled(!h.active)
-                Divider()
-                Button("Rename…") { renameTarget = h }
-                Button("Set Username…") {
-                    setUsernameTargets = [h]
-                    showingSetUsernameSheet = true
-                }
-                Menu("Set Category") {
-                    if !categories.categories.isEmpty {
-                        ForEach(categories.categories, id: \.self) { cat in
-                            Button(cat) { assignCategoryDirect(cat, to: [h]) }
-                        }
-                        Divider()
-                    }
-                    Button("Clear Category") { assignCategoryDirect(nil, to: [h]) }
-                    Divider()
-                    Button("New Category…") {
-                        categoryTargets = [h]
-                        showingCategorySheet = true
-                    }
-                }
-                Divider()
-                // (Install moved up — see the flat "Install…" button
-                // just under SSH / VNC. Source picking (Munki /
-                // Remote / Local) happens inside the picker window
-                // now, not via a nested menu here.)
-                Menu("Danger Zone") {
-                    Button("Erase / Reinstall macOS…", role: .destructive) {
-                        eraseInstallTarget = h
-                    }
-                    .disabled(!h.active)
-                    Divider()
-                    Button("Send Delete Command (selfdestruct)") {
-                        alert = .singleAction(host: h, action: .selfdestruct)
-                    }
-                    Button("Delete from Database…", role: .destructive) {
-                        alert = .singleAction(host: h, action: .delete)
-                    }
-                    Button("Block Host Permanently…", role: .destructive) {
-                        alert = .singleAction(host: h, action: .block)
-                    }
-                    .disabled((h.serialnum ?? "").isEmpty)
-                }
-                // MDM features at the very bottom — only when this Mac is
-                // matched to an MDM enrollment (by serial). Navigation +
-                // safe one-shot actions; lock/erase/profile-push live in
-                // the inspector's MDM tab with their confirmation sheets.
-                if settings.mdmEnabled {
-                    if let e = mdmFleet.entry(forSerial: h.serialnum) {
-                        Divider()
-                        Menu("MDM") {
-                            Button("Open MDM Details") { openMDMDetails(h) }
-                            Divider()
-                            Button("Check In Now") { mdmCheckIn(h, enrollmentID: e.enrollmentID) }
-                            if e.os == nil || e.fileVault == nil {
-                                Button("Enable Reporting") { mdmEnableReporting(h, enrollmentID: e.enrollmentID) }
-                            }
-                        }
-                    } else if !(h.serialnum ?? "").isEmpty {
-                        // Not enrolled — offer to hand-deliver the enrollment
-                        // profile to the Mac's Desktop over the BSC tunnel.
-                        Divider()
-                        Button("Send MDM Enrollment Profile to Desktop…") { sendEnrollmentProfile(h) }
-                            .disabled(!h.active)
-                    }
-                }
-                // (Quick Actions + Open Chat moved to the top of the
-                // menu per user spec — see the block above the
-                // Connections section.)
-            } else if menuTargets.count > 1 {
-                Button("Set Username for \(menuTargets.count) Hosts…") {
-                    setUsernameTargets = menuTargets
-                    showingSetUsernameSheet = true
-                }
-                Menu("Set Category for \(menuTargets.count) Hosts") {
-                    if !categories.categories.isEmpty {
-                        ForEach(categories.categories, id: \.self) { cat in
-                            Button(cat) { assignCategoryDirect(cat, to: menuTargets) }
-                        }
-                        Divider()
-                    }
-                    Button("Clear Category") { assignCategoryDirect(nil, to: menuTargets) }
-                    Divider()
-                    Button("New Category…") {
-                        categoryTargets = menuTargets
-                        showingCategorySheet = true
-                    }
-                }
-                if let cat = packageCatalog.catalog, !cat.packages.isEmpty {
-                    Button("Install Package on \(menuTargets.count) Hosts…") {
-                        openPackagePicker(for: menuTargets)
-                    }
-                    .disabled(!menuTargets.contains(where: \.active))
-                }
-                Divider()
-                Button("Send Delete Command to \(menuTargets.count) Hosts") {
-                    alert = .bulkAction(hosts: menuTargets, action: .selfdestruct)
-                }
-                Button("Delete \(menuTargets.count) Hosts from Database…", role: .destructive) {
-                    alert = .bulkAction(hosts: menuTargets, action: .delete)
-                }
-                // Bulk MDM — operates on the enrolled subset of the selection.
-                let enrolled = menuTargets.filter { mdmFleet.entry(forSerial: $0.serialnum) != nil }
-                if settings.mdmEnabled, !enrolled.isEmpty {
-                    Divider()
-                    Menu("MDM (\(enrolled.count) enrolled)") {
-                        Button("Check In \(enrolled.count)") { bulkMDMCheckIn(enrolled) }
-                        Button("Enable Reporting on \(enrolled.count)") { bulkMDMEnableReporting(enrolled) }
-                        let saved = SavedProfilesStore.load()
-                        if !saved.isEmpty {
-                            Divider()
-                            Menu("Deploy profile to \(enrolled.count)") {
-                                ForEach(saved) { p in
-                                    Button(p.name) { bulkMDMDeploy(p, to: enrolled) }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            hostRowContextMenu(sel)
         }
         .focusable()
         .onKeyPress(keys: [.delete], phases: .down) { press in
