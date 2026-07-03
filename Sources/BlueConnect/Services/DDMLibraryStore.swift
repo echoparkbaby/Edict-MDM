@@ -171,7 +171,11 @@ final class DDMLibraryStore {
             try fm.createDirectory(at: setsDir, withIntermediateDirectories: true)
             for (set, members) in setMembers {
                 let body = members.sorted().joined(separator: "\n") + "\n"
-                try Data(body.utf8).write(to: setsDir.appendingPathComponent("set.\(set).txt"))
+                // Neutralize path separators in the (user-named) set — an
+                // unsanitized "/" or "../" would let appendingPathComponent
+                // write the membership file outside the chosen export folder.
+                let safeSet = set.replacingOccurrences(of: "/", with: "_")
+                try Data(body.utf8).write(to: setsDir.appendingPathComponent("set.\(safeSet).txt"))
             }
         }
     }
@@ -190,6 +194,6 @@ final class DDMLibraryStore {
     }
     private func persist() {
         try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if let d = try? JSONEncoder().encode(items) { try? d.write(to: fileURL) }
+        if let d = try? JSONEncoder().encode(items) { try? d.write(to: fileURL, options: .atomic) }
     }
 }

@@ -81,6 +81,28 @@ struct DDMLibraryStoreTests {
         #expect(DDMSetsMatrix.make(from: store.items).unactivatedCount == 0)
     }
 
+    /// A set named with a path separator must not create nested folders on
+    /// export — the "/" is neutralized so the membership file stays inside
+    /// the chosen sets/ directory (path-traversal guard).
+    @Test func exportSanitizesSetNamesWithSlashes() throws {
+        let url = tempURL(); defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let store = DDMLibraryStore(fileURL: url)
+        store.add(decl("com.apple.configuration.foo", "com.x.a"), sets: ["a/b"])
+
+        let exportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ddmexport-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: exportDir) }
+        try store.export(to: exportDir)
+
+        let setsDir = exportDir.appendingPathComponent("sets", isDirectory: true)
+        // The sanitized flat file exists…
+        #expect(FileManager.default.fileExists(atPath: setsDir.appendingPathComponent("set.a_b.txt").path))
+        // …and no "set.a" subdirectory was carved out by an unescaped slash.
+        var isDir: ObjCBool = false
+        let carved = FileManager.default.fileExists(atPath: setsDir.appendingPathComponent("set.a").path, isDirectory: &isDir)
+        #expect(!(carved && isDir.boolValue))
+    }
+
     @Test func persistenceRoundTrips() {
         let url = tempURL(); defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         DDMLibraryStore(fileURL: url).add(decl("com.apple.configuration.foo", "com.x.a"), sets: ["default"])

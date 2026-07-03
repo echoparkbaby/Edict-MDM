@@ -595,7 +595,7 @@ struct GroupDashboardView: View {
         for (id, f) in mdmSec { map[id] = CachedSecurity(facts: f, at: mdmSecAt[id] ?? Date()) }
         let url = Self.securityCacheURL
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if let data = try? JSONEncoder().encode(map) { try? data.write(to: url) }
+        if let data = try? JSONEncoder().encode(map) { try? data.write(to: url, options: .atomic) }
     }
 
     // MARK: - Live device names (MDM DeviceInformation, cached)
@@ -616,7 +616,7 @@ struct GroupDashboardView: View {
         for (id, n) in mdmNames { map[id] = CachedName(name: n, at: mdmNamesAt[id] ?? Date()) }
         let url = Self.namesCacheURL
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if let data = try? JSONEncoder().encode(map) { try? data.write(to: url) }
+        if let data = try? JSONEncoder().encode(map) { try? data.write(to: url, options: .atomic) }
     }
 
     /// Pull the live computer name from each Mac that still reads as a bare

@@ -115,10 +115,10 @@ final class MunkiReportInventoryStore {
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                  withIntermediateDirectories: true)
         if let data = try? JSONEncoder().encode(bySerial) {
-            try? data.write(to: url)
+            try? data.write(to: url, options: .atomic)
         }
         if let data = try? JSONEncoder().encode(fetchedAt) {
-            try? data.write(to: Self.timesURL)
+            try? data.write(to: Self.timesURL, options: .atomic)
         }
     }
 }

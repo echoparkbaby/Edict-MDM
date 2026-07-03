@@ -23,11 +23,24 @@ enum KeychainHelper {
         let updateStatus = SecItemUpdate(query as CFDictionary,
                                          [kSecValueData as String: data] as CFDictionary)
         if updateStatus == errSecSuccess { return true }
-        guard updateStatus == errSecItemNotFound else { return false }
+        guard updateStatus == errSecItemNotFound else {
+            // A locked keychain / ACL / interaction-not-allowed failure here
+            // means the secret survives only in memory this session and is
+            // gone next launch — the classic "works on one Mac, 401s on
+            // another". Callers historically discard the Bool, so log it
+            // (account name + status only, never the secret value).
+            Log.error("Keychain", "Couldn't update “\(account)”: OSStatus \(updateStatus). It won't persist to next launch.")
+            return false
+        }
         var add = query
         add[kSecValueData as String] = data
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
+        let addStatus = SecItemAdd(add as CFDictionary, nil)
+        if addStatus != errSecSuccess {
+            Log.error("Keychain", "Couldn't store “\(account)”: OSStatus \(addStatus). It won't persist to next launch.")
+            return false
+        }
+        return true
     }
 
     static func read(account: String) -> String? {
