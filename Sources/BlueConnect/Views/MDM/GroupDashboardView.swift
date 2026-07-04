@@ -1291,7 +1291,22 @@ struct GroupDashboardView: View {
         defer { loading = false }
         do {
             let api = EnrollmentsAPI(settings: settings)
-            enrollments = try await api.list()
+            // Retry the enrollments list a couple times — the tailnet link to
+            // the sidecar can blip (e.g. right after wake), and one transient
+            // failure shouldn't flash a "network error" when a retry succeeds.
+            // On persistent failure we throw and keep the previously-loaded
+            // fleet (enrollments isn't reassigned).
+            var listed: [MDMEnrollment]?
+            var lastErr: Error?
+            for attempt in 0..<3 {
+                do { listed = try await api.list(); break }
+                catch {
+                    lastErr = error
+                    if attempt < 2 { try? await Task.sleep(for: .milliseconds(600)) }
+                }
+            }
+            guard let listed else { throw lastErr ?? MDMError.transport("enrollments list failed") }
+            enrollments = listed
             pushCert = try? await api.pushCert()
             let svc = KMFDDMService(settings: settings)
             var os: [String: String] = [:], fv: [String: String] = [:], mdl: [String: String] = [:]

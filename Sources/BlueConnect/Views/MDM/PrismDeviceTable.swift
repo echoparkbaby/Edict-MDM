@@ -132,7 +132,7 @@ struct PrismDeviceTable: View {
                 .accessibilityLabel("Export this view as CSV")
             HStack(spacing: 5) {
                 Image(systemName: "sparkle.magnifyingglass").font(.caption).foregroundStyle(.secondary)
-                TextField("Search — e.g. “Sonoma FileVault off”", text: $tableSearch).textFieldStyle(.plain).frame(width: 230)
+                TextField("Search", text: $tableSearch).textFieldStyle(.plain).frame(width: 230)
             }
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.controlBackgroundColor)))
