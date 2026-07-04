@@ -273,11 +273,10 @@ struct PrismInventoryTable: View {
                         Image(systemName: "laptopcomputer").font(.caption).foregroundStyle(.secondary)
                         Text(pickerDevices.first { $0.id == inventoryDeviceID }?.label ?? "All Macs")
                             .lineLimit(1).truncationMode(.middle)
-                        Spacer(minLength: 4)
                         Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
                     }
                     .padding(.horizontal, 8).padding(.vertical, 4)
-                    .frame(width: 160)
+                    .frame(maxWidth: 200)
                     .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.controlBackgroundColor)))
                     .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.secondary.opacity(0.25)))
                     .contentShape(Rectangle())
