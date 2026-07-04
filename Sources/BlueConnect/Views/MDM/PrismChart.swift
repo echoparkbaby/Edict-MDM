@@ -24,9 +24,11 @@ struct PrismChart: View {
     }
 
     /// Compact bar track width — fixed so bars stay short and comparable
-    /// instead of stretching across the whole pane.
-    private let barWidth: CGFloat = 240
-    private let labelWidth: CGFloat = 160
+    /// instead of stretching across the whole pane. Kept narrow so the label
+    /// column can be wide enough for long model names ("MacBook Air (13-inch,
+    /// M4, 2025)") without truncating.
+    private let barWidth: CGFloat = 150
+    private let labelWidth: CGFloat = 250
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
