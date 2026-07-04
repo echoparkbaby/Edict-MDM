@@ -1,16 +1,123 @@
 import SwiftUI
 
-// Inventory tables + the searchable device picker, split out of the large
-// GroupDashboardView. This is a same-type extension: behavior is unchanged and
-// all @State stays on the main struct — only the code location moved. The
-// parent members these methods reach are internal (not private) for cross-file
-// access within this single module.
-extension GroupDashboardView {
+/// What sources a category table and how fresh that data is, shown as a caption
+/// under the toolbar so the user always knows where a value came from and
+/// whether it's stale. (Moved out of GroupDashboardView so the extracted table
+/// component can use it too.)
+struct InvSource {
+    let name: String
+    let checkedAt: Date?
+    let note: String?
+    var coverage: (have: Int, total: Int)? = nil
+}
+
+/// One device for the "narrow to one Mac" picker — decoupled from the MDM
+/// enrollment model so the table doesn't depend on it.
+struct PrismPickerDevice: Identifiable, Hashable {
+    let id: String
+    let label: String
+    let serial: String?
+}
+
+/// The Prism dashboard's inventory table: a toolbar (device picker, CSV export,
+/// filter) over sortable, drag-to-resize columns with per-device or rolled-up
+/// (drill-down) rows. Extracted from GroupDashboardView.
+///
+/// Transient table-local UI state (filter text, picker, live column drag) is
+/// owned here. The state the parent resets on category/group change — the device
+/// narrow, the sort column, and the expanded drill row — is passed as a binding
+/// so the parent's existing `.onChange` reset handlers stay unchanged. Row
+/// selection into the main-window inspector is delegated via `onSelectRow` /
+/// `isRowSelected` so the component doesn't reach into the parent's selection.
+struct PrismInventoryTable: View {
+    let category: String
+    let columns: [(String, CGFloat)]
+    let rows: [(id: String, cells: [String])]
+    let source: InvSource?
+    let deviceRows: Bool
+    let drillDevices: ((String) -> [String])?
+    let onPullMDM: (() -> Void)?
+    let pullingSecurity: Bool
+    let pickerDevices: [PrismPickerDevice]
+    let onSelectRow: (String) -> Void
+    let isRowSelected: (String) -> Bool
+
+    @Binding var inventoryDeviceID: String?
+    @Binding var invSortCol: Int?
+    @Binding var invSortAsc: Bool
+    @Binding var expandedInventoryRow: String?
+
+    @AppStorage("invColWidthsJSON") private var invColWidthsRaw = ""
+    @State private var tableSearch = ""
+    @State private var devicePickerQuery = ""
+    @State private var showDevicePicker = false
+    @State private var invResizeStart: CGFloat?
+    @State private var invLiveResize: (index: Int, width: CGFloat)?
+
+    init(category: String,
+         columns: [(String, CGFloat)],
+         rows: [(id: String, cells: [String])],
+         source: InvSource? = nil,
+         deviceRows: Bool = false,
+         drillDevices: ((String) -> [String])? = nil,
+         onPullMDM: (() -> Void)? = nil,
+         pullingSecurity: Bool = false,
+         pickerDevices: [PrismPickerDevice],
+         onSelectRow: @escaping (String) -> Void,
+         isRowSelected: @escaping (String) -> Bool,
+         inventoryDeviceID: Binding<String?>,
+         invSortCol: Binding<Int?>,
+         invSortAsc: Binding<Bool>,
+         expandedInventoryRow: Binding<String?>) {
+        self.category = category
+        self.columns = columns
+        self.rows = rows
+        self.source = source
+        self.deviceRows = deviceRows
+        self.drillDevices = drillDevices
+        self.onPullMDM = onPullMDM
+        self.pullingSecurity = pullingSecurity
+        self.pickerDevices = pickerDevices
+        self.onSelectRow = onSelectRow
+        self.isRowSelected = isRowSelected
+        self._inventoryDeviceID = inventoryDeviceID
+        self._invSortCol = invSortCol
+        self._invSortAsc = invSortAsc
+        self._expandedInventoryRow = expandedInventoryRow
+    }
+
+    var body: some View { inventoryTable }
+
+    // MARK: - Source caption
+
+    @ViewBuilder
+    private func sourceCaption(_ s: InvSource) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "info.circle").font(.caption2)
+            Text("Source: \(s.name)")
+            if let d = s.checkedAt {
+                Text("· checked \(d.formatted(.relative(presentation: .named)))")
+            } else {
+                Text("· not checked yet")
+            }
+            if let c = s.coverage {
+                Text("· \(c.have) of \(c.total) Mac\(c.total == 1 ? "" : "s") reporting")
+                    .foregroundStyle(c.have < c.total ? Color.orange : .secondary)
+            }
+            if let n = s.note { Text("· \(n)").foregroundStyle(.tertiary) }
+            Spacer(minLength: 0)
+        }
+        .font(.caption2).foregroundStyle(.secondary)
+        .padding(.horizontal, 18).padding(.bottom, 6)
+    }
+
+    // MARK: - Searchable device picker
+
     private var devicePickerPopover: some View {
         let q = devicePickerQuery.trimmingCharacters(in: .whitespaces)
-        let matches = q.isEmpty ? scoped : scoped.filter {
-            label(for: $0).localizedCaseInsensitiveContains(q)
-                || ($0.serialNumber ?? "").localizedCaseInsensitiveContains(q)
+        let matches = q.isEmpty ? pickerDevices : pickerDevices.filter {
+            $0.label.localizedCaseInsensitiveContains(q)
+                || ($0.serial ?? "").localizedCaseInsensitiveContains(q)
         }
         return VStack(spacing: 0) {
             HStack(spacing: 5) {
@@ -24,8 +131,8 @@ extension GroupDashboardView {
                     devicePickerRow(label: "All Macs", sub: nil, selected: inventoryDeviceID == nil) {
                         inventoryDeviceID = nil; showDevicePicker = false
                     }
-                    ForEach(matches, id: \.id) { d in
-                        devicePickerRow(label: label(for: d), sub: d.serialNumber,
+                    ForEach(matches) { d in
+                        devicePickerRow(label: d.label, sub: d.serial,
                                         selected: inventoryDeviceID == d.id) {
                             inventoryDeviceID = d.id; showDevicePicker = false
                         }
@@ -63,26 +170,13 @@ extension GroupDashboardView {
         .background(selected ? Color.accentColor.opacity(0.1) : .clear)
     }
 
-    /// When a per-device inventory row (Storage, Updates, Firewall, …) is
-    /// tapped, select that Mac in the main window so the right-hand inspector
-    /// shows it — same behavior the Devices/Security table gives.
-    private func selectHost(forRowID rowID: String) {
-        guard let dev = scoped.first(where: { $0.id == rowID }) else { return }
-        selection = [df.hostID(for: dev)]
-    }
-    /// The main-window selection id for a per-device row, to highlight it.
-    private func isRowSelected(_ rowID: String) -> Bool {
-        guard let dev = scoped.first(where: { $0.id == rowID }) else { return false }
-        return selection.contains(df.hostID(for: dev))
-    }
-
     private func filteredRows(_ rows: [(id: String, cells: [String])]) -> [(id: String, cells: [String])] {
         let q = tableSearch.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return rows }
         return rows.filter { row in row.cells.contains { $0.localizedCaseInsensitiveContains(q) } }
     }
 
-    // MARK: - Inventory-table sort + resizable columns
+    // MARK: - Sort + resizable columns
 
     /// Effective column widths for the current category: dragged overrides if
     /// present (and still matching the column count), else the natural widths.
@@ -90,7 +184,7 @@ extension GroupDashboardView {
         var widths = columns.map(\.1)
         if let data = invColWidthsRaw.data(using: .utf8),
            let map = try? JSONDecoder().decode([String: [Double]].self, from: data),
-           let saved = map[category.rawValue], saved.count == columns.count {
+           let saved = map[category], saved.count == columns.count {
             widths = saved.map { CGFloat($0) }
         }
         if let lr = invLiveResize, lr.index < widths.count { widths[lr.index] = lr.width }
@@ -104,7 +198,7 @@ extension GroupDashboardView {
         var map: [String: [Double]] = [:]
         if let data = invColWidthsRaw.data(using: .utf8),
            let m = try? JSONDecoder().decode([String: [Double]].self, from: data) { map = m }
-        map[category.rawValue] = widths.map { Double($0) }
+        map[category] = widths.map { Double($0) }
         if let data = try? JSONEncoder().encode(map), let s = String(data: data, encoding: .utf8) {
             invColWidthsRaw = s
         }
@@ -114,14 +208,11 @@ extension GroupDashboardView {
         if invSortCol == i { invSortAsc.toggle() } else { invSortCol = i; invSortAsc = true }
     }
 
-    /// Sort the (already filtered) rows by the active column. Numeric when the
-    /// cell starts with a number ("12 of 30", "45.2 GB"), else case-insensitive
-    /// text. nil sort column leaves the rows in their incoming order.
     private func sortedRows(_ rows: [(id: String, cells: [String])]) -> [(id: String, cells: [String])] {
         InventoryRowSort.sorted(rows, column: invSortCol, ascending: invSortAsc)
     }
 
-    /// A sortable, drag-to-resize header cell for the inventory tables.
+    /// A sortable, drag-to-resize header cell.
     @ViewBuilder
     private func invHeaderCell(_ title: String, width: CGFloat, index: Int,
                                columns: [(String, CGFloat)]) -> some View {
@@ -155,19 +246,14 @@ extension GroupDashboardView {
         .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
     }
 
-    /// Generic Kandji-style category table: a toolbar with title + filter,
-    /// then a horizontally-scrolling sortable-width table. Column width 0
-    /// means "flexible".
-    func inventoryTable(columns: [(String, CGFloat)], rows: [(id: String, cells: [String])],
-                                source: InvSource? = nil,
-                                deviceRows: Bool = false,
-                                drillDevices: ((String) -> [String])? = nil,
-                                onPullMDM: (() -> Void)? = nil) -> some View {
+    // MARK: - Table
+
+    private var inventoryTable: some View {
         let widths = invWidths(columns)
         let filtered = sortedRows(filteredRows(rows))
         return VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Text(category.rawValue).font(.title3.bold())
+                Text(category).font(.title3.bold())
                 Text("\(filtered.count)").font(.callout).foregroundStyle(.secondary)
                 Spacer()
                 if let onPullMDM {
@@ -185,7 +271,7 @@ extension GroupDashboardView {
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "laptopcomputer").font(.caption).foregroundStyle(.secondary)
-                        Text(inventoryDeviceID.flatMap { id in scoped.first { $0.id == id }.map { label(for: $0) } } ?? "All Macs")
+                        Text(pickerDevices.first { $0.id == inventoryDeviceID }?.label ?? "All Macs")
                             .lineLimit(1).truncationMode(.middle)
                         Spacer(minLength: 4)
                         Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
@@ -200,7 +286,7 @@ extension GroupDashboardView {
                 .help("Roll up every Mac, or search to narrow to just one")
                 .popover(isPresented: $showDevicePicker, arrowEdge: .bottom) { devicePickerPopover }
                 Button {
-                    TableCSVExport.save(filename: "\(category.rawValue).csv", columns: columns.map(\.0), rows: filtered.map(\.cells))
+                    TableCSVExport.save(filename: "\(category).csv", columns: columns.map(\.0), rows: filtered.map(\.cells))
                 } label: { Image(systemName: "square.and.arrow.up") }
                 .help("Export this view as CSV").disabled(filtered.isEmpty)
                 .accessibilityLabel("Export this view as CSV")
@@ -252,8 +338,8 @@ extension GroupDashboardView {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    /// One category-table row. When `drillDevices` is supplied (rolled-up
-    /// Apps / Local Users), the row is tappable to reveal which Macs it's on.
+    /// One category-table row. When `drillDevices` is supplied (rolled-up Apps /
+    /// Local Users), the row is tappable to reveal which Macs it's on.
     @ViewBuilder
     private func inventoryRow(_ row: (id: String, cells: [String]), columns: [(String, CGFloat)],
                              widths: [CGFloat],
@@ -277,7 +363,7 @@ extension GroupDashboardView {
             .contentShape(Rectangle())
             .onTapGesture {
                 if expandable { expandedInventoryRow = isOpen ? nil : row.id }
-                else if deviceRows { selectHost(forRowID: row.id) }
+                else if deviceRows { onSelectRow(row.id) }
             }
             .accessibilityAddTraits((expandable || deviceRows) ? .isButton : [])
             if isOpen, let drillDevices {

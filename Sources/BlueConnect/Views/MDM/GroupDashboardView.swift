@@ -83,27 +83,19 @@ struct GroupDashboardView: View {
         }
     }
     @State var category: Category = .devices
-    @State var tableSearch = ""
-    /// Inventory-table sort: which column index, ascending or not. nil keeps
-    /// the rows' natural (pre-sorted) order.
+    /// Inventory-table sort — kept here (not in PrismInventoryTable) so the
+    /// reset-on-category `.onChange` below stays unchanged. nil = natural order.
     @State var invSortCol: Int?
     @State var invSortAsc = true
-    /// Per-category dragged column widths ({category: [width]}), persisted.
-    @AppStorage("invColWidthsJSON") var invColWidthsRaw = ""
-    /// Column width captured at drag start (see PrismDeviceTable.resizeStart).
-    @State var invResizeStart: CGFloat?
-    /// Live (in-memory) width of the column being dragged, by index — keeps the
-    /// drag smooth without a per-tick disk write; persisted once on release.
-    @State var invLiveResize: (index: Int, width: CGFloat)?
-    /// Searchable "narrow to one Mac" popover state — replaces a flat Picker
-    /// that became unusable at fleet scale (100+ Macs in a dropdown).
-    @State var showDevicePicker = false
-    @State var devicePickerQuery = ""
-    /// Which Mac the category tables (Apps, Local Users, …) are scoped to.
-    /// nil = all Macs, rolled up; a value = just that machine's rows.
+    /// Which Mac the category tables are scoped to (nil = all, rolled up). Read
+    /// by `inventoryScope`, so it's owned here and passed to the table as a
+    /// binding; `expandedInventoryRow` resets alongside it.
     @State var inventoryDeviceID: String?
     /// A rolled-up Apps / Local Users row expanded to show which Macs it's on.
     @State var expandedInventoryRow: String?
+    // Transient table-local UI state (filter text, device-picker popover, live
+    // column-drag width, per-category persisted widths) lives in
+    // PrismInventoryTable.
     /// Live firewall + SIP pulled from MDM (enrollmentID → facts), overriding
     /// MunkiReport for those Macs. Populated by the "Pull via MDM" action.
     @State private var mdmSec: [String: MDMSecurityFacts] = [:]
@@ -652,11 +644,8 @@ struct GroupDashboardView: View {
 
     // MARK: - Source + freshness, per category
 
-    /// What sources a category table and how fresh that data is, shown as a
-    /// caption under the toolbar so the user always knows where a value came
-    /// from and whether it's stale.
-    struct InvSource { let name: String; let checkedAt: Date?; let note: String?
-        var coverage: (have: Int, total: Int)? = nil }
+    // InvSource lives in PrismInventoryTable.swift (used by both the table and
+    // the callers below that construct the source attribution).
 
     /// Oldest MunkiReport fetch across the current scope — the most
     /// conservative freshness (flags the stalest Mac, e.g. wiped-but-cached).
@@ -677,25 +666,42 @@ struct GroupDashboardView: View {
         (inventoryScope.filter { mdmSec[$0.id] != nil }.count, inventoryScope.count)
     }
 
-    @ViewBuilder
-    func sourceCaption(_ s: InvSource) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: "info.circle").font(.caption2)
-            Text("Source: \(s.name)")
-            if let d = s.checkedAt {
-                Text("· checked \(d.formatted(.relative(presentation: .named)))")
-            } else {
-                Text("· not checked yet")
-            }
-            if let c = s.coverage {
-                Text("· \(c.have) of \(c.total) Mac\(c.total == 1 ? "" : "s") reporting")
-                    .foregroundStyle(c.have < c.total ? Color.orange : .secondary)
-            }
-            if let n = s.note { Text("· \(n)").foregroundStyle(.tertiary) }
-            Spacer(minLength: 0)
-        }
-        .font(.caption2).foregroundStyle(.secondary)
-        .padding(.horizontal, 18).padding(.bottom, 6)
+    // MARK: - Inventory tables (rendered by PrismInventoryTable)
+
+    /// Devices for the table's "narrow to one Mac" picker.
+    private var inventoryPickerDevices: [PrismPickerDevice] {
+        scoped.map { PrismPickerDevice(id: $0.id, label: label(for: $0), serial: $0.serialNumber) }
+    }
+    /// Select a per-device row's Mac in the main window so the inspector shows
+    /// it — same behavior the Devices/Security table gives.
+    private func selectInventoryRow(_ rowID: String) {
+        guard let dev = scoped.first(where: { $0.id == rowID }) else { return }
+        selection = [df.hostID(for: dev)]
+    }
+    private func isInventoryRowSelected(_ rowID: String) -> Bool {
+        guard let dev = scoped.first(where: { $0.id == rowID }) else { return false }
+        return selection.contains(df.hostID(for: dev))
+    }
+    /// Adapter so the category `switch` keeps calling `inventoryTable(...)` while
+    /// PrismInventoryTable owns the rendering + local UI state.
+    private func inventoryTable(columns: [(String, CGFloat)], rows: [(id: String, cells: [String])],
+                                source: InvSource? = nil,
+                                deviceRows: Bool = false,
+                                drillDevices: ((String) -> [String])? = nil,
+                                onPullMDM: (() -> Void)? = nil) -> some View {
+        PrismInventoryTable(
+            category: category.rawValue,
+            columns: columns, rows: rows, source: source,
+            deviceRows: deviceRows, drillDevices: drillDevices,
+            onPullMDM: onPullMDM, pullingSecurity: pullingSecurity,
+            pickerDevices: inventoryPickerDevices,
+            onSelectRow: selectInventoryRow,
+            isRowSelected: isInventoryRowSelected,
+            inventoryDeviceID: $inventoryDeviceID,
+            invSortCol: $invSortCol,
+            invSortAsc: $invSortAsc,
+            expandedInventoryRow: $expandedInventoryRow
+        )
     }
 
 
