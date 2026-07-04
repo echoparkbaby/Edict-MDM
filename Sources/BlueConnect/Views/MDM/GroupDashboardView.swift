@@ -242,10 +242,14 @@ struct GroupDashboardView: View {
             header
             Divider()
             HStack(spacing: 0) {
+                // layoutPriority pins the rail's width so a wide content pane
+                // (long category title + toolbar) can never squeeze/shift it.
                 categoryRail
+                    .layoutPriority(1)
                 railDivider
                 categoryPanel
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -253,7 +253,7 @@ struct PrismInventoryTable: View {
         let filtered = sortedRows(filteredRows(rows))
         return VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Text(category).font(.title3.bold()).lineLimit(1).fixedSize()
+                Text(category).font(.title3.bold()).lineLimit(1)
                 Text("\(filtered.count)").font(.callout).foregroundStyle(.secondary)
                 Spacer(minLength: 8)
                 if let onPullMDM {
