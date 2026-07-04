@@ -144,13 +144,10 @@ struct KMFDDMService {
     /// KMFDDM returns 304 when the association is already present (no re-notify);
     /// that's success, not an error, so re-assigning is safe + idempotent.
     func assign(enrollmentID: String, toSet set: String) async throws {
-        do {
-            _ = try await request("v1/enrollment-sets/\(pathEsc(enrollmentID))",
-                                  method: "PUT",
-                                  query: [URLQueryItem(name: "set", value: set)])
-        } catch MDMError.http(304, _) {
-            // Already associated — unchanged.
-        }
+        // 304 (already associated) is treated as success by request().
+        _ = try await request("v1/enrollment-sets/\(pathEsc(enrollmentID))",
+                              method: "PUT",
+                              query: [URLQueryItem(name: "set", value: set)])
     }
 
     /// `GET /v1/status-values/<enrollmentID>[?path=prefix]` — the status
@@ -263,7 +260,13 @@ struct KMFDDMService {
             guard let http = resp as? HTTPURLResponse else {
                 throw MDMError.transport("Non-HTTP response")
             }
-            guard (200...299).contains(http.statusCode) else {
+            // 304 Not Modified = the resource is already in the requested
+            // state (declaration content unchanged, already a set member,
+            // already associated). KMFDDM's mutations are idempotent and this
+            // client never sends conditional GETs, so 304 is success, not an
+            // error — otherwise re-running "Enable reporting" surfaces "HTTP
+            // 304" once the declarations already exist.
+            guard (200...299).contains(http.statusCode) || http.statusCode == 304 else {
                 throw MDMError.http(http.statusCode, String(data: data, encoding: .utf8) ?? "")
             }
             return (data, http)

@@ -83,6 +83,12 @@ struct GroupDashboardView: View {
         }
     }
     @State var category: Category = .devices
+    /// Draggable width of the Prism category rail (persisted). The live width
+    /// during a drag is held in memory so we don't write UserDefaults per tick.
+    @AppStorage("prismRailWidth") private var railWidthStored: Double = 178
+    @State private var railResizeStart: Double?
+    @State private var railLiveWidth: Double?
+    private var railWidth: CGFloat { CGFloat(railLiveWidth ?? railWidthStored) }
     /// Inventory-table sort — kept here (not in PrismInventoryTable) so the
     /// reset-on-category `.onChange` below stays unchanged. nil = natural order.
     @State var invSortCol: Int?
@@ -237,7 +243,7 @@ struct GroupDashboardView: View {
             Divider()
             HStack(spacing: 0) {
                 categoryRail
-                Divider()
+                railDivider
                 categoryPanel
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -280,8 +286,34 @@ struct GroupDashboardView: View {
             Spacer()
         }
         .padding(10)
-        .frame(width: 178, alignment: .top)
+        .frame(width: railWidth, alignment: .top)
         .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+    }
+
+    /// The divider between the category rail and the content — draggable to
+    /// resize the rail (persisted), so a narrow rail leaves more room for the
+    /// inventory tables' device-name column.
+    private var railDivider: some View {
+        Divider()
+            .overlay(
+                Color.clear
+                    .frame(width: 10)
+                    .contentShape(Rectangle())
+                    .onHover { $0 ? NSCursor.resizeLeftRight.push() : NSCursor.pop() }
+                    .gesture(
+                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .onChanged { v in
+                                if railResizeStart == nil { railResizeStart = railWidthStored }
+                                let w = (railResizeStart ?? railWidthStored) + Double(v.translation.width)
+                                railLiveWidth = min(320, max(130, w))
+                            }
+                            .onEnded { _ in
+                                if let w = railLiveWidth { railWidthStored = w }
+                                railLiveWidth = nil; railResizeStart = nil
+                            }
+                    )
+                    .accessibilityHidden(true)
+            )
     }
 
     // MARK: - Category panel
