@@ -253,9 +253,9 @@ struct PrismInventoryTable: View {
         let filtered = sortedRows(filteredRows(rows))
         return VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Text(category).font(.title3.bold())
+                Text(category).font(.title3.bold()).lineLimit(1).fixedSize()
                 Text("\(filtered.count)").font(.callout).foregroundStyle(.secondary)
-                Spacer()
+                Spacer(minLength: 8)
                 if let onPullMDM {
                     Button { onPullMDM() } label: {
                         if pullingSecurity { ProgressView().controlSize(.small) }
@@ -277,7 +277,7 @@ struct PrismInventoryTable: View {
                         Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
                     }
                     .padding(.horizontal, 8).padding(.vertical, 4)
-                    .frame(width: 190)
+                    .frame(width: 160)
                     .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.controlBackgroundColor)))
                     .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.secondary.opacity(0.25)))
                     .contentShape(Rectangle())
@@ -292,7 +292,7 @@ struct PrismInventoryTable: View {
                 .accessibilityLabel("Export this view as CSV")
                 HStack(spacing: 5) {
                     Image(systemName: "magnifyingglass").font(.caption).foregroundStyle(.secondary)
-                    TextField("Filter", text: $tableSearch).textFieldStyle(.plain).frame(width: 150)
+                    TextField("Filter", text: $tableSearch).textFieldStyle(.plain).frame(width: 130)
                 }
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.controlBackgroundColor)))
