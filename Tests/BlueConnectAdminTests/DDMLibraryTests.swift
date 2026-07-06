@@ -206,6 +206,20 @@ struct DDMLibraryTests {
         #expect(act.sets == ["default", "staging"])
     }
 
+    @Test func activatingPreservesExistingPredicate() throws {
+        // Adding a config to a predicate-gated activation must keep the gate,
+        // else it silently applies to every device in the set.
+        let activation = DDMLibraryItem(
+            json: DDMDeclarations.activation(identifier: "com.x.cfg.activation",
+                                             configurationIDs: ["com.x.other"],
+                                             predicate: "@status(...) == true"),
+            sets: ["default"])
+        let fixed = DDMLibraryItem.activating(configID: "com.x.cfg", in: "staging", within: [activation])
+        let act = try #require(fixed.first { $0.identifier == "com.x.cfg.activation" })
+        #expect(act.payload["Predicate"] as? String == "@status(...) == true")
+        #expect(Set(act.payload["StandardConfigurations"] as? [String] ?? []) == ["com.x.cfg", "com.x.other"])
+    }
+
     @Test func passcodeSettingsEmitsOnlyMeaningfulKeys() throws {
         let data = DDMDeclarations.passcodeSettings(
             identifier: "com.x.pass",

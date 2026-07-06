@@ -75,7 +75,12 @@ struct DDMLibraryItem: Codable, Identifiable, Hashable {
             var refs = (result[idx].payload["StandardConfigurations"] as? [String]) ?? []
             if !refs.contains(configID) {
                 refs.append(configID)
-                result[idx].json = DDMDeclarations.activation(identifier: actID, configurationIDs: refs)
+                // Preserve any gating Predicate — rebuilding without it would
+                // silently widen the activation to every device in the set.
+                let predicate = result[idx].payload["Predicate"] as? String
+                result[idx].json = DDMDeclarations.activation(identifier: actID,
+                                                              configurationIDs: refs,
+                                                              predicate: predicate)
             }
             if !result[idx].sets.contains(set) {
                 result[idx].sets = (result[idx].sets + [set]).sorted()
