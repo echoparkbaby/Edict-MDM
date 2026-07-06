@@ -34,18 +34,35 @@ final class MDMScheduler {
         }
     }
 
+    @ObservationIgnored private var isTicking = false
+
     /// Run all due tasks. Public so a "Run now" button can force a pass.
     func tick() async {
         guard let settings, settings.mdmEnabled, settings.mdmConfigured else { return }
+        // No overlap: the periodic loop and the "Run now" button both call
+        // tick(). Safe to check-and-set without a lock — @MainActor and no
+        // await between here and the assignment.
+        guard !isTicking else { return }
+        isTicking = true
+        defer { isTicking = false }
+
         let now = Date()
-        var tasks = settings.scheduledTasks
-        var changed = false
-        for idx in tasks.indices where tasks[idx].isDue(now: now) {
-            await run(tasks[idx])
-            tasks[idx].lastRunEpoch = now.timeIntervalSince1970
-            changed = true
+        let due = settings.scheduledTasks.filter { $0.isDue(now: now) }
+        var ranIDs: [UUID] = []
+        for t in due {
+            await run(t)
+            ranIDs.append(t.id)
         }
-        if changed { settings.scheduledTasks = tasks }
+        guard !ranIDs.isEmpty else { return }
+        // Re-read and stamp by id instead of writing back a pre-await
+        // snapshot — otherwise a task the user edited/deleted during the run
+        // would be reverted/resurrected.
+        var tasks = settings.scheduledTasks
+        let stamp = now.timeIntervalSince1970
+        for idx in tasks.indices where ranIDs.contains(tasks[idx].id) {
+            tasks[idx].lastRunEpoch = stamp
+        }
+        settings.scheduledTasks = tasks
     }
 
     private func run(_ t: ScheduledTask) async {
