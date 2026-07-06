@@ -33,19 +33,28 @@ enum DeploymentLog {
         if let data = try? JSONEncoder().encode(map) { try? data.write(to: fileURL, options: .atomic) }
     }
 
+    // Serializes the read-modify-write so concurrent record/forget calls
+    // (a manual deploy racing a fleet-refresh onboarding pass) don't
+    // last-writer-wins away each other's entries. ponytail: reads
+    // (load/entries) stay lock-free — atomic writes mean a reader always
+    // sees a complete old-or-new file, never a partial one.
+    private static let ioQueue = DispatchQueue(label: "xyz.hellocomputer.edict.deploymentlog")
+
     /// Record a deploy of `profileData` to `deviceIDs`, keyed by the
     /// profile's PayloadIdentifier (so re-deploys replace the entry).
     static func record(profileData: Data, name: String, to deviceIDs: [String], nowEpoch: Double) async {
         guard let id = await payloadIdentifier(profileData) else { return }
-        var map = load()
-        for d in deviceIDs {
-            var list = map[d] ?? []
-            list.removeAll { $0.identifier == id }
-            list.append(Entry(identifier: id, name: name, epoch: nowEpoch,
-                              dataBase64: profileData.base64EncodedString()))
-            map[d] = list
+        let b64 = profileData.base64EncodedString()
+        ioQueue.sync {
+            var map = load()
+            for d in deviceIDs {
+                var list = map[d] ?? []
+                list.removeAll { $0.identifier == id }
+                list.append(Entry(identifier: id, name: name, epoch: nowEpoch, dataBase64: b64))
+                map[d] = list
+            }
+            save(map)
         }
-        save(map)
     }
 
     static func entries(for deviceID: String) -> [Entry] {
@@ -53,9 +62,11 @@ enum DeploymentLog {
     }
 
     static func forget(deviceID: String, identifier: String) {
-        var map = load()
-        map[deviceID]?.removeAll { $0.identifier == identifier }
-        save(map)
+        ioQueue.sync {
+            var map = load()
+            map[deviceID]?.removeAll { $0.identifier == identifier }
+            save(map)
+        }
     }
 
     /// Top-level PayloadIdentifier of a profile (signed or plain). Signed
