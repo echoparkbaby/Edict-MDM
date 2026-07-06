@@ -279,19 +279,22 @@ struct PrismDeviceTable: View {
         func fvRank(_ d: MDMEnrollment) -> Int {
             switch facts.fileVaultOn(for: d) { case .some(true): return 0; case .some(false): return 1; case nil: return 2 }
         }
-        rows.sort { a, b in
-            let asc: Bool
+        // Strict less-than per key. Descending swaps operands (never !less):
+        // negating a non-strict comparison returns true both ways on ties,
+        // violating strict-weak-ordering and trapping sort(). Same fix as
+        // InventoryRowSort.
+        func less(_ a: MDMEnrollment, _ b: MDMEnrollment) -> Bool {
             switch sortKey {
-            case .name: asc = facts.label(for: a).localizedCaseInsensitiveCompare(facts.label(for: b)) == .orderedAscending
-            case .serial: asc = (a.serialNumber ?? "").localizedCaseInsensitiveCompare(b.serialNumber ?? "") == .orderedAscending
-            case .model: asc = (facts.models[a.id] ?? "~").localizedCaseInsensitiveCompare(facts.models[b.id] ?? "~") == .orderedAscending
-            case .os: asc = facts.osRank(facts.osVersions[a.id]) < facts.osRank(facts.osVersions[b.id])
-            case .fileVault: asc = fvRank(a) < fvRank(b)
-            case .compliance: asc = rank(a) < rank(b)
-            case .lastSeen: asc = (a.lastSeenDate ?? .distantPast) < (b.lastSeenDate ?? .distantPast)
+            case .name: return facts.label(for: a).localizedCaseInsensitiveCompare(facts.label(for: b)) == .orderedAscending
+            case .serial: return (a.serialNumber ?? "").localizedCaseInsensitiveCompare(b.serialNumber ?? "") == .orderedAscending
+            case .model: return (facts.models[a.id] ?? "~").localizedCaseInsensitiveCompare(facts.models[b.id] ?? "~") == .orderedAscending
+            case .os: return facts.osRank(facts.osVersions[a.id]) < facts.osRank(facts.osVersions[b.id])
+            case .fileVault: return fvRank(a) < fvRank(b)
+            case .compliance: return rank(a) < rank(b)
+            case .lastSeen: return (a.lastSeenDate ?? .distantPast) < (b.lastSeenDate ?? .distantPast)
             }
-            return sortAsc ? asc : !asc
         }
+        rows.sort { a, b in sortAsc ? less(a, b) : less(b, a) }
         return rows
     }
 
