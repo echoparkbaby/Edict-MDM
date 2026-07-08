@@ -13,17 +13,18 @@ enum SavedProfilesStore {
     }
 
     static func load() -> [SavedProfile] {
-        guard let data = try? Data(contentsOf: fileURL),
-              let list = try? JSONDecoder().decode([SavedProfile].self, from: data)
-        else { return [] }
-        return list
+        guard let raw = try? Data(contentsOf: fileURL) else { return [] }
+        // Decrypt; fall back to legacy plaintext (re-encrypted on next save).
+        let json = ProfileVault.open(raw) ?? raw
+        return (try? JSONDecoder().decode([SavedProfile].self, from: json)) ?? []
     }
 
     static func save(_ list: [SavedProfile]) {
         let dir = fileURL.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        if let data = try? JSONEncoder().encode(list) {
-            try? data.write(to: fileURL, options: .atomic)
+        if let data = try? JSONEncoder().encode(list),
+           let sealed = ProfileVault.seal(data) {
+            try? sealed.write(to: fileURL, options: .atomic)
         }
     }
 

@@ -21,16 +21,17 @@ enum DeploymentLog {
 
     /// deviceID -> deployed profiles.
     static func load() -> [String: [Entry]] {
-        guard let data = try? Data(contentsOf: fileURL),
-              let map = try? JSONDecoder().decode([String: [Entry]].self, from: data)
-        else { return [:] }
-        return map
+        guard let raw = try? Data(contentsOf: fileURL) else { return [:] }
+        // Decrypt; fall back to legacy plaintext (re-encrypted on next save).
+        let json = ProfileVault.open(raw) ?? raw
+        return (try? JSONDecoder().decode([String: [Entry]].self, from: json)) ?? [:]
     }
 
     private static func save(_ map: [String: [Entry]]) {
         let dir = fileURL.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        if let data = try? JSONEncoder().encode(map) { try? data.write(to: fileURL, options: .atomic) }
+        if let data = try? JSONEncoder().encode(map),
+           let sealed = ProfileVault.seal(data) { try? sealed.write(to: fileURL, options: .atomic) }
     }
 
     // Serializes the read-modify-write so concurrent record/forget calls
