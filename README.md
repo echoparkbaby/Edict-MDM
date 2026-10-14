@@ -395,15 +395,15 @@ The host list populates from the server on the next refresh.
 |---|---|
 | ⌃⌘S | Toggle sidebar |
 | ⌃⌘P | Toggle Connect Panel (right pane) |
-| ⌘⇧1 | Sidebar filter: All hosts |
-| ⌘⇧2 | Sidebar filter: Favorites |
-| ⌘⇧3 | Sidebar filter: Recently Connected |
-| ⌘⇧4 | Sidebar filter: Active |
-| ⌘⇧5 | Sidebar filter: Inactive |
-| ⌘⇧6 | Sidebar filter: Uncategorized |
+| ⌥⌘1 | Sidebar filter: All hosts |
+| ⌥⌘2 | Sidebar filter: Favorites |
+| ⌥⌘3 | Sidebar filter: Recently Connected |
+| ⌥⌘4 | Sidebar filter: Active |
+| ⌥⌘5 | Sidebar filter: Inactive |
+| ⌥⌘6 | Sidebar filter: Uncategorized |
 | ⌘\\ | Show Log pane |
 | ⌥⌘F | Focus the host search field |
-| ⌃⌘F | Focus the menubar quick-search dropdown |
+| ⌥⌘B | Focus the menubar quick-search dropdown |
 
 **App**
 

@@ -38,17 +38,17 @@ struct ViewMenuCommands: Commands {
 
             Section("Filter") {
                 Button("All Hosts") { actions?.setSidebarFilter(.all) }
-                    .keyboardShortcut("1", modifiers: [.command, .shift])
+                    .keyboardShortcut("1", modifiers: [.command, .option])
                 Button("Favorites") { actions?.setSidebarFilter(.favorites) }
-                    .keyboardShortcut("2", modifiers: [.command, .shift])
+                    .keyboardShortcut("2", modifiers: [.command, .option])
                 Button("Recently Connected") { actions?.setSidebarFilter(.recent) }
-                    .keyboardShortcut("3", modifiers: [.command, .shift])
+                    .keyboardShortcut("3", modifiers: [.command, .option])
                 Button("Active") { actions?.setSidebarFilter(.active) }
-                    .keyboardShortcut("4", modifiers: [.command, .shift])
+                    .keyboardShortcut("4", modifiers: [.command, .option])
                 Button("Inactive") { actions?.setSidebarFilter(.inactive) }
-                    .keyboardShortcut("5", modifiers: [.command, .shift])
+                    .keyboardShortcut("5", modifiers: [.command, .option])
                 Button("Uncategorized") { actions?.setSidebarFilter(.uncategorized) }
-                    .keyboardShortcut("6", modifiers: [.command, .shift])
+                    .keyboardShortcut("6", modifiers: [.command, .option])
             }
 
             Divider()
