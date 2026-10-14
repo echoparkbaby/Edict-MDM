@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "BlueConnectAdmin",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v15)],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.2.0"),
     ],

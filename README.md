@@ -124,7 +124,7 @@ Grab the latest signed and notarized `.dmg` from the [Releases page](../../relea
 
 - A running [BlueSkyConnect](https://github.com/BlueSkyTools/BlueSkyConnect) server
 - The BlueConnect Admin PHP endpoints deployed on that server (see [Server setup](#server-setup))
-- macOS 14 (Sonoma) or later
+- macOS 15 (Sequoia) or later
 - An SSH key authorized on your BlueSkyConnect server
 - BlueSky web admin credentials
 

@@ -73,7 +73,7 @@ The app talks to the **admin** APIs over a private network (e.g. Tailscale); onl
 
 ## Requirements
 
-- **macOS 14 or later** to run the app.
+- **macOS 15 or later** to run the app.
 - A **self-hosted MDM stack**: NanoMDM + KMFDDM + a SCEP CA, MySQL, and a small read-only enrollments sidecar. NanoDEP is optional (only for ABM zero-touch).
 - An **Apple MDM push certificate** (via the Apple Push Certificates Portal / a vendor cert).
 - A public HTTPS endpoint for the device-facing `/mdm` and `/scep` paths.
@@ -121,7 +121,7 @@ bash build-app.sh      # produces a signed "Edict MDM.app"
 swift test             # unit tests for the pure model + service layers
 ```
 
-Swift Package, no third-party dependencies. The app is `macOS 14+`, SwiftUI, and uses `@Observable`/`@AppStorage` plus the Keychain and JSON files under `~/Library/Application Support/EdictMDM/` for storage (no SwiftData).
+Swift Package, no third-party dependencies. The app is `macOS 15+`, SwiftUI, and uses `@Observable`/`@AppStorage` plus the Keychain and JSON files under `~/Library/Application Support/EdictMDM/` for storage (no SwiftData).
 
 ---
 
