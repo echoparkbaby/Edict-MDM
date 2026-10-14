@@ -35,7 +35,7 @@ enum SavedProfilesStore {
             // Signed profiles decode via `security cms -D` (a subprocess) —
             // keep it off the main actor so importing signed .mobileconfigs
             // doesn't stall the UI once per file.
-            let plistData = data.first == 0x30 ? (decodeSigned(data) ?? data) : data
+            let plistData = CMSProfile.plistData(data) ?? data
             guard let obj = try? PropertyListSerialization.propertyList(from: plistData, format: nil) as? [String: Any]
             else { return (fallbackName, data.first == 0x30 ? "signed" : "") }
             let name = (obj["PayloadDisplayName"] as? String) ?? fallbackName
@@ -46,23 +46,6 @@ enum SavedProfilesStore {
             let summary = Array(NSOrderedSet(array: types)).compactMap { $0 as? String }.prefix(4).joined(separator: ", ")
             return (name, summary)
         }.value
-    }
-
-    /// Strip a CMS signature to recover the inner plist via /usr/bin/security.
-    private static func decodeSigned(_ data: Data) -> Data? {
-        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("edict-\(UUID().uuidString).mobileconfig")
-        defer { try? FileManager.default.removeItem(at: tmp) }
-        guard (try? data.write(to: tmp)) != nil else { return nil }
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        p.arguments = ["cms", "-D", "-i", tmp.path]
-        let out = Pipe()
-        p.standardOutput = out
-        p.standardError = Pipe()
-        do { try p.run() } catch { return nil }
-        p.waitUntilExit()
-        let d = out.fileHandleForReading.readDataToEndOfFile()
-        return d.isEmpty ? nil : d
     }
 
     /// Map a payload type to a short human label for the summary.

@@ -17,22 +17,7 @@ enum ProfileDiff {
 
     /// Top-level dict of a .mobileconfig (signed or plain XML).
     static func decode(_ data: Data) -> [String: Any]? {
-        let plistData: Data
-        if data.first == 0x30 {
-            let tmp = FileManager.default.temporaryDirectory
-                .appendingPathComponent("edict-diff-\(UUID().uuidString).mobileconfig")
-            defer { try? FileManager.default.removeItem(at: tmp) }
-            guard (try? data.write(to: tmp)) != nil else { return nil }
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-            p.arguments = ["cms", "-D", "-i", tmp.path]
-            let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
-            do { try p.run() } catch { return nil }
-            p.waitUntilExit()
-            plistData = out.fileHandleForReading.readDataToEndOfFile()
-        } else {
-            plistData = data
-        }
+        guard let plistData = CMSProfile.plistData(data) else { return nil }
         return (try? PropertyListSerialization.propertyList(from: plistData, format: nil)) as? [String: Any]
     }
 

@@ -75,25 +75,8 @@ enum DeploymentLog {
     /// subprocess never blocks the main actor (this runs on the deploy and
     /// fleet-refresh paths).
     static func payloadIdentifier(_ data: Data) async -> String? {
-        let plistData: Data
-        if data.first == 0x30 {
-            let decoded = await Task.detached(priority: .userInitiated) { () -> Data in
-                let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("edict-\(UUID().uuidString).mobileconfig")
-                defer { try? FileManager.default.removeItem(at: tmp) }
-                guard (try? data.write(to: tmp)) != nil else { return Data() }
-                let p = Process()
-                p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-                p.arguments = ["cms", "-D", "-i", tmp.path]
-                let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
-                do { try p.run() } catch { return Data() }
-                p.waitUntilExit()
-                return out.fileHandleForReading.readDataToEndOfFile()
-            }.value
-            if decoded.isEmpty { return nil }
-            plistData = decoded
-        } else {
-            plistData = data
-        }
+        guard let plistData = await Task.detached(priority: .userInitiated, operation: { CMSProfile.plistData(data) }).value
+        else { return nil }
         guard let obj = try? PropertyListSerialization.propertyList(from: plistData, format: nil) as? [String: Any]
         else { return nil }
         return obj["PayloadIdentifier"] as? String
