@@ -115,15 +115,9 @@ final class TailscaleBrowser {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: path)
             p.arguments = ["status", "--json"]
-            let outPipe = Pipe()
-            let errPipe = Pipe()
-            p.standardOutput = outPipe
-            p.standardError = errPipe
             do {
-                try p.run()
-                p.waitUntilExit()
+                let data = try p.runCapturing().out
                 guard p.terminationStatus == 0 else { continue }
-                let data = outPipe.fileHandleForReading.readDataToEndOfFile()
                 return data.isEmpty ? nil : data
             } catch {
                 continue

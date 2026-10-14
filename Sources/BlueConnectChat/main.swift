@@ -558,7 +558,7 @@ final class ChatAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if !force && w.isKeyWindow { return }
         let original = w.level
         w.level = .floating
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         NSRunningApplication.current.activate()
         w.orderFrontRegardless()
         w.makeKey()

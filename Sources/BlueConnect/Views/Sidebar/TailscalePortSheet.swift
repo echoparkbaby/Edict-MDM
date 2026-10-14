@@ -63,6 +63,7 @@ struct TailscalePortSheet: View {
         .frame(width: 380)
         .onAppear {
             let existing = settings.tailscalePortOverrides[peerName]
+            userText = existing?.user ?? ""
             sshText = existing?.ssh.map(String.init) ?? ""
             vncText = existing?.vnc.map(String.init) ?? ""
         }

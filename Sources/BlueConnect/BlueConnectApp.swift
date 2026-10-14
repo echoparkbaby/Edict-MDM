@@ -484,7 +484,7 @@ final class MainWindowGuard {
     }
 }
 
-private extension NSWindow {
+extension NSWindow {
     var isBlueConnectAdminMainWindow: Bool {
         title == "BlueConnect Admin"
     }

@@ -14,10 +14,7 @@ enum CMSProfile {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         p.arguments = ["cms", "-D", "-i", tmp.path]
-        let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
-        do { try p.run() } catch { return nil }
-        p.waitUntilExit()
-        let d = out.fileHandleForReading.readDataToEndOfFile()
-        return d.isEmpty ? nil : d
+        guard let d = try? p.runCapturing().out, !d.isEmpty else { return nil }
+        return d
     }
 }

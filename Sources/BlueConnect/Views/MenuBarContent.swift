@@ -458,20 +458,17 @@ struct MenuBarContent: View {
     private var footer: some View {
         VStack(spacing: 0) {
             FooterButton(label: "Open BlueConnect Admin", icon: "macwindow") {
-                NSApp.activate(ignoringOtherApps: true)
-                if let win = NSApp.windows.first(where: { $0.title.contains("BlueConnect") }) {
-                    win.makeKeyAndOrderFront(nil)
-                }
+                MainWindowReopener.shared.reopen()
             }
             FooterButton(label: "New Terminal", icon: "terminal") {
                 terminals.openLocalShell()
-                NSApp.activate(ignoringOtherApps: true)
+                NSApp.activate()
                 if let win = NSApp.windows.first(where: { $0.title.contains("BlueConnect") }) {
                     win.makeKeyAndOrderFront(nil)
                 }
             }
             FooterButton(label: "Activity Log…", icon: "list.bullet.rectangle") {
-                NSApp.activate(ignoringOtherApps: true)
+                NSApp.activate()
                 if let win = NSApp.windows.first(where: { $0.title.contains("BlueConnect") }) {
                     win.makeKeyAndOrderFront(nil)
                 }
@@ -483,7 +480,7 @@ struct MenuBarContent: View {
                 NotificationCenter.default.post(name: .blueConnectOpenActivityLog, object: nil)
             }
             FooterButton(label: "Settings…", icon: "gearshape") {
-                NSApp.activate(ignoringOtherApps: true)
+                NSApp.activate()
                 openSettings()
             }
             FooterButton(label: "Quit", icon: "power", role: .destructive) {

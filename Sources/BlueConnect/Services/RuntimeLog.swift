@@ -51,7 +51,7 @@ final class RuntimeLog {
         entries.insert(e, at: 0)
         if entries.count > cap { entries.removeLast(entries.count - cap) }
         // Mirror to NSLog so Console.app + stdout still see it.
-        NSLog("[\(category)] \(msg)")
+        NSLog("%@", "[\(category)] \(msg)")
     }
 }
 

@@ -161,12 +161,8 @@ enum EnrollmentProfileExporter {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
             p.arguments = ["find-identity", "-v", "-p", "codesigning"]
-            let pipe = Pipe()
-            p.standardOutput = pipe
-            p.standardError = Pipe()
-            do { try p.run() } catch { return nil }
-            p.waitUntilExit()
-            let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            guard let (outData, _) = try? p.runCapturing() else { return nil }
+            let out = String(data: outData, encoding: .utf8) ?? ""
             // Lines look like:  1) ABC123 "Developer ID Application: Name (TEAMID)"
             for line in out.split(separator: "\n") {
                 if line.contains("Developer ID Application"),

@@ -279,7 +279,7 @@ struct QuickActionsBrowserWindow: View {
         // .onChange / .task) is open. If it was closed, this also
         // gives ContentView a chance to mount and pick up the
         // pendingRun we're about to set.
-        openWindow(id: "main")
+        MainWindowReopener.shared.reopen()
         launcher.pendingRun = .init(host: host, action: action, command: command)
     }
 

@@ -28,7 +28,7 @@ struct ConnectPanel: View {
     @State private var remoteUser: String = ""
     @State private var notes: String = ""
     @State private var notesDirty: Bool = false
-    @State private var notesHostId: Int = -1
+    @State private var notesHost: BlueSkyHost?
     /// Holds the serial that was just copied to the clipboard via the
     /// click-to-copy on the inventory header. Flashes back to nil
     /// after ~1.2s so the "Copied" affordance is short-lived.
@@ -106,6 +106,7 @@ struct ConnectPanel: View {
     private func mdmTab(host: BlueSkyHost) -> some View {
         if let entry = mdmFleet.entry(forSerial: host.serialnum) {
             MDMHostDetail(host: host, entry: entry)
+                .id(entry.enrollmentID)   // fresh state per Mac; stale DDM/inventory otherwise carried over
         } else {
             VStack(alignment: .leading, spacing: 8) {
                 Label("Not enrolled in MDM", systemImage: "shield.slash").font(.subheadline.bold())
@@ -355,7 +356,7 @@ struct ConnectPanel: View {
                 .onAppear { syncNotes(host: host) }
                 .onChange(of: host.id) { syncNotes(host: host) }
                 .onChange(of: notes) { _, newValue in
-                    if notesHostId == host.id {
+                    if notesHost?.id == host.id {
                         notesDirty = newValue != (host.notes ?? "")
                     }
                 }
@@ -363,9 +364,12 @@ struct ConnectPanel: View {
     }
 
     private func syncNotes(host: BlueSkyHost) {
+        // Switching hosts with unsaved edits: save them to the host they
+        // were typed for instead of silently discarding.
+        if notesDirty, let prev = notesHost, prev.id != host.id { onSaveNotes(prev, notes) }
         notes = host.notes ?? ""
         notesDirty = false
-        notesHostId = host.id
+        notesHost = host
     }
 
     private func hostHeader(_ host: BlueSkyHost) -> some View {

@@ -98,7 +98,7 @@ struct LoginView: View {
     private func tryLogin() async {
         let u = url.trimmingCharacters(in: .whitespacesAndNewlines)
         let n = username.trimmingCharacters(in: .whitespacesAndNewlines)
-        let p = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        let p = password   // never trim: spaces can be part of a password
 
         checking = true
         errorMessage = nil

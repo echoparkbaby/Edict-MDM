@@ -53,7 +53,7 @@ struct PackagePickerWindow: View {
     /// Activating explicitly avoids the dead first-click.
     private func activateAndFocus() {
         DispatchQueue.main.async {
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.activate()
             // Look up the picker window by title and make it key. The
             // SwiftUI Window scene's title is set in BlueConnectApp.swift
             // ("Install Package…") and the AppKit-side NSWindow.title

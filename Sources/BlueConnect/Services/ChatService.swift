@@ -598,22 +598,16 @@ final class ChatService: ObservableObject, Identifiable {
         ]
 
         let proc = Process()
-        proc.launchPath = "/usr/bin/ssh"
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
         proc.arguments = args
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        proc.standardOutput = outPipe
-        proc.standardError = errPipe
         liveProcesses.append(proc)
         defer { liveProcesses.removeAll { $0 === proc } }
 
         return await Task.detached(priority: .userInitiated) {
-            do { try proc.run() } catch {
+            let outData: Data, errData: Data
+            do { (outData, errData) = try proc.runCapturing() } catch {
                 return ShellResult(status: -2, stdout: "", stderr: "\(error)")
             }
-            proc.waitUntilExit()
-            let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
             return ShellResult(
                 status: proc.terminationStatus,
                 stdout: String(data: outData, encoding: .utf8) ?? "",

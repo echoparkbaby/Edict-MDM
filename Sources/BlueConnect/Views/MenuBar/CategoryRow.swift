@@ -13,7 +13,7 @@ struct CategoryRow: View {
     var body: some View {
         Button {
             UserDefaults.standard.set("cat:\(name)", forKey: "sidebarFilter")
-            NSApp.activate(ignoringOtherApps: true)
+            NSApp.activate()
             if let win = NSApp.windows.first(where: { $0.title.contains("BlueConnect") }) {
                 win.makeKeyAndOrderFront(nil)
             }

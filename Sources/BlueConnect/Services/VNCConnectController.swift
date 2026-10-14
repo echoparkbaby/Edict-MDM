@@ -110,7 +110,10 @@ final class VNCConnectController {
             // Off the main actor: availableData is a blocking read() that
             // hangs for the TCP connect timeout when ssh is alive but silent
             // (slow/black-holed host) — the very case this modal reports.
-            let errData = await Task.detached { errPipe.fileHandleForReading.availableData }.value
+            // Kill ssh first so its stderr hits EOF; reading a live-but-silent
+            // ssh would block for the whole TCP connect timeout.
+            p.terminate()
+            let errData = await Task.detached { errPipe.fileHandleForReading.readDataToEndOfFile() }.value
             let errStr = (String(data: errData, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let detail: String
             if errStr.contains("Connection refused") && errStr.contains("22") {
@@ -132,7 +135,6 @@ final class VNCConnectController {
                 detail = errStr
             }
             phase = .failed(detail)
-            p.terminate()
             return
         }
 

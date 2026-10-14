@@ -407,12 +407,16 @@ final class InstallController {
 
         stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            guard !data.isEmpty, let s = String(data: data, encoding: .utf8) else { return }
+            // Empty read = EOF; unhook or the handler re-fires forever.
+            if data.isEmpty { handle.readabilityHandler = nil; return }
+            guard let s = String(data: data, encoding: .utf8) else { return }
             Task { @MainActor in self?.appendOutput(s) }
         }
         stderr.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            guard !data.isEmpty, let s = String(data: data, encoding: .utf8) else { return }
+            // Empty read = EOF; unhook or the handler re-fires forever.
+            if data.isEmpty { handle.readabilityHandler = nil; return }
+            guard let s = String(data: data, encoding: .utf8) else { return }
             Task { @MainActor in self?.appendErrors(s) }
         }
 

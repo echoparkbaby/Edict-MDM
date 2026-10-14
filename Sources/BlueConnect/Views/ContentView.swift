@@ -561,10 +561,10 @@ struct ContentView: View {
     }
 
     /// Wired into the App's `Connect` menu via `@FocusedValue`. Each
-    /// closure operates on the first selected host (or the host currently
-    /// shown in ConnectPanel for single-row workflows).
+    /// closure operates on the first selected host; with nothing selected
+    /// the commands disable rather than hitting whichever row sorts first.
     private var currentHostActions: HostActions {
-        let target: BlueSkyHost? = selectedHosts.first ?? filteredAndSorted.first
+        let target: BlueSkyHost? = selectedHosts.first
         return HostActions(
             hasTarget: target != nil,
             ssh:  { if let h = target, h.active { runQuickAction(host: h, kind: .ssh) } },
@@ -951,7 +951,7 @@ struct ContentView: View {
     private var exportFilename: String { "BlueSkyHosts-\(Self.dateStamp()).csv" }
 
     private func handleExportResult(_ result: Result<URL, Error>) {
-        if case .failure(let e) = result { NSLog("export err: \(e)") }
+        if case .failure(let e) = result { NSLog("%@", "export err: \(e)") }
         exportDoc = nil
     }
 
@@ -980,7 +980,7 @@ struct ContentView: View {
             )
             svc.onConnect = { h in recents.recordConnect(blueskyid: h.blueskyid) }
             svc.openSCPInTerminal(host: host, remoteUser: effectiveRemoteUser(host: host), sourceURL: url)
-        case .failure(let e): NSLog("terminal scp picker err: \(e)")
+        case .failure(let e): NSLog("%@", "terminal scp picker err: \(e)")
         }
         pendingTerminalScpHost = nil
     }

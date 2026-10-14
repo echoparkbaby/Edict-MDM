@@ -92,6 +92,12 @@ enum KeychainHelper {
     /// import that pulls secrets out of the legacy BlueConnect Admin
     /// keychain into this app's namespace.
     static func read(account: String, service: String) -> String? {
+        readWithStatus(account: account, service: service).value
+    }
+
+    /// Like `read`, but also returns the OSStatus so callers can tell
+    /// "not stored" (`errSecItemNotFound`) from "keychain locked / denied".
+    static func readWithStatus(account: String, service: String = service) -> (value: String?, status: OSStatus) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -104,8 +110,8 @@ enum KeychainHelper {
         guard status == errSecSuccess,
               let data = result as? Data,
               let str = String(data: data, encoding: .utf8)
-        else { return nil }
-        return str
+        else { return (nil, status) }
+        return (str, status)
     }
 
     /// All generic-password account names stored under `service`. Returns

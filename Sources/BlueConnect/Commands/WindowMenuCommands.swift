@@ -30,19 +30,15 @@ final class MainWindowReopener {
     static let shared = MainWindowReopener()
     var open: (() -> Void)?
 
+    /// Fronts the existing main window; only opens a new one when none is
+    /// left. `openWindow(id: "main")` on a WindowGroup always adds another
+    /// window, so callers must come through here.
     func reopen() {
-        if let open {
-            open()
-            return
-        }
-        // Fallback when openWindow wasn't wired (cold start path where
-        // the WindowGroup itself isn't loaded): poke the NSApplication
-        // to ask SwiftUI to bring the main scene back. Matches Apple's
-        // own Dock-icon-click behaviour.
-        NSApp.activate(ignoringOtherApps: true)
-        for w in NSApp.windows where w.title == "BlueConnect Admin" {
+        NSApp.activate()
+        if let w = NSApp.windows.first(where: { $0.isBlueConnectAdminMainWindow && ($0.isVisible || $0.isMiniaturized) }) {
             w.makeKeyAndOrderFront(nil)
-            return
+        } else {
+            open?()
         }
     }
 }

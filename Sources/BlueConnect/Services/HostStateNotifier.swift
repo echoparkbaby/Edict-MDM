@@ -43,8 +43,8 @@ final class HostStateNotifier {
         guard !hasRequestedAuth else { return }
         hasRequestedAuth = true
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, err in
-            if let err = err { NSLog("Notification auth error: \(err.localizedDescription)") }
-            NSLog("Notification auth granted: \(granted)")
+            if let err = err { NSLog("%@", "Notification auth error: \(err.localizedDescription)") }
+            NSLog("%@", "Notification auth granted: \(granted)")
         }
     }
 

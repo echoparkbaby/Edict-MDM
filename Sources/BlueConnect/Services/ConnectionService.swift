@@ -182,16 +182,12 @@ struct ConnectionService {
         ]
         return await Task.detached(priority: .userInitiated) {
             let proc = Process()
-            proc.launchPath = "/usr/bin/scp"
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/scp")
             proc.arguments = args
-            let errPipe = Pipe()
-            proc.standardError = errPipe
-            proc.standardOutput = Pipe()
-            do { try proc.run() } catch {
+            let errData: Data
+            do { (_, errData) = try proc.runCapturing() } catch {
                 return (-1, "scp launch failed: \(error)")
             }
-            proc.waitUntilExit()
-            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
             let errStr = String(data: errData, encoding: .utf8) ?? ""
             return (proc.terminationStatus, errStr)
         }.value
@@ -214,15 +210,10 @@ struct ConnectionService {
         ]
         return await Task.detached(priority: .userInitiated) {
             let proc = Process()
-            proc.launchPath = "/usr/bin/ssh"
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
             proc.arguments = args
-            let outPipe = Pipe(); let errPipe = Pipe()
-            proc.standardOutput = outPipe; proc.standardError = errPipe
-            do { try proc.run() } catch { return (-1, "", "ssh launch failed: \(error)") }
-            proc.waitUntilExit()
-            let out = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            let err = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            return (proc.terminationStatus, out, err)
+            guard let (outData, errData) = try? proc.runCapturing() else { return (-1, "", "ssh launch failed") }
+            return (proc.terminationStatus, String(data: outData, encoding: .utf8) ?? "", String(data: errData, encoding: .utf8) ?? "")
         }.value
     }
 
@@ -606,7 +597,7 @@ struct ConnectionService {
             var err: NSDictionary?
             s.executeAndReturnError(&err)
             if let err = err {
-                NSLog("Terminal launch error: \(err)")
+                NSLog("%@", "Terminal launch error: \(err)")
             }
         }
     }
