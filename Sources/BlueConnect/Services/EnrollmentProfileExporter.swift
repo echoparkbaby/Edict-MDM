@@ -1,4 +1,6 @@
+import CryptoKit
 import Foundation
+import Security
 
 /// Generates the enrollment `.mobileconfig` from Edict's own settings —
 /// the same profile that used to be hand-built by a script on the
@@ -150,13 +152,22 @@ enum EnrollmentProfileExporter {
         return Data(xml.utf8)
     }
 
+    /// A keychain signing identity, pinned by its certificate's SHA-1 so a
+    /// duplicate/expired cert with the same name can't be picked instead.
+    /// Interpolates as its display name.
+    struct SigningIdentity: CustomStringConvertible, Sendable {
+        let sha1: String   // uppercase hex, as `security find-identity` prints it
+        let name: String
+        var description: String { name }
+    }
+
     /// First "Developer ID Application" identity in the login keychain,
     /// if any — used to sign the profile so it installs as Verified.
     ///
     /// Runs off the main actor: `security find-identity` spawns a
     /// subprocess and `waitUntilExit()` would otherwise stall the UI (this
     /// is called from the Enrollment view's `.task`, i.e. on every appear).
-    static func developerIDIdentity() async -> String? {
+    static func developerIDIdentity() async -> SigningIdentity? {
         await Task.detached(priority: .userInitiated) {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
@@ -167,38 +178,49 @@ enum EnrollmentProfileExporter {
             for line in out.split(separator: "\n") {
                 if line.contains("Developer ID Application"),
                    let open = line.firstIndex(of: "\""),
-                   let close = line.lastIndex(of: "\""), open < close {
-                    return String(line[line.index(after: open)..<close])
+                   let close = line.lastIndex(of: "\""), open < close,
+                   let hash = line[..<open].split(separator: " ").last, hash.count == 40 {
+                    return SigningIdentity(sha1: String(hash).uppercased(),
+                                           name: String(line[line.index(after: open)..<close]))
                 }
             }
             return nil
         }.value
     }
 
-    /// CMS-sign `profile` with `identity` via `/usr/bin/security cms -S`.
-    /// Returns the signed `.mobileconfig` bytes. Runs off the main actor —
-    /// the subprocess `waitUntilExit()` must not block the UI.
-    static func sign(_ profile: Data, identity: String) async throws -> Data {
+    /// CMS-sign `profile` with the keychain identity whose certificate
+    /// SHA-1 matches `identity.sha1`. Signs in-process (CMSEncodeContent)
+    /// rather than `security cms -N <name>`, which fails as "ambiguous"
+    /// when two certs share a name and can silently pick the wrong one.
+    /// Returns the signed `.mobileconfig` bytes. Runs off the main actor.
+    static func sign(_ profile: Data, identity: SigningIdentity) async throws -> Data {
         try await Task.detached(priority: .userInitiated) {
-            let tmp = FileManager.default.temporaryDirectory
-            let inURL = tmp.appendingPathComponent("edict-\(UUID().uuidString).mobileconfig")
-            let outURL = tmp.appendingPathComponent("edict-\(UUID().uuidString)-signed.mobileconfig")
-            defer { try? FileManager.default.removeItem(at: inURL)
-                    try? FileManager.default.removeItem(at: outURL) }
-            try profile.write(to: inURL)
-
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-            p.arguments = ["cms", "-S", "-N", identity, "-i", inURL.path, "-o", outURL.path]
-            let err = Pipe()
-            p.standardError = err
-            try p.run()
-            p.waitUntilExit()
-            guard p.terminationStatus == 0 else {
-                let msg = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "exit \(p.terminationStatus)"
-                throw ExportError.signing(msg.trimmingCharacters(in: .whitespacesAndNewlines))
+            let query: [String: Any] = [kSecClass as String: kSecClassIdentity,
+                                        kSecReturnRef as String: true,
+                                        kSecMatchLimit as String: kSecMatchLimitAll]
+            var items: CFTypeRef?
+            guard SecItemCopyMatching(query as CFDictionary, &items) == errSecSuccess,
+                  let all = items as? [SecIdentity] else {
+                throw ExportError.signing("no signing identities in the keychain")
             }
-            return try Data(contentsOf: outURL)
+            let match = all.first { id in
+                var cert: SecCertificate?
+                guard SecIdentityCopyCertificate(id, &cert) == errSecSuccess, let cert else { return false }
+                let digest = Insecure.SHA1.hash(data: SecCertificateCopyData(cert) as Data)
+                return digest.map { String(format: "%02X", $0) }.joined() == identity.sha1
+            }
+            guard let match else {
+                throw ExportError.signing("“\(identity.name)” (\(identity.sha1.prefix(8))…) not found in the keychain")
+            }
+            var out: CFData?
+            let status = profile.withUnsafeBytes { buf in
+                CMSEncodeContent(match, nil, nil, false, [], buf.baseAddress!, buf.count, &out)
+            }
+            guard status == errSecSuccess, let out else {
+                let msg = SecCopyErrorMessageString(status, nil) as String? ?? "OSStatus \(status)"
+                throw ExportError.signing(msg)
+            }
+            return out as Data
         }.value
     }
 }

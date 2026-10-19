@@ -14,7 +14,7 @@ struct EnrollmentView: View {
     @State private var savedProfiles: [SavedProfile] = []
     @State private var challengeBuffer = ""
     @State private var topic: String?
-    @State private var signingIdentity: String?
+    @State private var signingIdentity: EnrollmentProfileExporter.SigningIdentity?
     @State private var signProfile = true
     @State private var working = false
     @State private var status: String?
