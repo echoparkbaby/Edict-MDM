@@ -104,6 +104,7 @@ struct ChatWindow: View {
             }
             .buttonStyle(.borderless)
             .help("Clear chat history (both sides)")
+            .accessibilityLabel("Clear chat history")
             .disabled(chat.messages.isEmpty)
             Button("Close") { dismissWindow(id: "blueconnect-chat") }
                 .keyboardShortcut(.cancelAction)

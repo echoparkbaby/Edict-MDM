@@ -117,13 +117,16 @@ struct ScannedTableWindow: View {
     }
 
     var body: some View {
+        // Build/filter/sort once per render — body re-runs on every
+        // scan progress tick.
+        let visible = sortedRows
         VStack(spacing: 0) {
-            header
+            header(shown: visible.count)
             Divider()
             if scanner.results.isEmpty && !scanner.isScanning {
                 emptyState
             } else {
-                table
+                table(visible)
             }
         }
         .frame(minWidth: 600, idealWidth: 1100, minHeight: 400, idealHeight: 900)
@@ -148,13 +151,13 @@ struct ScannedTableWindow: View {
         }
     }
 
-    private var header: some View {
+    private func header(shown: Int) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "dot.radiowaves.left.and.right")
                 .foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Network Scan").font(.headline)
-                Text(headerSubtitle).font(.caption).foregroundStyle(.secondary)
+                Text(headerSubtitle(shown: shown)).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             // Compact search field — anchored next to Scan so it's
@@ -245,14 +248,13 @@ struct ScannedTableWindow: View {
               : "Switch UniFi controller profile")
     }
 
-    private var headerSubtitle: String {
+    private func headerSubtitle(shown: Int) -> String {
         if let err = scanner.lastError, !err.isEmpty { return err }
         if scanner.isScanning { return "Probing \(settings.scanSubnets)…" }
         if scanner.results.isEmpty { return "No results — click Scan to probe." }
         let total = scanner.results.count
         let tcp = scanner.results.filter { $0.hasSSH || $0.hasVNC }.count
         let unifiOnly = total - tcp
-        let shown = filteredRows.count
         let filterNote = (shown != total) ? " · showing \(shown)" : ""
         if unifiOnly == 0 {
             return "\(total) host\(total == 1 ? "" : "s") responded on TCP 22 or 5900\(filterNote)"
@@ -277,8 +279,8 @@ struct ScannedTableWindow: View {
     /// Table grants the user header-bar reordering, hide/show via
     /// right-click on the header, and `.tableColumnCustomization`
     /// state for persistence.
-    private var table: some View {
-        Table(sortedRows,
+    private func table(_ visible: [Row]) -> some View {
+        Table(visible,
               selection: $selection,
               sortOrder: $sortOrder,
               columnCustomization: $columnCustomization) {
@@ -309,12 +311,14 @@ struct ScannedTableWindow: View {
             TableColumn("SSH", value: \.sshSort) { (r: Row) in
                 Image(systemName: r.hasSSH ? "checkmark.circle.fill" : "xmark.circle")
                     .foregroundStyle(r.hasSSH ? .green : .secondary.opacity(0.4))
+                    .accessibilityLabel(r.hasSSH ? "SSH available" : "SSH unavailable")
             }
             .width(40)
             .customizationID("ssh")
             TableColumn("VNC", value: \.vncSort) { (r: Row) in
                 Image(systemName: r.hasVNC ? "checkmark.circle.fill" : "xmark.circle")
                     .foregroundStyle(r.hasVNC ? .blue : .secondary.opacity(0.4))
+                    .accessibilityLabel(r.hasVNC ? "VNC available" : "VNC unavailable")
             }
             .width(40)
             .customizationID("vnc")

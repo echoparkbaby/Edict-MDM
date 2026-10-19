@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct LocalNetworkRow: View {
     let service: LocalService
@@ -13,9 +12,7 @@ struct LocalNetworkRow: View {
     @Environment(\.openWindow) private var openWindow
     @State private var hovered = false
     @State private var showingPortSheet = false
-    @State private var showingScpPicker = false
     @State private var showingRunCommand = false
-    @State private var showingLocalFilePicker = false
     @State private var quickActionPending: QuickAction?
     @State private var pendingCommand = ""
 
@@ -155,19 +152,7 @@ struct LocalNetworkRow: View {
                 .environmentObject(settings)
                 .environment(tailscale)
         }
-        .fileImporter(isPresented: $showingScpPicker, allowedContentTypes: [.item]) { result in
-            if case .success(let url) = result { sendFileViaSCP(url) }
-        }
         .sheet(isPresented: $showingRunCommand) { runCommandSheet }
-        // Install Local .pkg / .dmg / .app — directly from the LAN, no BSC.
-        .fileImporter(isPresented: $showingLocalFilePicker,
-                      allowedContentTypes: [
-                        UTType(filenameExtension: "pkg") ?? .data,
-                        UTType(filenameExtension: "dmg") ?? .data,
-                        .application,
-                      ]) { result in
-            if case .success(let url) = result { installLocalFile(url) }
-        }
         // Quick Action sheet — reuses the existing field-driven sheet
         // (header now targets a generic name, not just BlueSkyHost).
         .sheet(item: $quickActionPending) { action in
@@ -188,8 +173,9 @@ struct LocalNetworkRow: View {
             }
             Text("Runs via direct SSH to \(service.displayHostname) as \(resolvedRemoteUser).")
                 .font(.caption).foregroundStyle(.secondary)
-            TextField("", text: $pendingCommand,
+            TextField("Command", text: $pendingCommand,
                       prompt: Text("e.g. uptime, sw_vers, sudo killall Finder"))
+                .labelsHidden()
                 .textFieldStyle(.roundedBorder)
                 .font(.body.monospaced())
             HStack {
@@ -253,20 +239,6 @@ struct LocalNetworkRow: View {
                           remoteUser: resolvedRemoteUser)
     }
 
-    private func sendFileViaSCP(_ url: URL) {
-        guard let port = service.sshPort else { return }
-        let svc = ConnectionService(
-            server: settings.serverFqdn,
-            adminKeyPath: settings.expandedKeyPath,
-            serverSshPort: settings.sshTunnelPort,
-            terminals: terminals
-        )
-        svc.openDirectSCP(hostname: service.hostname,
-                          port: port,
-                          remoteUser: resolvedRemoteUser,
-                          sourceURL: url)
-    }
-
     private func runRemoteCommand(_ command: String) {
         // First 24 chars of the command, for the tab title.
         let cmd = command.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -291,20 +263,6 @@ struct LocalNetworkRow: View {
                                     remoteUser: resolvedRemoteUser,
                                     command: cmd,
                                     label: label)
-    }
-
-    private func installLocalFile(_ url: URL) {
-        guard let port = service.sshPort else { return }
-        let target = InstallController.DirectTarget(
-            hostname: service.hostname,
-            port: port,
-            remoteUser: resolvedRemoteUser,
-            displayName: service.name
-        )
-        let ext = url.pathExtension.lowercased()
-        let appMode: InstallController.AppMode = ext == "app" ? .compress : .compress
-        installer.prepareDirect(target: target, localFile: url, appMode: appMode)
-        openWindow(id: "install-progress")
     }
 
     private func openRepoPicker() {

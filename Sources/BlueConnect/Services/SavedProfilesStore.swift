@@ -7,7 +7,7 @@ enum SavedProfilesStore {
     static let dirName = "EdictMDM"
 
     static var fileURL: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let base = URL.applicationSupportDirectory
         return base.appendingPathComponent(dirName, isDirectory: true)
             .appendingPathComponent("saved-profiles.json")
     }

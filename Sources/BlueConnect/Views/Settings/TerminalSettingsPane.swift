@@ -149,7 +149,7 @@ struct TerminalSettingsPane: View {
     private func colorRow(_ label: String, hex: Binding<String>) -> some View {
         LabeledContent(label) {
             HStack(spacing: 10) {
-                ColorPicker("", selection: nsColorBinding(hex), supportsOpacity: false)
+                ColorPicker(label, selection: nsColorBinding(hex), supportsOpacity: false)
                     .labelsHidden()
                 Text(hex.wrappedValue.uppercased())
                     .font(.caption.monospaced())

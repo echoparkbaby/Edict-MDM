@@ -15,6 +15,8 @@ struct QuickActionsSettingsPane: View {
     /// from `showingAddSheet` so we can't accidentally end up in both
     /// states at once.
     @State private var editingAction: CustomQuickAction?
+    /// Pending delete awaiting confirmation.
+    @State private var deletingAction: CustomQuickAction?
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -40,6 +42,20 @@ struct QuickActionsSettingsPane: View {
             CustomQuickActionEditor(existing: existing) { updated in
                 quickActions.updateCustom(updated)
             }
+        }
+        .confirmationDialog(
+            "Delete \u{201C}\(deletingAction?.label ?? "")\u{201D}?",
+            isPresented: Binding(
+                get: { deletingAction != nil },
+                set: { if !$0 { deletingAction = nil } }
+            ),
+            presenting: deletingAction
+        ) { custom in
+            Button("Delete", role: .destructive) {
+                quickActions.removeCustom(id: custom.id)
+            }
+        } message: { _ in
+            Text("This custom Quick Action will be removed.")
         }
     }
 
@@ -118,7 +134,7 @@ struct QuickActionsSettingsPane: View {
                 }
             }
             Spacer()
-            Toggle("", isOn: Binding(
+            Toggle(action.label, isOn: Binding(
                 get: { quickActions.isEnabled(action.id) },
                 set: { _ in quickActions.toggleEnabled(action.id) }
             ))
@@ -184,15 +200,17 @@ struct QuickActionsSettingsPane: View {
             Button {
                 editingAction = custom
             } label: {
-                Image(systemName: "pencil")
+                Label("Edit", systemImage: "pencil")
+                    .labelStyle(.iconOnly)
             }
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
             .help("Edit this custom action")
             Button {
-                quickActions.removeCustom(id: custom.id)
+                deletingAction = custom
             } label: {
-                Image(systemName: "trash")
+                Label("Delete", systemImage: "trash")
+                    .labelStyle(.iconOnly)
             }
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)

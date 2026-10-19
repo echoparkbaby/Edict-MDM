@@ -89,7 +89,7 @@ final class MunkiReportInventoryStore {
     // MARK: - Disk cache
 
     private static func appSupportFile(_ name: String) -> URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let base = URL.applicationSupportDirectory
         return base.appendingPathComponent("EdictMDM", isDirectory: true)
             .appendingPathComponent(name)
     }

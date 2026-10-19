@@ -251,7 +251,7 @@ final class InstallController {
         self.pendingFileName = ""
         Task { [weak self] in
             let m = await PackageMetadata.read(from: localFile)
-            await MainActor.run { self?.fileMetadata = m }
+            self?.fileMetadata = m
         }
     }
 
@@ -278,7 +278,7 @@ final class InstallController {
         self.pendingFileName = ""
         Task { [weak self] in
             let m = await PackageMetadata.read(from: localFile)
-            await MainActor.run { self?.fileMetadata = m }
+            self?.fileMetadata = m
         }
     }
 
@@ -366,21 +366,17 @@ final class InstallController {
             Task { [weak self] in
                 do {
                     let url = try await download()
-                    await MainActor.run {
-                        guard let self else { return }
-                        self.localFile = url
-                        self.log.append("✓ Download complete: \(url.lastPathComponent)\n")
-                        Task { [weak self] in
-                            let m = await PackageMetadata.read(from: url)
-                            await MainActor.run { self?.fileMetadata = m }
-                        }
-                        self.runInstallProcess(settings: settings)
+                    guard let self else { return }
+                    self.localFile = url
+                    self.log.append("✓ Download complete: \(url.lastPathComponent)\n")
+                    Task { [weak self] in
+                        let m = await PackageMetadata.read(from: url)
+                        self?.fileMetadata = m
                     }
+                    self.runInstallProcess(settings: settings)
                 } catch {
-                    await MainActor.run {
-                        self?.log.append("✖ Download failed: \(error.localizedDescription)\n")
-                        self?.phase = .failed("Download: \(error.localizedDescription)")
-                    }
+                    self?.log.append("✖ Download failed: \(error.localizedDescription)\n")
+                    self?.phase = .failed("Download: \(error.localizedDescription)")
                 }
             }
             return
@@ -556,7 +552,7 @@ final class InstallController {
             remoteUser = settings.defaultRemoteUser
             sshPortArg = host.sshPort
             sshHostArg = "localhost"
-            let proxy = "ProxyCommand=ssh -o WarnWeakCrypto=no -p \(settings.sshTunnelPort) -i \(settings.expandedKeyPath) admin@\(settings.serverFqdn) /bin/nc %h %p"
+            let proxy = "ProxyCommand=ssh -o WarnWeakCrypto=no -o IdentitiesOnly=yes -p \(settings.sshTunnelPort) -i \(settings.expandedKeyPath) admin@\(settings.serverFqdn) /bin/nc %h %p"
             proxyOption = "-o \(Self.shq(proxy)) "
         } else {
             // canStart / start() guards prevent this, but make the
@@ -622,7 +618,7 @@ final class InstallController {
 
         let sshBase = "ssh \(proxyOption)-o StrictHostKeyChecking=no -o WarnWeakCrypto=no -p \(sshPortArg) \(Self.shq("\(remoteUser)@\(sshHostArg)"))"
         let installSSH = sudoPassword.isEmpty
-            ? sshBase.replacingOccurrences(of: "ssh ", with: "ssh -t ") + " \(Self.shq(sudoWrap))"
+            ? "ssh -t " + sshBase.dropFirst("ssh ".count) + " \(Self.shq(sudoWrap))"
             : "printf '%s\\n' \"$BCADMIN_PW\" | \(sshBase) \(Self.shq(sudoWrap))"
 
         // ---- Upload command (scp through `script` so we get a TTY → % progress) ----

@@ -4,7 +4,7 @@ import SwiftTerm
 
 @MainActor
 @Observable
-final class TerminalSession: NSObject, Identifiable, LocalProcessTerminalViewDelegate {
+final class TerminalSession: NSObject, Identifiable, @preconcurrency LocalProcessTerminalViewDelegate {
     let id = UUID()
     let title: String
     let kind: Kind
@@ -135,7 +135,10 @@ final class TerminalSession: NSObject, Identifiable, LocalProcessTerminalViewDel
     }
 
     func terminate() {
-        if let pid = view.process.shellPid as pid_t? {
+        // shellPid is 0 before spawn / after exit; kill(0, …) would
+        // signal our whole process group.
+        let pid = view.process.shellPid
+        if pid > 0 {
             kill(pid, SIGTERM)
         }
         isRunning = false

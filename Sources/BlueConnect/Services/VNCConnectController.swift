@@ -65,7 +65,7 @@ final class VNCConnectController {
         // operator uses for fleet access, which may not be bluesky_admin.
         let proxy = "ProxyCommand=ssh -o WarnWeakCrypto=no -o IdentitiesOnly=yes -p \(serverSshPort) -i \(adminKeyPath) admin@\(server) /bin/nc %h %p"
         let p = Process()
-        p.launchPath = "/usr/bin/ssh"
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
         // BatchMode=yes was here historically to fail fast when creds are
         // missing. Removed v1.5.6: it also blocked the macOS keychain
         // from silently answering a passphrase prompt for the BSC

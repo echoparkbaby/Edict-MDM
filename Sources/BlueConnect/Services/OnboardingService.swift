@@ -115,7 +115,9 @@ struct OnboardingService {
                     try await kmf.assign(enrollmentID: id, toSet: set)
                     settings.markAppliedGroupSet(deviceID: id, set: set)
                     did = true
-                } catch {}
+                } catch {
+                    Log.warn("Onboarding", "assign \(id) to set \(set) failed: \(error.localizedDescription)")
+                }
             }
             let already = Set((deployed[id] ?? []).map(\.identifier))
             for pid in bl.profiles {
@@ -128,7 +130,9 @@ struct OnboardingService {
                     await DeploymentLog.record(profileData: sp.data, name: sp.name, to: [id],
                                                nowEpoch: Date().timeIntervalSince1970)
                     did = true
-                } catch {}
+                } catch {
+                    Log.warn("Onboarding", "install profile \(pid) on \(id) failed: \(error.localizedDescription)")
+                }
             }
             if did {
                 changed += 1

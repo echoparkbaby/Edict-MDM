@@ -80,8 +80,8 @@ struct PackageMetadata: Equatable {
         let version = attribute(in: pkgInfoXML, tag: "pkg-info", attr: "version")
             ?? attribute(in: distXML, tag: "pkg-ref", attr: "version")
         let title = tagText(in: distXML, tag: "title")
-        let minSystem = attribute(in: distXML, tag: "options", attr: "hostArchitectures") // not perfect; pkgs vary
-            ?? attribute(in: distXML, tag: "allowed-os-versions", attr: "min")
+        // Distribution: <allowed-os-versions><os-version min="…"/></allowed-os-versions>
+        let minSystem = attribute(in: distXML, tag: "os-version", attr: "min")
 
         if id == nil && version == nil && title == nil { return nil }
         return PackageMetadata(
@@ -98,10 +98,14 @@ struct PackageMetadata: Equatable {
     /// Pull `attr="value"` from the first `<tag …>` occurrence in `xml`.
     private static func attribute(in xml: String, tag: String, attr: String) -> String? {
         guard let tagRange = xml.range(of: "<\(tag)") else { return nil }
-        guard let attrStart = xml.range(of: "\(attr)=\"", range: tagRange.upperBound..<xml.endIndex)
+        // Bound the search to this tag's own attributes (up to its '>').
+        let tagEnd = xml.range(of: ">", range: tagRange.upperBound..<xml.endIndex)?.lowerBound ?? xml.endIndex
+        guard let attrStart = xml.range(of: " \(attr)=\"", range: tagRange.upperBound..<tagEnd)
+              ?? xml.range(of: "\t\(attr)=\"", range: tagRange.upperBound..<tagEnd)
+              ?? xml.range(of: "\n\(attr)=\"", range: tagRange.upperBound..<tagEnd)
         else { return nil }
         // Stop at the next "
-        guard let attrEnd = xml.range(of: "\"", range: attrStart.upperBound..<xml.endIndex)
+        guard let attrEnd = xml.range(of: "\"", range: attrStart.upperBound..<tagEnd)
         else { return nil }
         let value = xml[attrStart.upperBound..<attrEnd.lowerBound]
         return value.isEmpty ? nil : String(value)

@@ -145,6 +145,7 @@ struct RowIconPicker: View {
                 chatIcon = "bubble.left.and.bubble.right.fill"
                 scanWiredIcon = "network"
                 scanWirelessIcon = "dot.radiowaves.left.and.right"
+                mdmDeployIcon = "hammer.fill"
             }
             .controlSize(.small)
             Spacer()

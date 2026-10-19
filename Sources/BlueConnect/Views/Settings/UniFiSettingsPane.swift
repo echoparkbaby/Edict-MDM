@@ -145,7 +145,11 @@ struct UniFiSettingsPane: View {
                 .help("Base URL of the UniFi Network Application. Self-signed certs are accepted.")
             SecureField("API Key", text: $apiKeyBuffer)
                 .onChange(of: apiKeyBuffer) { _, newValue in
-                    settings.setUnifiAPIKey(newValue, for: profile)
+                    // Resolve the profile at fire time and skip no-op writes:
+                    // reloadAPIKeyBuffer() on profile switch also fires this,
+                    // and must not write the new key into the old profile.
+                    guard let p = currentProfile, newValue != settings.unifiAPIKey(for: p) else { return }
+                    settings.setUnifiAPIKey(newValue, for: p)
                     testResult = nil
                 }
                 .help("Generated in UniFi: Settings → Control Plane → Integrations → API → Create API Key.")

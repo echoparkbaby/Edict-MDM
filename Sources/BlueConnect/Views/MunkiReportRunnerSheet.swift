@@ -208,7 +208,10 @@ struct MunkiReportRunnerSheet: View {
         let user    = await MainActor.run { remoteUser }
         let hostPort = host.sshPort
 
-        let proxy = "ProxyCommand=ssh -o WarnWeakCrypto=no -p \(sshPort) -i \(keyPath) admin@\(server) /bin/nc %h %p"
+        // ProxyCommand runs via the shell: single-quote the key path so a
+        // path with spaces doesn't split.
+        let quotedKey = "'" + keyPath.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        let proxy = "ProxyCommand=ssh -o WarnWeakCrypto=no -o IdentitiesOnly=yes -p \(sshPort) -i \(quotedKey) admin@\(server) /bin/nc %h %p"
         // The remote command:
         //   1. Verify the runner script exists & is executable.
         //   2. Run it under sudo -S (password from stdin) with -p '' so

@@ -151,7 +151,13 @@ final class PackageCatalogStore {
         let port = url.port ?? 22
         let remoteDir = url.path.isEmpty ? "/" : url.path
         let local = localFile.path
-        let batchScript = "cd \(remoteDir)\nput \(local)\nquit\n"
+        // sftp batch args split on whitespace; double-quote and escape
+        // so paths with spaces/quotes survive.
+        func q(_ s: String) -> String {
+            "\"" + s.replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "\"", with: "\\\"") + "\""
+        }
+        let batchScript = "cd \(q(remoteDir))\nput \(q(local))\nquit\n"
 
         return await Task.detached(priority: .userInitiated) {
             let p = Process()

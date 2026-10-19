@@ -80,6 +80,7 @@ struct TailscaleSection: View {
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
                 .help("Manage visible peers")
+                .accessibilityLabel("Manage visible peers")
                 .popover(isPresented: $showingManager, arrowEdge: .trailing) {
                     TailscalePeerManager()
                         .environmentObject(settings)

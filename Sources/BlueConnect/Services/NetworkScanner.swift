@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import Observation
+import os
 
 /// Active TCP-probe scanner for Macs on the LAN that the Bonjour
 /// browser misses — Macs with mDNS turned off, Macs the user just
@@ -258,7 +259,7 @@ final class NetworkScanner {
                 return String(cString: buf)
             }
             group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(deadline * 1_000_000_000))
+                try? await Task.sleep(for: .seconds(deadline))
                 return nil
             }
             // Take whichever task returns first.
@@ -266,55 +267,6 @@ final class NetworkScanner {
             group.cancelAll()
             return first ?? nil
         }
-    }
-
-    /// Send an mDNS reverse PTR query for `<ip>.in-addr.arpa.` via
-    /// `dns-sd`, kill the process after `timeout` seconds, and parse
-    /// the first PTR rdata that comes back. dns-sd has no built-in
-    /// timeout flag, so we lean on `Process.terminate()` after a
-    /// scheduled deadline.
-    ///
-    /// Sample dns-sd PTR output line:
-    ///   `Z:11:09:07.000  Add 2  4 4.0.0.10.in-addr.arpa. PTR foo.local.`
-    /// The last token is the answer name; trailing `.` is stripped.
-    private static func mdnsReversePTR(ip: String, timeout: TimeInterval) async -> String? {
-        let octets = ip.split(separator: ".")
-        guard octets.count == 4 else { return nil }
-        let reverseName = "\(octets[3]).\(octets[2]).\(octets[1]).\(octets[0]).in-addr.arpa."
-        return await Task.detached(priority: .utility) {
-            let proc = Process()
-            proc.launchPath = "/usr/bin/dns-sd"
-            proc.arguments = ["-Q", reverseName, "PTR"]
-            let outPipe = Pipe()
-            proc.standardOutput = outPipe
-            proc.standardError = Pipe()
-            do { try proc.run() } catch { return nil }
-            // Schedule the kill — dns-sd otherwise runs forever
-            // waiting for additional answers.
-            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-                if proc.isRunning { proc.terminate() }
-            }
-            proc.waitUntilExit()
-            let raw = String(
-                data: outPipe.fileHandleForReading.readDataToEndOfFile(),
-                encoding: .utf8
-            ) ?? ""
-            for line in raw.split(separator: "\n") {
-                let s = String(line)
-                // Match an answer line — contains both "PTR" and the
-                // reverse name (or just "Add" + PTR for v2 dns-sd).
-                guard s.contains(" PTR ") || s.contains("\tPTR\t") else { continue }
-                let tokens = s.split(separator: " ", omittingEmptySubsequences: true)
-                guard let last = tokens.last else { continue }
-                let name = String(last).trimmingCharacters(in: .whitespacesAndNewlines)
-                let stripped = name.hasSuffix(".") ? String(name.dropLast()) : name
-                if !stripped.isEmpty,
-                   stripped != reverseName.trimmingCharacters(in: CharacterSet(charactersIn: ".")) {
-                    return stripped
-                }
-            }
-            return nil
-        }.value
     }
 
     // MARK: - Probing
@@ -347,9 +299,13 @@ final class NetworkScanner {
             // Resolve the continuation once — there are three possible
             // race winners (ready / failed / timeout) and we must
             // resume exactly once or Swift traps.
-            let resumed = Atomic(false)
-            func finish(_ value: Bool) {
-                if resumed.swap(true) == false {
+            let resumed = OSAllocatedUnfairLock(initialState: false)
+            @Sendable func finish(_ value: Bool) {
+                let first = resumed.withLock { done in
+                    defer { done = true }
+                    return !done
+                }
+                if first {
                     conn.cancel()
                     continuation.resume(returning: value)
                 }
@@ -443,21 +399,5 @@ final class NetworkScanner {
         let parts = ip.split(separator: ".").compactMap { UInt32($0) }
         guard parts.count == 4 else { return 0 }
         return (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]
-    }
-}
-
-/// Tiny atomic flag — used inside `probePort` to make sure the
-/// continuation resumes exactly once across the {ready, failed,
-/// timeout} race. NSLock + an Int is heavier than this needs, and
-/// the Swift Atomics package is out of scope.
-private final class Atomic<T> {
-    private var value: T
-    private let lock = NSLock()
-    init(_ v: T) { self.value = v }
-    func swap(_ new: T) -> T {
-        lock.lock(); defer { lock.unlock() }
-        let old = value
-        value = new
-        return old
     }
 }

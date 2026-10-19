@@ -59,14 +59,13 @@ struct HostnamePreview: View {
                     .font(.caption.monospaced())
                     .foregroundStyle(active ? .secondary : Color.secondary.opacity(0.5))
                     .frame(width: 110, alignment: .leading)
-                ((Text(isEmpty ? "—" : value)
+                let valueText = Text(isEmpty ? "—" : value)
                     .foregroundStyle(active
                                      ? (isEmpty ? AnyShapeStyle(HierarchicalShapeStyle.secondary)
                                                 : AnyShapeStyle(HierarchicalShapeStyle.primary))
-                                     : AnyShapeStyle(Color.secondary.opacity(0.5))))
-                 + (suffix.isEmpty
-                    ? Text("")
-                    : Text(suffix).foregroundStyle(.secondary)))
+                                     : AnyShapeStyle(Color.secondary.opacity(0.5)))
+                let suffixText = Text(suffix).foregroundStyle(.secondary)
+                Text("\(valueText)\(suffixText)")
                     .font(.callout.monospaced().bold())
                 Spacer(minLength: 0)
                 if !active {

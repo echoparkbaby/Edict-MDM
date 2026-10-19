@@ -34,13 +34,23 @@ struct TerminalContainer: NSViewRepresentable {
         return container
     }
 
+    final class Coordinator {
+        weak var lastWindow: NSWindow?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func updateNSView(_ nsView: NSView, context: Context) {
         // SwiftUI reparents the SwiftTerm view between attached and
-        // detached layouts; re-take focus if we lost it during the
-        // transition. Idempotent when we're already first responder.
+        // detached layouts; re-take focus only when the terminal has
+        // landed in a new window, not on every SwiftUI update (which
+        // would steal focus from other controls in the same window).
+        let coordinator = context.coordinator
         Task { @MainActor in
-            if terminal.window?.firstResponder !== terminal {
-                terminal.window?.makeFirstResponder(terminal)
+            guard let window = terminal.window, window !== coordinator.lastWindow else { return }
+            coordinator.lastWindow = window
+            if window.firstResponder !== terminal {
+                window.makeFirstResponder(terminal)
             }
         }
     }

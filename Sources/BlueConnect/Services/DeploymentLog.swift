@@ -14,7 +14,7 @@ enum DeploymentLog {
     }
 
     private static var fileURL: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let base = URL.applicationSupportDirectory
         return base.appendingPathComponent(SavedProfilesStore.dirName, isDirectory: true)
             .appendingPathComponent("deployments.json")
     }

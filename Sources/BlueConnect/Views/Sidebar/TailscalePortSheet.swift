@@ -73,7 +73,8 @@ struct TailscalePortSheet: View {
         HStack {
             Text(label)
             Spacer()
-            TextField("", text: text, prompt: Text(verbatim: String(placeholder)))
+            TextField(label, text: text, prompt: Text(verbatim: String(placeholder)))
+                .labelsHidden()
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 100)
                 .multilineTextAlignment(.trailing)
@@ -84,7 +85,8 @@ struct TailscalePortSheet: View {
         HStack {
             Text(label)
             Spacer()
-            TextField("", text: text, prompt: Text(verbatim: placeholder))
+            TextField(label, text: text, prompt: Text(verbatim: placeholder))
+                .labelsHidden()
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 160)
                 .multilineTextAlignment(.trailing)

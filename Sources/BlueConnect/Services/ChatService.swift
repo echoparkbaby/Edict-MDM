@@ -440,7 +440,7 @@ final class ChatService: ObservableObject, Identifiable {
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.pollOnce()
-                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                try? await Task.sleep(for: .seconds(1.5))
             }
         }
     }

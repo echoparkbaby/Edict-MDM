@@ -2,7 +2,6 @@ import Foundation
 
 /// Background SSH local-forward (no PTY) — used for VNC port-forwards.
 @MainActor
-@Observable
 final class TrackedTunnel: Identifiable {
     let id = UUID()
     let blueskyid: Int

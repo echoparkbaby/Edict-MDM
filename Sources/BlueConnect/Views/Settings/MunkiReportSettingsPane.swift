@@ -117,7 +117,7 @@ struct MunkiReportSettingsPane: View {
                             .frame(width: 18)
                         Text(s.label)
                         Spacer()
-                        Toggle("", isOn: Binding(
+                        Toggle(s.label, isOn: Binding(
                             get: { settings.munkiReportSectionIsVisible(s) },
                             set: { newVal in
                                 var hidden = settings.munkiReportHiddenSections

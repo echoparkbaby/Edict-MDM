@@ -60,6 +60,8 @@ final class ChatSession: ObservableObject {
     }
 
     func start() {
+        // onAppear can fire more than once; only one poll timer.
+        guard pollTimer == nil else { return }
         // Best-effort dir setup — the helper install creates the parent
         // (world-writable) so we only have to create our own subdirs.
         try? FileManager.default.createDirectory(at: adminDir, withIntermediateDirectories: true)
@@ -83,7 +85,8 @@ final class ChatSession: ObservableObject {
         let user  = files(in: userDir).map  { (file: $0, author: ChatMessage.Author.user) }
         let all = (admin + user).sorted { $0.file.lastPathComponent < $1.file.lastPathComponent }
         for entry in all {
-            if let msg = readMessage(at: entry.file, author: entry.author) {
+            if let msg = readMessage(at: entry.file, author: entry.author),
+               !seenIDs.contains(msg.id) {
                 messages.append(msg)
                 seenIDs.insert(msg.id)
             }
@@ -116,13 +119,17 @@ final class ChatSession: ObservableObject {
     }
 
     private func readMessage(at url: URL, author: ChatMessage.Author, idOverride: String? = nil) -> ChatMessage? {
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        // An empty read is usually a file caught mid-write; return nil
+        // so it isn't marked seen and gets retried next tick.
+        guard let raw = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
         let stem = url.deletingPathExtension().lastPathComponent
         let ts = Double(stem).map { Date(timeIntervalSince1970: $0 / 1000) } ?? Date()
         return ChatMessage(
             id: idOverride ?? "\(author == .admin ? "admin" : "user")/\(url.lastPathComponent)",
             author: author,
-            text: text.trimmingCharacters(in: .whitespacesAndNewlines),
+            text: text,
             timestamp: ts
         )
     }
@@ -244,13 +251,7 @@ struct ChatRoot: View {
                     .textFieldStyle(.roundedBorder)
                     // Mirror the admin-side cap (ChatWindow.swift).
                     // 12 lines fits a long reply without burying the
-                    // transcript above. NOTE: on macOS 14 hosts the
-                    // SwiftUI TextField + axis: .vertical layout path
-                    // doesn't grow with .lineLimit (works fine on
-                    // 15+). Tried frame(maxHeight:) + fixedSize as a
-                    // workaround; no dice. Treating as a known
-                    // macOS-14 limitation rather than carrying a
-                    // workaround that doesn't actually work.
+                    // transcript above.
                     .lineLimit(1...12)
                     .focused($inputFocused)
                     .onSubmit { session.send() }
@@ -271,6 +272,12 @@ struct ChatRoot: View {
 let args = CommandLine.arguments
 guard args.count >= 2 else {
     FileHandle.standardError.write(Data("usage: blueconnect-chat <session-id> [title]\n".utf8))
+    exit(2)
+}
+// The session id becomes a path component (session dir + lock file);
+// only accept a real UUID so it can't traverse or inject.
+guard UUID(uuidString: args[1]) != nil else {
+    FileHandle.standardError.write(Data("error: session id must be a UUID\n".utf8))
     exit(2)
 }
 let sessionID = args[1]
@@ -480,6 +487,12 @@ final class ChatAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let appItem = NSMenuItem()
         appItem.submenu = NSMenu(title: "App")
         appItem.submenu?.addItem(
+            NSMenuItem(title: "Hide Chat",
+                       action: #selector(NSApplication.hide(_:)),
+                       keyEquivalent: "h")
+        )
+        appItem.submenu?.addItem(NSMenuItem.separator())
+        appItem.submenu?.addItem(
             NSMenuItem(title: "Quit Chat",
                        action: #selector(NSApplication.terminate(_:)),
                        keyEquivalent: "q")
@@ -528,9 +541,25 @@ final class ChatAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         copyAll.keyEquivalentModifierMask = [.command, .shift]
         copyAll.target = self
         edit.submenu?.addItem(copyAll)
+        // Window menu - ⌘W routes through windowShouldClose (confirm).
+        let windowItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Window")
+        windowItem.submenu = windowMenu
+        windowMenu.addItem(
+            NSMenuItem(title: "Minimize",
+                       action: #selector(NSWindow.performMiniaturize(_:)),
+                       keyEquivalent: "m")
+        )
+        windowMenu.addItem(
+            NSMenuItem(title: "Close",
+                       action: #selector(NSWindow.performClose(_:)),
+                       keyEquivalent: "w")
+        )
         main.addItem(appItem)
         main.addItem(edit)
+        main.addItem(windowItem)
         NSApp.mainMenu = main
+        NSApp.windowsMenu = windowMenu
     }
 
     @objc private func copyAllMessages() {

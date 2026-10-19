@@ -194,9 +194,10 @@ struct InstallProgressWindow: View {
             switch controller.phase {
             case .idle:
                 @Bindable var c = controller
-                SecureField("",
+                SecureField("Remote sudo password",
                             text: $c.sudoPassword,
                             prompt: Text("Remote sudo password"))
+                    .labelsHidden()
                     .textFieldStyle(.roundedBorder)
                     .focused($focus, equals: .password)
                     .onSubmit {

@@ -23,12 +23,13 @@ struct LogPaneView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Picker("", selection: $filterLevel) {
+                Picker("Log level", selection: $filterLevel) {
                     ForEach(LevelFilter.allCases) { f in
                         Text(f.rawValue.capitalized).tag(f)
                     }
                 }
                 .pickerStyle(.segmented)
+                .labelsHidden()
                 .frame(width: 240)
                 TextField("Filter…", text: $search)
                     .textFieldStyle(.roundedBorder)
@@ -43,12 +44,13 @@ struct LogPaneView: View {
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
             Divider()
-            if filtered.isEmpty {
+            let entries = filtered
+            if entries.isEmpty {
                 ContentUnavailableView("No log entries match", systemImage: "text.alignleft")
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(filtered) { e in
+                        ForEach(entries) { e in
                             LogRow(entry: e)
                             Divider().opacity(0.25)
                         }

@@ -68,6 +68,7 @@ struct MDMSettingsPane: View {
                 .onChange(of: settings.nanoMDMBaseURL) { _, _ in testResult = nil }
             SecureField("API Key", text: $nanoKeyBuffer)
                 .onChange(of: nanoKeyBuffer) { _, newValue in
+                    guard newValue != settings.nanoMDMAPIKey else { return }
                     settings.setNanoMDMAPIKey(newValue)
                     testResult = nil
                 }
@@ -87,6 +88,7 @@ struct MDMSettingsPane: View {
                 .onChange(of: settings.kmfddmBaseURL) { _, _ in testResult = nil }
             SecureField("API Key", text: $kmfddmKeyBuffer)
                 .onChange(of: kmfddmKeyBuffer) { _, newValue in
+                    guard newValue != settings.kmfddmAPIKey else { return }
                     settings.setKMFDDMAPIKey(newValue)
                     testResult = nil
                 }
@@ -103,7 +105,9 @@ struct MDMSettingsPane: View {
                       prompt: Text(verbatim: "https://mdm.example.com"))
                 .help("The device-facing reverse-proxy URL Macs reach over the internet. /mdm and /scep are appended in the generated profile.")
             SecureField("SCEP challenge", text: $challengeBuffer)
-                .onChange(of: challengeBuffer) { _, v in settings.setSCEPChallenge(v) }
+                .onChange(of: challengeBuffer) { _, v in
+                    if v != settings.scepChallenge { settings.setSCEPChallenge(v) }
+                }
                 .help("The shared-secret challenge the SCEP server runs with. Embedded in generated enrollment profiles.")
             Button {
                 Task { await exportProfile() }
@@ -179,7 +183,9 @@ struct MDMSettingsPane: View {
             TextField("DEP name", text: $settings.nanoDEPName, prompt: Text(verbatim: "default"))
                 .help("NanoDEP's handle for one ABM/ASM MDM-server token (the -name it was set up with).")
             SecureField("API Key", text: $depKeyBuffer)
-                .onChange(of: depKeyBuffer) { _, newValue in settings.setNanoDEPAPIKey(newValue) }
+                .onChange(of: depKeyBuffer) { _, newValue in
+                    if newValue != settings.nanoDEPAPIKey { settings.setNanoDEPAPIKey(newValue) }
+                }
                 .help("The -api key NanoDEP was started with (HTTP Basic password, user 'depserver').")
             Text("Leave blank unless you use Apple Business Manager. The DEP token itself is loaded into NanoDEP server-side; this just points Edict at it. Manage devices/profiles in Device Management → Auto-Enroll.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

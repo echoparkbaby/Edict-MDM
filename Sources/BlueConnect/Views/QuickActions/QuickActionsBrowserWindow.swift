@@ -171,6 +171,8 @@ struct QuickActionsBrowserWindow: View {
                 onCopy: { copyCommand() },
                 onToggleFavorite: { quickActionStore.toggleFavorite(action.id) }
             )
+            // Fresh identity per action so onAppear primeDefaults() re-runs.
+            .id(action.id)
         } else {
             VStack(spacing: 12) {
                 Image(systemName: "wand.and.stars")
@@ -190,13 +192,6 @@ struct QuickActionsBrowserWindow: View {
     }
 
     // MARK: - Helpers
-
-    private var sortedHosts: [BlueSkyHost] {
-        hostStore.hosts.sorted { a, b in
-            if a.active != b.active { return a.active && !b.active }
-            return a.displayName.localizedCaseInsensitiveCompare(b.displayName) == .orderedAscending
-        }
-    }
 
     private var onlineHosts: [BlueSkyHost] {
         hostStore.hosts.filter { $0.active }.sorted {
@@ -439,6 +434,7 @@ private struct DetailPane: View {
             }
             .buttonStyle(.plain)
             .help(isFavorite ? "Remove from Favorites" : "Add to Favorites")
+            .accessibilityLabel(isFavorite ? "Remove from Favorites" : "Add to Favorites")
         }
     }
 
@@ -610,6 +606,7 @@ private struct DetailPane: View {
                 }
                 .buttonStyle(.plain)
                 .help(justCopied ? "Copied" : "Copy command to clipboard")
+                .accessibilityLabel(justCopied ? "Copied" : "Copy command to clipboard")
                 .padding(6)
             }
             .overlay(
@@ -617,20 +614,17 @@ private struct DetailPane: View {
                     .stroke(Color.secondary.opacity(0.3))
             )
             .frame(maxHeight: 180)
-            .contentShape(Rectangle())
-            .onTapGesture { flashAndCopy() }
         }
     }
 
     /// Calls the parent's copy callback AND flips the local feedback
-    /// state for the brief checkmark flash. Keeps the click-anywhere
-    /// and tiny-icon paths in sync.
+    /// state for the brief checkmark flash.
     private func flashAndCopy() {
         onCopy()
         justCopied = true
         Task {
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            await MainActor.run { justCopied = false }
+            try? await Task.sleep(for: .seconds(1.5))
+            justCopied = false
         }
     }
 

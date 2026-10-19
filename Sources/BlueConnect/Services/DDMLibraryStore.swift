@@ -121,8 +121,14 @@ final class DDMLibraryStore {
                     try? await kmf.removeDeclaration(id, fromSet: set)
                 }
             }
-            for id in extras { try? await kmf.deleteDeclaration(id: id) }
-            pruned = extras.count
+            for id in extras {
+                do {
+                    try await kmf.deleteDeclaration(id: id)
+                    pruned += 1
+                } catch {
+                    Log.warn("DDM", "prune of \(id) failed: \(error.localizedDescription)")
+                }
+            }
         }
         return (items.count, adds, pruned)
     }
@@ -183,7 +189,7 @@ final class DDMLibraryStore {
     // MARK: - Persistence
 
     private static var defaultFileURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        URL.applicationSupportDirectory
             .appendingPathComponent("EdictMDM", isDirectory: true)
             .appendingPathComponent("ddm-library.json")
     }

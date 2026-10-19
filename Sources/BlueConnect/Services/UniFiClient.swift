@@ -171,6 +171,8 @@ struct UniFiClient {
             delegate: pinDelegate,
             delegateQueue: nil
         )
+        // A session retains its delegate until invalidated.
+        defer { session.finishTasksAndInvalidate() }
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try await session.data(for: req)

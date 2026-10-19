@@ -99,6 +99,7 @@ struct PackagePickerSheet: View {
                 .buttonStyle(.borderless)
                 .disabled(munkiStore.isLoading)
                 .help("Refresh Munki catalogs/all")
+                .accessibilityLabel("Refresh Munki catalogs")
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 6)
@@ -162,9 +163,11 @@ struct PackagePickerSheet: View {
     /// to one row per `name`, keeping the newest version, and merging the
     /// catalogs lists so the UI still shows all catalogs the package
     /// belongs to. Sorted alphabetically by display name.
-    private var groupedMunki: [MunkiPkg] {
+    private var groupedMunki: [MunkiPkg] { Self.groupByName(munkiStore.packages) }
+
+    private static func groupByName(_ packages: [MunkiPkg]) -> [MunkiPkg] {
         var byName: [String: MunkiPkg] = [:]
-        for pkg in munkiStore.packages {
+        for pkg in packages {
             if let existing = byName[pkg.name] {
                 // Pick the newer version, but union the catalogs so the
                 // detail pane still reports both testing/production etc.
@@ -205,8 +208,12 @@ struct PackagePickerSheet: View {
     }
 
     private var selectedMunkiPkg: MunkiPkg? {
-        guard let id = selectedMunki else { return nil }
-        return groupedMunki.first { $0.id == id }
+        // Group only the selected name's entries — this is read several
+        // times per render, so don't regroup the whole catalog each time.
+        guard let id = selectedMunki,
+              let name = munkiStore.packages.first(where: { $0.id == id })?.name
+        else { return nil }
+        return Self.groupByName(munkiStore.packages.filter { $0.name == name }).first { $0.id == id }
     }
 
     /// Total versions available for the currently-selected package name
@@ -436,20 +443,23 @@ struct PackagePickerSheet: View {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
                 }
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
             Divider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                    if filtered.isEmpty {
+                    // Computed once per render (filters + groups the catalog).
+                    let sections = groupedFiltered
+                    if sections.isEmpty {
                         Text(allPackages.isEmpty
                              ? "No catalog loaded. Add a Catalog URL in Settings → Packages."
                              : "No packages match “\(query)”.")
                             .font(.callout).foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity).padding(24)
                     } else {
-                        ForEach(Array(groupedFiltered.enumerated()), id: \.offset) { _, section in
+                        ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
                             Section {
                                 ForEach(section.items) { pkg in
                                     packageRow(pkg)
@@ -541,6 +551,8 @@ struct PackagePickerSheet: View {
 
     private var munkiList: some View {
         VStack(spacing: 0) {
+            // Group + filter the catalog once per render, not per use.
+            let rows = filteredMunki
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("Filter Munki packages", text: $query)
@@ -557,6 +569,7 @@ struct PackagePickerSheet: View {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
                 }
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
@@ -579,7 +592,7 @@ struct PackagePickerSheet: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if filteredMunki.isEmpty {
+            } else if rows.isEmpty {
                 Text(munkiStore.packages.isEmpty
                      ? "No catalog loaded yet."
                      : "No packages match “\(query)”.")
@@ -591,8 +604,8 @@ struct PackagePickerSheet: View {
                 // are always in reach. Reads the same @AppStorage
                 // key MunkiBrowserView writes.
                 let favs = MunkiFavorites.decode(munkiFavoritesRaw)
-                let favoriteRows = filteredMunki.filter { favs.contains($0.name) }
-                let otherRows    = filteredMunki.filter { !favs.contains($0.name) }
+                let favoriteRows = rows.filter { favs.contains($0.name) }
+                let otherRows    = rows.filter { !favs.contains($0.name) }
                 // No `.simultaneousGesture(TapGesture(count: 2))` on
                 // these rows. It races with List's built-in
                 // tap-to-select on macOS and was eating single clicks
@@ -683,6 +696,7 @@ struct PackagePickerSheet: View {
             }
             .buttonStyle(.plain)
             .help(isFavorite ? "Unfavorite \(pkg.resolvedDisplayName)" : "Favorite \(pkg.resolvedDisplayName)")
+            .accessibilityLabel(isFavorite ? "Unfavorite \(pkg.resolvedDisplayName)" : "Favorite \(pkg.resolvedDisplayName)")
 
             Image(systemName: "cube.box")
                 .font(.body).foregroundStyle(.blue).frame(width: 20)
