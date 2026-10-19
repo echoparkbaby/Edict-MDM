@@ -47,41 +47,39 @@ APP_BUNDLE="$PROJECT_ROOT/$APP_NAME.app"
 cd "$PROJECT_ROOT"
 echo "▶ swift build -c release"
 swift build -c release
-# Build every binary BEFORE touching the old bundle: a failed build must
-# leave the previous working .app in place, not a half-built one.
-echo "▶ swift build --arch x86_64 (chat universal — already have arm64 from the main build)"
-swift build -c release --arch arm64  --product BlueConnectChat
-swift build -c release --arch x86_64 --product BlueConnectChat
+# Build every binary into a staging dir BEFORE touching the old bundle:
+# a failed build must leave the previous working .app in place. Staging
+# also matters because the Xcode 27 build system shares one products dir
+# across arches, so later builds overwrite earlier binaries in place.
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
+cp "$(swift build -c release --show-bin-path)/$EXEC_NAME" "$STAGE/$EXEC_NAME"
+
+# Chat client: universal so the app can SCP it to BOTH Apple Silicon and
+# Intel fleet Macs. Multiple --arch flags build a fat binary in one go
+# (the old per-arch build + lipo broke when both arches landed in the
+# same path). scripts/build-helper-pkg.sh builds the Munki copy.
+echo "▶ swift build BlueConnectChat (universal arm64 + x86_64)"
+swift build -c release --arch arm64 --arch x86_64 --product BlueConnectChat
+cp "$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/BlueConnectChat" "$STAGE/blueconnect-chat"
+ARCHS="$(lipo -archs "$STAGE/blueconnect-chat")"
+[[ "$ARCHS" == *arm64* && "$ARCHS" == *x86_64* ]] || { echo "❌ chat client isn't universal ($ARCHS)"; exit 1; }
 
 echo "▶ build .app bundle at: $APP_BUNDLE"
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 
-cp ".build/release/$EXEC_NAME" "$APP_BUNDLE/Contents/MacOS/$EXEC_NAME"
+cp "$STAGE/$EXEC_NAME" "$APP_BUNDLE/Contents/MacOS/$EXEC_NAME"
 chmod +x "$APP_BUNDLE/Contents/MacOS/$EXEC_NAME"
 
 # Embed the chat-client binary inside the .app's Resources. The Mac app
 # pushes this over SCP on first chat open so the target gets
 # /usr/local/bin/blueconnect-chat (a tiny SwiftUI window the GUI Helper
 # LaunchAgent launches in the console user's Aqua session).
-#
-# Universal binary so the app can SCP it to BOTH Apple Silicon and
-# Intel fleet Macs. SwiftPM doesn't have a one-shot universal flag —
-# build each arch separately then lipo. The pkg path
-# (scripts/build-helper-pkg.sh) does the same dual-arch dance for
-# the Munki-distributed copy.
-CHAT_ARM64="$(swift build -c release --arch arm64  --show-bin-path)/BlueConnectChat"
-CHAT_X86_64="$(swift build -c release --arch x86_64 --show-bin-path)/BlueConnectChat"
-if [[ -f "$CHAT_ARM64" && -f "$CHAT_X86_64" ]]; then
-    lipo -create "$CHAT_ARM64" "$CHAT_X86_64" \
-        -output "$APP_BUNDLE/Contents/Resources/blueconnect-chat"
-    chmod +x "$APP_BUNDLE/Contents/Resources/blueconnect-chat"
-    echo "▶ embedded chat client (universal): $APP_BUNDLE/Contents/Resources/blueconnect-chat ($(du -h "$APP_BUNDLE/Contents/Resources/blueconnect-chat" | cut -f1))"
-    echo "  $(lipo -info "$APP_BUNDLE/Contents/Resources/blueconnect-chat")"
-else
-    echo "⚠️  chat client binary missing — chat feature will be unavailable"
-fi
+cp "$STAGE/blueconnect-chat" "$APP_BUNDLE/Contents/Resources/blueconnect-chat"
+chmod +x "$APP_BUNDLE/Contents/Resources/blueconnect-chat"
+echo "  $(lipo -info "$APP_BUNDLE/Contents/Resources/blueconnect-chat")"
 
 # App icon
 if [[ -f "$PROJECT_ROOT/Resources/AppIcon.icns" ]]; then
