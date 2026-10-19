@@ -6,7 +6,8 @@ struct LabeledSecureField: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(.caption).foregroundStyle(.secondary)
-            SecureField("", text: $text)
+            SecureField(label, text: $text, prompt: Text(""))
+                .labelsHidden()
                 .textFieldStyle(.roundedBorder)
         }
     }

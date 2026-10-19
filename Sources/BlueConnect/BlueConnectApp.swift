@@ -430,36 +430,10 @@ private extension String {
     func nilIfEmpty() -> String? { isEmpty ? nil : self }
 }
 
-/// Custom NSWindow subclass for the main BlueConnect Admin window that
-/// refuses menu-driven closes (⌘W from the keyboard, or File > Close
-/// from the menu bar). Programmatic closes and the red traffic light
-/// still work, so the window can be quit normally — just not via the
-/// keyboard shortcut where one stray keystroke would lose the session.
-///
-/// Why a subclass instead of an event monitor: `NSEvent` local monitors
-/// fire AFTER `NSApplication`'s menu-key-equivalent matching for ⌘W on
-/// macOS, so by the time the monitor sees the event the close has
-/// already been triggered. Overriding `performClose(_:)` is the only
-/// reliable interception point.
-final class BCMainWindow: NSWindow {
-    @objc override func performClose(_ sender: Any?) {
-        // sender is an NSMenuItem when triggered by File > Close OR by
-        // ⌘W (the system matches the shortcut to the menu item). The red
-        // traffic light sends `self` or `nil`. Refuse only the menu path.
-        if sender is NSMenuItem {
-            if let id = MainWindowGuard.shared.terminals?.activeSessionID {
-                MainWindowGuard.shared.terminals?.close(id)
-            }
-            return
-        }
-        super.performClose(sender)
-    }
-}
-
-/// Holds the main-window reference and the terminal sessions manager so
-/// `BCMainWindow.performClose` can find the active tab to close. Also
-/// swaps the SwiftUI-supplied NSWindow's class to BCMainWindow on first
-/// sight, which is how we hook performClose without owning the window.
+/// Holds the main-window reference and the terminal sessions manager.
+/// It used to swap the window's class to a `performClose`-overriding
+/// subclass; that swap is disabled (see below) and ⌘W tab-close now
+/// lives in `MainWindowCloseGuard`.
 @MainActor
 final class MainWindowGuard {
     static let shared = MainWindowGuard()
@@ -487,10 +461,5 @@ final class MainWindowGuard {
 extension NSWindow {
     var isBlueConnectAdminMainWindow: Bool {
         title == "BlueConnect Admin"
-    }
-
-    var canInstallBlueConnectMainWindowClass: Bool {
-        let className = NSStringFromClass(object_getClass(self) ?? NSWindow.self)
-        return !className.hasPrefix("NSKVONotifying_")
     }
 }

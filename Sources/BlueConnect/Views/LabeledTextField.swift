@@ -7,7 +7,8 @@ struct LabeledTextField: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(.caption).foregroundStyle(.secondary)
-            TextField(placeholder, text: $text)
+            TextField(label, text: $text, prompt: Text(placeholder))
+                .labelsHidden()
                 .textFieldStyle(.roundedBorder)
                 .autocorrectionDisabled()
         }

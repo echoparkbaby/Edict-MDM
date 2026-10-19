@@ -11,9 +11,9 @@ struct WindowMenuCommands: Commands {
         CommandGroup(after: .windowList) {
             Divider()
             Button("Show BlueConnect Admin") {
-                // Pull openWindow off the env at action time — a
-                // CommandGroup doesn't have a containing view but the
-                // shortcut still fires through the app's command chain.
+                // A CommandGroup has no containing view (and so no
+                // openWindow env value); the reopener fronts the existing
+                // main window or falls back to its captured openWindow.
                 MainWindowReopener.shared.reopen()
             }
             .keyboardShortcut("0", modifiers: [.command])
@@ -21,10 +21,9 @@ struct WindowMenuCommands: Commands {
     }
 }
 
-/// Helper that grabs the SwiftUI `openWindow` action from the first
-/// scene that registers it. The main WindowGroup's content wires this
-/// up on `.onAppear`, so by the time the user could close + reopen the
-/// window, `reopen` has a usable handle.
+/// Brings the main window back. Holds the SwiftUI `openWindow` action
+/// captured by `MainWindowReopenerCapture` on the main WindowGroup's
+/// `.onAppear`, used only when no main window is left to front.
 @MainActor
 final class MainWindowReopener {
     static let shared = MainWindowReopener()

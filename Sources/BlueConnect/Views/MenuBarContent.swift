@@ -282,6 +282,7 @@ struct MenuBarContent: View {
                             }
                             .buttonStyle(.plain)
                             .help("Kill this tunnel")
+                            .accessibilityLabel("Kill tunnel to \(t.displayName)")
                         }
                         .padding(.horizontal, 14).padding(.vertical, 4)
                     }
@@ -364,9 +365,11 @@ struct MenuBarContent: View {
                     Text("Find host…")
                         .foregroundStyle(.tertiary)
                         .font(.callout)
+                        .accessibilityHidden(true)
                 }
                 TextField("", text: $query)
                     .textFieldStyle(.plain).font(.callout)
+                    .accessibilityLabel("Find host")
             }
             if !query.isEmpty {
                 Button("Clear search", systemImage: "xmark.circle.fill") {

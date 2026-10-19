@@ -16,7 +16,7 @@ extension String {
     ///   4. If both encode + decode round-trip cleanly, the result is the
     ///      original text. If not, return the input unchanged.
     func unmojibake() -> String {
-        let markers = ["â€", "Ã©", "Ã¨", "Ã ", "Ã­", "â‚¬", "â„¢", "â„¢", "â", "Ã"]
+        let markers = ["â€", "Ã©", "Ã¨", "Ã ", "Ã­", "â‚¬", "â„¢", "â", "Ã"]
         guard markers.contains(where: { self.contains($0) }) else { return self }
         guard let win1252 = self.data(using: .windowsCP1252) else { return self }
         guard let fixed = String(data: win1252, encoding: .utf8), !fixed.isEmpty else {

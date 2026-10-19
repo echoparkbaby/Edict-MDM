@@ -24,7 +24,6 @@ struct ContentView: View {
     @Environment(ChatSessionController.self) private var chatController
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
-    @State private var showingSettingsSheet = false
     @State private var sortOrder: [KeyPathComparator<BlueSkyHost>] = [
         KeyPathComparator(\.blueskyid, order: .forward)
     ]
@@ -43,6 +42,8 @@ struct ContentView: View {
     @State private var vncController: VNCConnectController?
     @Environment(\.openSettings) private var openSettings
     @State private var showingExporter = false
+    @State private var exportFilename = ""
+    @State private var savedProfiles: [SavedProfile] = []
     @State private var exportDoc: HostsCSVDocument?
     @State private var serverHealthOK: Bool = true
     @State private var deleteChooserHosts: [BlueSkyHost] = []
@@ -716,11 +717,6 @@ struct ContentView: View {
         // Toolbar removed — all former actions live in the standard
         // menus now (File / View / app). Kept the modifier off so the
         // window's titlebar stays clean.
-        .sheet(isPresented: $showingSettingsSheet) {
-            SettingsView()
-                .environmentObject(settings)
-                .frame(width: 560, height: 720)
-        }
         .sheet(item: $renameTarget) { h in
             RenameSheet(host: h) { newName in
                 runRename(host: h, newHostname: newName)
@@ -887,7 +883,12 @@ struct ContentView: View {
         // Drain any pending window intent that was queued while ContentView
         // wasn't mounted. .onChange only fires on subsequent transitions;
         // this picks up the value-already-set case after openWindow("main").
+        // Saved profiles cached for the per-row MDM menus (load() decrypts
+        // from disk). No save notification exists, so reload on tab change —
+        // profiles are only edited in the Profiles tab.
+        .onChange(of: sidebarFilterRaw) { savedProfiles = SavedProfilesStore.load() }
         .task {
+            savedProfiles = SavedProfilesStore.load()
             drainPackagePickerIntents()
             if let run = quickActionLauncher.pendingRun {
                 runQuickAction(host: run.host, action: run.action, command: run.command)
@@ -948,10 +949,11 @@ struct ContentView: View {
         )
     }
 
-    private var exportFilename: String { "BlueSkyHosts-\(Self.dateStamp()).csv" }
-
     private func handleExportResult(_ result: Result<URL, Error>) {
-        if case .failure(let e) = result { NSLog("%@", "export err: \(e)") }
+        if case .failure(let e) = result {
+            NSLog("%@", "export err: \(e)")
+            alert = .result(title: "Export Failed", message: e.localizedDescription)
+        }
         exportDoc = nil
     }
 
@@ -980,7 +982,9 @@ struct ContentView: View {
             )
             svc.onConnect = { h in recents.recordConnect(blueskyid: h.blueskyid) }
             svc.openSCPInTerminal(host: host, remoteUser: effectiveRemoteUser(host: host), sourceURL: url)
-        case .failure(let e): NSLog("%@", "terminal scp picker err: \(e)")
+        case .failure(let e):
+            NSLog("%@", "terminal scp picker err: \(e)")
+            alert = .result(title: "File Picker Failed", message: e.localizedDescription)
         }
         pendingTerminalScpHost = nil
     }
@@ -1117,6 +1121,7 @@ struct ContentView: View {
     private func exportCSV() {
         let csv = HostsCSVBuilder.build(filteredAndSorted)
         exportDoc = HostsCSVDocument(csv: csv)
+        exportFilename = "BlueSkyHosts-\(Self.dateStamp()).csv"
         showingExporter = true
     }
 
@@ -1323,7 +1328,7 @@ struct ContentView: View {
                     Menu("MDM (\(enrolled.count) enrolled)") {
                         Button("Check In \(enrolled.count)") { bulkMDMCheckIn(enrolled) }
                         Button("Enable Reporting on \(enrolled.count)") { bulkMDMEnableReporting(enrolled) }
-                        let saved = SavedProfilesStore.load()
+                        let saved = savedProfiles
                         if !saved.isEmpty {
                             Divider()
                             Menu("Deploy profile to \(enrolled.count)") {
@@ -1517,7 +1522,7 @@ struct ContentView: View {
                                 }
                                 Button("Open MDM Details") { openMDMDetails(h) }
                                 Button("Open Profiles Tab") { sidebarFilter = .mdmProfiles }
-                                let saved = SavedProfilesStore.load()
+                                let saved = savedProfiles
                                 if saved.isEmpty {
                                     Text("No saved profiles yet — create them in the Profiles tab")
                                 } else {
@@ -2382,9 +2387,11 @@ struct ContentView: View {
                     if searchText.isEmpty {
                         Text("Search")
                             .foregroundStyle(.tertiary)
+                            .accessibilityHidden(true)
                     }
                     TextField("", text: $searchText)
                         .textFieldStyle(.plain)
+                        .accessibilityLabel("Search")
                         .focused($searchFocused)
                 }
                 if !searchText.isEmpty {

@@ -24,7 +24,8 @@ struct QuickActionsCommands: Commands {
             Divider()
             // Starred items get pinned at the top, flat — no category
             // detour for the user's most-used commands.
-            let favorites = store.allEnabled.favorites
+            let list = store.allEnabled
+            let favorites = list.favorites
             if !favorites.isEmpty {
                 Section("Favorites") {
                     ForEach(favorites) { action in
@@ -39,10 +40,10 @@ struct QuickActionsCommands: Commands {
             // Each category becomes its own submenu so the top-level
             // Quick Actions menu stays a one-screen scan instead of a
             // 50-item wall. Categories are alphabetized in `grouped`.
-            ForEach(Array(store.allEnabled.grouped.enumerated()),
-                    id: \.offset) { entry in
-                Menu(entry.element.0) {
-                    ForEach(entry.element.1) { action in
+            // Category names are dictionary keys in `grouped`, so unique.
+            ForEach(list.grouped, id: \.0) { entry in
+                Menu(entry.0) {
+                    ForEach(entry.1) { action in
                         Button(action.label) {
                             actions?.runQuickAction(action)
                         }
@@ -50,7 +51,7 @@ struct QuickActionsCommands: Commands {
                     }
                 }
             }
-            if store.allEnabled.isEmpty {
+            if list.isEmpty {
                 Text("All actions disabled — see Settings → Quick Actions")
             }
         }

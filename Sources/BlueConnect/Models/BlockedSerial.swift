@@ -14,11 +14,15 @@ struct BlockedSerial: Codable, Hashable, Identifiable {
     /// string isn't in the expected `yyyy-MM-dd HH:mm:ss` shape.
     var addedDate: Date? {
         guard let s = added_at else { return nil }
+        return Self.addedAtFormatter.date(from: s)
+    }
+
+    private static let addedAtFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd HH:mm:ss"
         f.locale = Locale(identifier: "en_US_POSIX")
-        return f.date(from: s)
-    }
+        return f
+    }()
 }
 
 /// `bs_blocklist.json.php` response envelope.

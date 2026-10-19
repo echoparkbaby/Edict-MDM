@@ -647,7 +647,7 @@ final class SettingsStore: ObservableObject {
     @AppStorage("mdmOnboardedIDsRaw") private var mdmOnboardedIDsRaw: String = "[]"
     var mdmOnboardedIDs: Set<String> {
         get { Set((try? JSONDecoder().decode([String].self, from: Data(mdmOnboardedIDsRaw.utf8))) ?? []) }
-        set { mdmOnboardedIDsRaw = String(data: (try? JSONEncoder().encode(Array(newValue)) ) ?? Data("[]".utf8), encoding: .utf8) ?? "[]" }
+        set { mdmOnboardedIDsRaw = String(data: (try? JSONEncoder().encode(newValue.sorted())) ?? Data("[]".utf8), encoding: .utf8) ?? "[]" }
     }
     func isOnboarded(_ id: String) -> Bool { mdmOnboardedIDs.contains(id) }
     func markOnboarded(_ id: String) { mdmOnboardedIDs.insert(id) }
@@ -661,7 +661,7 @@ final class SettingsStore: ObservableObject {
     @AppStorage("mdmIgnoredForAttentionRaw") private var mdmIgnoredForAttentionRaw: String = "[]"
     var mdmIgnoredForAttention: Set<String> {
         get { Set((try? JSONDecoder().decode([String].self, from: Data(mdmIgnoredForAttentionRaw.utf8))) ?? []) }
-        set { mdmIgnoredForAttentionRaw = String(data: (try? JSONEncoder().encode(Array(newValue))) ?? Data("[]".utf8), encoding: .utf8) ?? "[]" }
+        set { mdmIgnoredForAttentionRaw = String(data: (try? JSONEncoder().encode(newValue.sorted())) ?? Data("[]".utf8), encoding: .utf8) ?? "[]" }
     }
     func isIgnoredForAttention(_ id: String) -> Bool { mdmIgnoredForAttention.contains(id) }
     func setIgnoredForAttention(_ id: String, _ ignored: Bool) {
@@ -676,7 +676,7 @@ final class SettingsStore: ObservableObject {
     @AppStorage("mdmAppliedGroupSetsRaw") private var mdmAppliedGroupSetsRaw: String = "[]"
     private var mdmAppliedGroupSets: Set<String> {
         get { Set((try? JSONDecoder().decode([String].self, from: Data(mdmAppliedGroupSetsRaw.utf8))) ?? []) }
-        set { mdmAppliedGroupSetsRaw = String(data: (try? JSONEncoder().encode(Array(newValue))) ?? Data("[]".utf8), encoding: .utf8) ?? "[]" }
+        set { mdmAppliedGroupSetsRaw = String(data: (try? JSONEncoder().encode(newValue.sorted())) ?? Data("[]".utf8), encoding: .utf8) ?? "[]" }
     }
     private func groupSetKey(_ id: String, _ set: String) -> String { id + "\u{1}" + set }
     func hasAppliedGroupSet(deviceID: String, set: String) -> Bool { mdmAppliedGroupSets.contains(groupSetKey(deviceID, set)) }
@@ -786,16 +786,28 @@ final class SettingsStore: ObservableObject {
         return list.first
     }
 
+    /// In-memory mirror of per-profile keys — `isConfigured(_:)` is hit
+    /// from view bodies, and a Keychain read per call is slow.
+    private var unifiAPIKeyCache: [UUID: String] = [:]
+
     func unifiAPIKey(for profile: UniFiProfile) -> String {
-        KeychainHelper.read(account: unifiAPIKeyAccount(for: profile.id)) ?? ""
+        if let cached = unifiAPIKeyCache[profile.id] { return cached }
+        let key = KeychainHelper.read(account: unifiAPIKeyAccount(for: profile.id)) ?? ""
+        unifiAPIKeyCache[profile.id] = key
+        return key
     }
 
     func setUnifiAPIKey(_ key: String, for profile: UniFiProfile) {
-        KeychainHelper.save(key, account: unifiAPIKeyAccount(for: profile.id))
+        if KeychainHelper.save(key, account: unifiAPIKeyAccount(for: profile.id)) {
+            unifiAPIKeyCache[profile.id] = key
+        } else {
+            unifiAPIKeyCache[profile.id] = nil   // re-read Keychain truth next time
+        }
     }
 
     func deleteUnifiAPIKey(for profile: UniFiProfile) {
         KeychainHelper.delete(account: unifiAPIKeyAccount(for: profile.id))
+        unifiAPIKeyCache[profile.id] = nil
     }
 
     func isConfigured(_ profile: UniFiProfile) -> Bool {

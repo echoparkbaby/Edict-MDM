@@ -122,7 +122,7 @@ struct SidebarView: View {
             case "favorites":
                 return StatusItem(key: key, filter: .favorites, label: "Favorites",
                                   icon: "star.fill", iconColor: .yellow,
-                                  count: hostStore.hosts.filter { $0.isFavorite }.count,
+                                  count: hostStore.hosts.count(where: \.isFavorite),
                                   acceptsHostDrop: true)
             case "recent":
                 return StatusItem(key: key, filter: .recent, label: "Recently Connected",
@@ -131,17 +131,17 @@ struct SidebarView: View {
             case "active":
                 return StatusItem(key: key, filter: .active, label: "Active",
                                   icon: "circle.fill", iconColor: .green,
-                                  count: hostStore.hosts.filter { $0.active }.count,
+                                  count: hostStore.hosts.count(where: \.active),
                                   acceptsHostDrop: false)
             case "inactive":
                 return StatusItem(key: key, filter: .inactive, label: "Inactive",
                                   icon: "circle", iconColor: .secondary,
-                                  count: hostStore.hosts.filter { !$0.active }.count,
+                                  count: hostStore.hosts.count { !$0.active },
                                   acceptsHostDrop: false)
             case "uncat":
                 return StatusItem(key: key, filter: .uncategorized, label: "Uncategorized",
                                   icon: "tag.slash", iconColor: .accentColor,
-                                  count: hostStore.hosts.filter { ($0.category ?? "").isEmpty }.count,
+                                  count: hostStore.hosts.count { ($0.category ?? "").isEmpty },
                                   acceptsHostDrop: false)
             default: return nil
             }
@@ -182,7 +182,9 @@ struct SidebarView: View {
     // MARK: - Categories (reorderable + accept host drops)
 
     private var categoriesGroup: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        // One pass over hosts for every category row's count.
+        let categoryCounts = hostStore.hosts.reduce(into: [String: Int]()) { $0[$1.category ?? "", default: 0] += 1 }
+        return VStack(alignment: .leading, spacing: 2) {
             Button {
                 withAnimation(.snappy(duration: 0.15)) {
                     settings.sidebarCategoriesCollapsed.toggle()
@@ -216,7 +218,7 @@ struct SidebarView: View {
                 ForEach(categories.categories, id: \.self) { name in
                     sidebarRow(.category(name), label: name, icon: "tag",
                                iconColor: .accentColor,
-                               count: hostStore.hosts.filter { ($0.category ?? "") == name }.count,
+                               count: categoryCounts[name] ?? 0,
                                deletable: true)
                         .draggable(DragPayload.category(name)) {
                             HStack { Image(systemName: "tag"); Text(name) }
@@ -294,6 +296,7 @@ struct SidebarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     // MARK: - Footer
@@ -358,6 +361,7 @@ struct SidebarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .if(deletable) { v in
             v.contextMenu {
                 if case .category(let name) = filter {

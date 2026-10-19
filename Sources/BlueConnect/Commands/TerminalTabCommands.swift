@@ -4,9 +4,10 @@ import SwiftUI
 /// and ⌃⌘1…⌃⌘9 to jump to a specific tab (1 = Log, 2..N = sessions).
 ///
 /// Lives outside the View hierarchy because it's a top-level Commands
-/// block. Anything that needs `@Environment(\.openWindow)` (detach) goes
-/// through `bcDetachActiveTerminal` so ContentView (which does have the
-/// environment) can perform the actual window open.
+/// block. Plain window opens (Profile Picker) use `openWindow` directly;
+/// detach posts `bcDetachActiveTerminal` instead, because ContentView
+/// owns the session hand-off (`terminals.detachActive()`) that must run
+/// before the detached window opens.
 struct TerminalTabCommands: Commands {
     @Bindable var terminals: TerminalSessionsManager
     @Environment(\.openWindow) private var openWindow
@@ -42,8 +43,7 @@ struct TerminalTabCommands: Commands {
                 NotificationCenter.default.post(name: .bcDetachActiveTerminal, object: nil)
             }
             // ⌘F = "break out current terminal" — pops the active tab
-            // into its own floating window. The old ⌘⇧D binding is
-            // kept as an alternate so muscle memory still works.
+            // into its own floating window (user-requested binding).
             .keyboardShortcut("f", modifiers: [.command])
             .disabled(terminals.activeSessionID == nil)
 
@@ -88,8 +88,8 @@ struct TerminalTabCommands: Commands {
 }
 
 extension Notification.Name {
-    /// Posted by TerminalTabCommands when the user invokes ⌘F (or
-    /// the older ⌘⇧D). ContentView observes and calls
+    /// Posted by TerminalTabCommands when the user invokes ⌘F.
+    /// ContentView observes and calls
     /// openWindow(id: "detached-terminal", value:) — Commands can't
     /// access the openWindow environment value directly.
     static let bcDetachActiveTerminal = Notification.Name("BC.DetachActiveTerminal")

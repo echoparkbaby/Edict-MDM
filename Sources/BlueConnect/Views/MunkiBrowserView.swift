@@ -31,6 +31,10 @@ struct MunkiBrowserView: View {
     /// picker sheet.
     @State private var pendingInstall: MunkiPkg?
 
+    /// Cache of `groupPackages(store.packages)` — rebuilt only when the
+    /// catalog changes, not on every body pass (it's read ~7x per render).
+    @State private var groupedPackages: [MunkiPkg] = []
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -48,6 +52,9 @@ struct MunkiBrowserView: View {
             // when you've used it recently.
             store.loadFromCacheIfPresent(settings: settings)
             await store.refresh(settings: settings)
+        }
+        .onChange(of: store.packages, initial: true) {
+            groupedPackages = Self.groupPackages(store.packages)
         }
         .sheet(item: $pendingInstall) { pkg in
             MunkiHostPickerSheet(pkg: pkg) { picked in
@@ -176,8 +183,9 @@ struct MunkiBrowserView: View {
         // resolves each name to the newest version — favoriting
         // "Firefox" gets the current newest Firefox each time.
         let favs = MunkiFavorites.decode(favoritesRaw)
-        let favoritePkgs = filteredPackages.filter { favs.contains($0.name) }
-        let otherPkgs    = filteredPackages.filter { !favs.contains($0.name) }
+        let filtered = filteredPackages
+        let favoritePkgs = filtered.filter { favs.contains($0.name) }
+        let otherPkgs    = filtered.filter { !favs.contains($0.name) }
         return List(selection: $selection) {
             if !favoritePkgs.isEmpty {
                 Section("Favorites") {
@@ -219,6 +227,7 @@ struct MunkiBrowserView: View {
             }
             .buttonStyle(.plain)
             .help(isFavorite ? "Unfavorite \(pkg.resolvedDisplayName)" : "Favorite \(pkg.resolvedDisplayName)")
+            .accessibilityLabel(isFavorite ? "Unfavorite \(pkg.resolvedDisplayName)" : "Favorite \(pkg.resolvedDisplayName)")
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
@@ -295,9 +304,10 @@ struct MunkiBrowserView: View {
                     }
                     Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
                         detailRow("Version", pkg.version)
-                        if allVersions(of: pkg.name).count > 1 {
+                        let versionCount = allVersions(of: pkg.name).count
+                        if versionCount > 1 {
                             detailRow("Available",
-                                      "\(allVersions(of: pkg.name).count) versions (right-click to pick)")
+                                      "\(versionCount) versions (right-click to pick)")
                         }
                         detailRow("Size", pkg.humanSize)
                         detailRow("Architectures", pkg.archSummary)
@@ -346,9 +356,9 @@ struct MunkiBrowserView: View {
 
     /// One row per unique package name (newest version), matching the
     /// picker's grouping. Removes catalog-membership duplicates.
-    private var groupedPackages: [MunkiPkg] {
+    private static func groupPackages(_ packages: [MunkiPkg]) -> [MunkiPkg] {
         var byName: [String: MunkiPkg] = [:]
-        for pkg in store.packages {
+        for pkg in packages {
             if let existing = byName[pkg.name] {
                 let merged = Array(Set(existing.catalogs).union(pkg.catalogs)).sorted()
                 if (pkg.version as NSString).compare(existing.version, options: .numeric)

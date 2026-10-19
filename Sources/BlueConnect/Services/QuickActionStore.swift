@@ -118,8 +118,9 @@ final class QuickActionStore: ObservableObject {
     /// built-ins come first in their original category order, then
     /// custom actions under their declared category.
     var allEnabled: ActionList {
+        let disabled = disabledIDs   // decode once, not per element
         let builtins = QuickAction.all
-            .filter { !disabledIDs.contains($0.id) }
+            .filter { !disabled.contains($0.id) }
         let customAsQA = customActions.map { $0.asQuickAction() }
         return ActionList(actions: builtins + customAsQA,
                           favoriteIDs: favoriteIDs,

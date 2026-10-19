@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// ⌘⇧F — pop open the BlueConnect MenuBarExtra dropdown so the user can
+/// ⌥⌘B — pop open the BlueConnect MenuBarExtra dropdown so the user can
 /// quick-search hosts from anywhere in the app.
 ///
 /// SwiftUI's `MenuBarExtra` doesn't expose its underlying `NSStatusItem`
@@ -22,7 +22,11 @@ struct FocusMenubarCommand: Commands {
 
     private static func openMenubar() {
         let statusBar = NSStatusBar.system
-        guard let items = statusBar.value(forKey: "_items") as? [NSStatusItem] else {
+        // KVC on a missing key raises an ObjC exception Swift can't catch,
+        // so confirm `_items` still exists (accessor or ivar) before asking.
+        guard statusBar.responds(to: NSSelectorFromString("_items"))
+                || class_getInstanceVariable(NSStatusBar.self, "_items") != nil,
+              let items = statusBar.value(forKey: "_items") as? [NSStatusItem] else {
             NSLog("FocusMenubarCommand: NSStatusBar._items unavailable")
             return
         }

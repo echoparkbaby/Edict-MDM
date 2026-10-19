@@ -26,6 +26,7 @@ struct ConnectCommands: Commands {
 
             Button("Upload Package to Repo…") { actions?.uploadToRepo() }
                 .keyboardShortcut("u", modifiers: [.command, .shift])
+                .disabled(actions == nil)
 
             // Chat lives below the install / upload entries so the
             // package-management items cluster together at the top.
@@ -53,6 +54,7 @@ struct ConnectCommands: Commands {
 
             Button("Refresh Hosts") { actions?.refresh() }
                 .keyboardShortcut("r", modifiers: [.command])
+                .disabled(actions == nil)
 
             Button("Search Hosts") { actions?.focusSearch() }
                 // ⌘F is now Detach Active Terminal (per user request);
@@ -60,6 +62,7 @@ struct ConnectCommands: Commands {
                 // up automatically — no muscle-memory loss for users
                 // who already knew the shortcut, just an Option modifier.
                 .keyboardShortcut("f", modifiers: [.command, .option])
+                .disabled(actions == nil)
 
             Button("Toggle Favorite") { actions?.toggleFavorite() }
                 .keyboardShortcut("d", modifiers: [.command])
@@ -85,6 +88,7 @@ struct ConnectCommands: Commands {
                 .disabled(!(actions?.hasTarget ?? false))
 
             Button("Copy BSC ProxyCommand") { actions?.copyProxyCommand() }
+                .disabled(actions == nil)
         }
     }
 }

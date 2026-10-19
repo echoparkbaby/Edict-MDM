@@ -178,6 +178,10 @@ struct QuickActionSheet: View {
     /// inside each one without expanding.
     @ViewBuilder
     private var detailsDisclosure: some View {
+        // Built once per body pass — buildCommand + the base64 regex over
+        // a large payload is expensive, and both the label and the
+        // expanded preview need it.
+        let command = previewCommand
         VStack(alignment: .leading, spacing: 4) {
             if let hint = Self.guiHelperHintMarkdown(actionID: action.id) {
                 DisclosureGroup {
@@ -202,7 +206,7 @@ struct QuickActionSheet: View {
                 }
             }
             DisclosureGroup {
-                preview
+                preview(command)
                     .padding(.top, 4)
             } label: {
                 // Show the first ~70 chars of the command inline so
@@ -213,7 +217,7 @@ struct QuickActionSheet: View {
                     Label("Preview command", systemImage: "terminal")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text(previewSummary)
+                    Text(previewSummary(of: command))
                         .font(.caption.monospaced())
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
@@ -228,8 +232,8 @@ struct QuickActionSheet: View {
     /// `set -e;`/`set +H;` noise. Used as the inline summary on the
     /// collapsed Preview-command chevron so the operator gets a hint
     /// of what's about to run without expanding the disclosure.
-    private var previewSummary: String {
-        let raw = previewCommand
+    private func previewSummary(of command: String) -> String {
+        let raw = command
             .replacingOccurrences(of: "\\\n", with: " ")
             .replacingOccurrences(of: "\n", with: " ")
         // Drop common leading set-shell noise so the summary starts
@@ -599,7 +603,7 @@ struct QuickActionSheet: View {
         }
     }
 
-    private var preview: some View {
+    private func preview(_ command: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Will run on \(targetName):")
                 .font(.caption).foregroundStyle(.secondary)
@@ -611,7 +615,7 @@ struct QuickActionSheet: View {
             // works because `.textSelection(.enabled)` claims drags
             // before the tap gesture fires.
             ScrollView([.vertical, .horizontal]) {
-                Text(previewCommand)
+                Text(command)
                     .font(.caption.monospaced())
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -715,11 +719,7 @@ struct QuickActionSheet: View {
                 HStack(spacing: 4) {
                     Image(systemName: "rectangle.stack")
                         .font(.caption).foregroundStyle(.secondary)
-                    Text("Existing SSH tab open: ")
-                        .font(.caption2).foregroundStyle(.secondary)
-                    + Text(title)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.primary)
+                    Text("\(Text("Existing SSH tab open: ").font(.caption2).foregroundStyle(.secondary))\(Text(title).font(.caption2.monospaced()).foregroundStyle(.primary))")
                     Spacer()
                 }
             }
