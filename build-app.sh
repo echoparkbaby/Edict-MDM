@@ -47,6 +47,11 @@ APP_BUNDLE="$PROJECT_ROOT/$APP_NAME.app"
 cd "$PROJECT_ROOT"
 echo "▶ swift build -c release"
 swift build -c release
+# Build every binary BEFORE touching the old bundle: a failed build must
+# leave the previous working .app in place, not a half-built one.
+echo "▶ swift build --arch x86_64 (chat universal — already have arm64 from the main build)"
+swift build -c release --arch arm64  --product BlueConnectChat
+swift build -c release --arch x86_64 --product BlueConnectChat
 
 echo "▶ build .app bundle at: $APP_BUNDLE"
 rm -rf "$APP_BUNDLE"
@@ -66,9 +71,6 @@ chmod +x "$APP_BUNDLE/Contents/MacOS/$EXEC_NAME"
 # build each arch separately then lipo. The pkg path
 # (scripts/build-helper-pkg.sh) does the same dual-arch dance for
 # the Munki-distributed copy.
-echo "▶ swift build --arch x86_64 (chat universal — already have arm64 from the main build)"
-swift build -c release --arch arm64  --product BlueConnectChat
-swift build -c release --arch x86_64 --product BlueConnectChat
 CHAT_ARM64="$(swift build -c release --arch arm64  --show-bin-path)/BlueConnectChat"
 CHAT_X86_64="$(swift build -c release --arch x86_64 --show-bin-path)/BlueConnectChat"
 if [[ -f "$CHAT_ARM64" && -f "$CHAT_X86_64" ]]; then
