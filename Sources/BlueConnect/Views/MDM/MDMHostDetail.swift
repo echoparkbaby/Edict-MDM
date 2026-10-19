@@ -411,9 +411,14 @@ struct MDMHostDetail: View {
         ddmStatusLoading = true; errorText = nil
         defer { ddmStatusLoading = false }
         let kmf = KMFDDMService(settings: settings)
-        ddmValues = (try? await kmf.statusValues(enrollmentID: entry.enrollmentID)) ?? []
-        ddmErrors = (try? await kmf.statusErrors(enrollmentID: entry.enrollmentID)) ?? []
-        ddmStatusLoaded = true
+        // A network failure must not read as "Nothing reported yet".
+        do {
+            ddmValues = try await kmf.statusValues(enrollmentID: entry.enrollmentID)
+            ddmErrors = try await kmf.statusErrors(enrollmentID: entry.enrollmentID)
+            ddmStatusLoaded = true
+        } catch {
+            errorText = "Couldn't load DDM status: \(error.localizedDescription)"
+        }
     }
 
     /// Friendly label for a reported status-item path (strips the leading

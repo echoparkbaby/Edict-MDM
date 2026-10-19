@@ -303,7 +303,7 @@ struct GroupDashboardView: View {
                 Color.clear
                     .frame(width: 10)
                     .contentShape(Rectangle())
-                    .onHover { $0 ? NSCursor.resizeLeftRight.push() : NSCursor.pop() }
+                    .pointerStyle(.frameResize(position: .trailing))
                     .gesture(
                         DragGesture(minimumDistance: 1, coordinateSpace: .global)
                             .onChanged { v in
@@ -704,20 +704,6 @@ struct GroupDashboardView: View {
 
     // MARK: - Inventory tables (rendered by PrismInventoryTable)
 
-    /// Devices for the table's "narrow to one Mac" picker.
-    private var inventoryPickerDevices: [PrismPickerDevice] {
-        scoped.map { PrismPickerDevice(id: $0.id, label: label(for: $0), serial: $0.serialNumber) }
-    }
-    /// Select a per-device row's Mac in the main window so the inspector shows
-    /// it — same behavior the Devices/Security table gives.
-    private func selectInventoryRow(_ rowID: String) {
-        guard let dev = scoped.first(where: { $0.id == rowID }) else { return }
-        selection = [df.hostID(for: dev)]
-    }
-    private func isInventoryRowSelected(_ rowID: String) -> Bool {
-        guard let dev = scoped.first(where: { $0.id == rowID }) else { return false }
-        return selection.contains(df.hostID(for: dev))
-    }
     /// Adapter so the category `switch` keeps calling `inventoryTable(...)` while
     /// PrismInventoryTable owns the rendering + local UI state.
     private func inventoryTable(columns: [(String, CGFloat)], rows: [(id: String, cells: [String])],
@@ -725,14 +711,22 @@ struct GroupDashboardView: View {
                                 deviceRows: Bool = false,
                                 drillDevices: ((String) -> [String])? = nil,
                                 onPullMDM: (() -> Void)? = nil) -> some View {
-        PrismInventoryTable(
+        // Filter `scoped` once per table and index it, so the per-row
+        // select / is-selected callbacks are O(1) instead of re-filtering
+        // the fleet through smart-group rules for every row.
+        let scoped = self.scoped
+        let byID = Dictionary(scoped.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return PrismInventoryTable(
             category: category.rawValue,
             columns: columns, rows: rows, source: source,
             deviceRows: deviceRows, drillDevices: drillDevices,
             onPullMDM: onPullMDM, pullingSecurity: pullingSecurity,
-            pickerDevices: inventoryPickerDevices,
-            onSelectRow: selectInventoryRow,
-            isRowSelected: isInventoryRowSelected,
+            // Devices for the table's "narrow to one Mac" picker.
+            pickerDevices: scoped.map { PrismPickerDevice(id: $0.id, label: label(for: $0), serial: $0.serialNumber) },
+            // Select a per-device row's Mac in the main window so the inspector
+            // shows it — same behavior the Devices/Security table gives.
+            onSelectRow: { id in if let d = byID[id] { selection = [df.hostID(for: d)] } },
+            isRowSelected: { id in byID[id].map { selection.contains(df.hostID(for: $0)) } ?? false },
             inventoryDeviceID: $inventoryDeviceID,
             invSortCol: $invSortCol,
             invSortAsc: $invSortAsc,
@@ -940,7 +934,8 @@ struct GroupDashboardView: View {
     // MARK: - Attention strip (actionable alerts)
 
     private struct DashAlert: Identifiable {
-        let id = UUID(); let text: String; let icon: String; let color: Color; let drill: String?
+        let text: String; let icon: String; let color: Color; let drill: String?
+        var id: String { drill ?? text }
     }
 
     private var needsOnboardingCount: Int {
@@ -1072,9 +1067,10 @@ struct GroupDashboardView: View {
                     Spacer()
                     if let os = osVersions[d.id] { Text("macOS \(os)").font(.caption).foregroundStyle(.secondary) }
                     fileVaultChip(for: d)
-                    Button { settings.setIgnoredForAttention(d.id, true) } label: {
-                        Image(systemName: "eye.slash").font(.caption)
+                    Button("Hide \(label(for: d)) from attention", systemImage: "eye.slash") {
+                        settings.setIgnoredForAttention(d.id, true)
                     }
+                    .labelStyle(.iconOnly).font(.caption)
                     .buttonStyle(.plain).foregroundStyle(.secondary)
                     .help("Hide from attention — for a Mac too old to report via DDM")
                 }

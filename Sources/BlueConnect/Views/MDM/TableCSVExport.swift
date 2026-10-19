@@ -13,14 +13,15 @@ enum TableCSVExport {
             : s
     }
 
-    static func save(filename: String, columns: [String], rows: [[String]]) {
+    /// Throws if the write fails; cancelling the panel is not an error.
+    static func save(filename: String, columns: [String], rows: [[String]]) throws {
         var csv = columns.map(escape).joined(separator: ",") + "\n"
         for r in rows { csv += r.map(escape).joined(separator: ",") + "\n" }
         let panel = NSSavePanel()
         panel.nameFieldStringValue = filename
         panel.allowedContentTypes = [.commaSeparatedText]
         if panel.runModal() == .OK, let url = panel.url {
-            try? csv.data(using: .utf8)?.write(to: url)
+            try Data(csv.utf8).write(to: url)
         }
     }
 }

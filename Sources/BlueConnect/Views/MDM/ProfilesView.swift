@@ -97,9 +97,9 @@ struct ProfilesView: View {
                             .foregroundStyle(.white).padding(.top, 8)
                     }
                 }
-                .onDrop(of: [.fileURL, .data], isTargeted: $dropHighlight) { providers in
-                    handleDrop(providers)
-                }
+                .dropDestination(for: URL.self) { urls, _ in
+                    handleDrop(urls)
+                } isTargeted: { dropHighlight = $0 }
             }
         }
         .task {
@@ -365,7 +365,8 @@ struct ProfilesView: View {
                         }
                     }
                     if let g = selectedGroup {
-                        Text("\(groupMembers(g).count) member\(groupMembers(g).count == 1 ? "" : "s") match right now. Membership re-evaluates each deploy.")
+                        let n = groupMembers(g).count
+                        Text("\(n) member\(n == 1 ? "" : "s") match right now. Membership re-evaluates each deploy.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -444,16 +445,19 @@ struct ProfilesView: View {
 
     /// Accept a dropped .mobileconfig: load its XML into the Custom
     /// template so it can be reviewed and deployed.
-    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
-        guard let provider = providers.first else { return false }
-        _ = provider.loadObject(ofClass: URL.self) { url, _ in
-            guard let url, let text = try? String(contentsOf: url, encoding: .utf8) else { return }
-            DispatchQueue.main.async {
-                form.customXML = text
-                template = .custom
-                result = "Loaded \(url.lastPathComponent) — review and deploy."
-            }
+    private func handleDrop(_ urls: [URL]) -> Bool {
+        guard let url = urls.first else { return false }
+        do {
+            form.customXML = try String(contentsOf: url, encoding: .utf8)
+        } catch {
+            result = "Couldn't read \(url.lastPathComponent): \(error.localizedDescription)"
+            return false
         }
+        // Select the Custom template too, so the editor shows it even when a
+        // saved profile was selected (onChange(of: selected) syncs `template`).
+        template = .custom
+        selected = .template(.custom)
+        result = "Loaded \(url.lastPathComponent) — review and deploy."
         return true
     }
 
@@ -464,7 +468,12 @@ struct ProfilesView: View {
         else { return }
         loadingDevices = true
         defer { loadingDevices = false }
-        devices = (try? await EnrollmentsAPI(settings: settings).list().filter(\.isDevice)) ?? []
+        do {
+            devices = try await EnrollmentsAPI(settings: settings).list().filter(\.isDevice)
+        } catch {
+            devices = []
+            result = "Couldn't load devices: \(error.localizedDescription)"
+        }
         // Resolve real computer names from MDM (cached) for anything that
         // would otherwise show a bare serial. Runs in the background so the
         // list appears immediately and names fill in as they come back.

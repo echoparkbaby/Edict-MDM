@@ -12,6 +12,21 @@ struct DDMLibraryItem: Codable, Identifiable, Hashable {
     private var object: [String: Any]? {
         (try? JSONSerialization.jsonObject(with: json)) as? [String: Any]
     }
+    /// The display fields from a single parse — each accessor below re-parses
+    /// `json`, so per-row UI reads several fields via `fields` instead.
+    struct Fields {
+        let identifier: String
+        let type: String
+        let payload: [String: Any]
+        var kind: String { DDMLibraryItem.kind(forType: type) }
+        var summary: DDMDeclarationSummary { DDMDeclarationSummary.make(type: type, payload: payload) }
+    }
+    var fields: Fields {
+        let o = object
+        return Fields(identifier: (o?["Identifier"] as? String) ?? "—",
+                      type: (o?["Type"] as? String) ?? "—",
+                      payload: (o?["Payload"] as? [String: Any]) ?? [:])
+    }
     var identifier: String { (object?["Identifier"] as? String) ?? "—" }
     var type: String { (object?["Type"] as? String) ?? "—" }
     var payload: [String: Any] { (object?["Payload"] as? [String: Any]) ?? [:] }

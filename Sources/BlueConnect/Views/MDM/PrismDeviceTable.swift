@@ -44,12 +44,17 @@ struct PrismDeviceTable: View {
     /// the drag is smooth (no per-tick disk write); persisted once on release.
     @State private var liveResize: (key: String, width: CGFloat)?
 
-    private func width(for key: String, default def: CGFloat) -> CGFloat {
-        if let lr = liveResize, lr.key == key { return lr.width }
+    @State private var exportError: String?
+
+    /// The persisted width map, decoded once per body (not per cell).
+    private var savedWidths: [String: Double] {
         guard let data = colWidthsRaw.data(using: .utf8),
-              let map = try? JSONDecoder().decode([String: Double].self, from: data),
-              let w = map[key] else { return def }
-        return CGFloat(w)
+              let map = try? JSONDecoder().decode([String: Double].self, from: data) else { return [:] }
+        return map
+    }
+    private func width(for key: String, default def: CGFloat, in map: [String: Double]) -> CGFloat {
+        if let lr = liveResize, lr.key == key { return lr.width }
+        return map[key].map { CGFloat($0) } ?? def
     }
     private func setWidth(_ key: String, to newWidth: CGFloat) {
         var map: [String: Double] = [:]
@@ -67,7 +72,7 @@ struct PrismDeviceTable: View {
         Color.clear.frame(width: 8, height: 14)
             .overlay(Rectangle().fill(Color.secondary.opacity(0.25)).frame(width: 1))
             .contentShape(Rectangle())
-            .onHover { $0 ? NSCursor.resizeLeftRight.push() : NSCursor.pop() }
+            .pointerStyle(.frameResize(position: .trailing))
             .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
                 .onChanged { v in
                     if resizeStart == nil { resizeStart = currentWidth }
@@ -81,19 +86,22 @@ struct PrismDeviceTable: View {
     }
 
     var body: some View {
+        // Filter/sort and width decode once per render — hover re-runs body.
+        let rows = self.rows
+        let widths = savedWidths
         VStack(spacing: 0) {
-            toolbar
+            toolbar(count: rows.count)
             // Fixed-width columns inside a horizontal scroll so a wide
             // table scrolls instead of forcing the whole window layout to
             // shift; the column header stays put while rows scroll down.
             ScrollView(.horizontal, showsIndicators: true) {
                 VStack(spacing: 0) {
-                    tableHeader
+                    tableHeader(widths)
                     Divider()
                     ScrollView(.vertical, showsIndicators: true) {
                         LazyVStack(spacing: 0) {
                             ForEach(rows, id: \.id) { d in
-                                tableRow(d)
+                                tableRow(d, widths)
                                 Divider().opacity(0.4)
                             }
                         }
@@ -102,12 +110,15 @@ struct PrismDeviceTable: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .alert("Couldn't save CSV", isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(exportError ?? "") }
     }
 
-    private var toolbar: some View {
+    private func toolbar(count: Int) -> some View {
         HStack(spacing: 8) {
             Text(title).font(.title3.bold())
-            Text("\(rows.count)").font(.callout).foregroundStyle(.secondary)
+            Text("\(count)").font(.callout).foregroundStyle(.secondary)
             Spacer()
             if devices.contains(where: { facts.osVersions[$0.id] == nil }) {
                 Button { onEnableReporting() } label: {
@@ -168,15 +179,15 @@ struct PrismDeviceTable: View {
 
     // MARK: - Header + rows
 
-    private var tableHeader: some View {
+    private func tableHeader(_ widths: [String: Double]) -> some View {
         HStack(spacing: 12) {
-            let deviceW = width(for: "device", default: 230)
+            let deviceW = width(for: "device", default: 230, in: widths)
             HStack(spacing: 0) {
                 sortHeader("Device", .name).frame(width: max(40, deviceW) - 8, alignment: .leading)
                 resizeHandle(key: "device", currentWidth: deviceW)
             }
             ForEach(visibleColumns) { col in
-                let w = width(for: col.key, default: col.width)
+                let w = width(for: col.key, default: col.width, in: widths)
                 HStack(spacing: 0) {
                     Group {
                         if let s = col.sort { sortHeader(col.title, s) } else { Text(col.title) }
@@ -190,7 +201,7 @@ struct PrismDeviceTable: View {
         .foregroundStyle(.secondary)
     }
 
-    private func tableRow(_ d: MDMEnrollment) -> some View {
+    private func tableRow(_ d: MDMEnrollment, _ widths: [String: Double]) -> some View {
         let hovered = hoveredRow == d.id
         let selected = selection.contains(facts.hostID(for: d))
         return HStack(spacing: 12) {
@@ -198,9 +209,9 @@ struct PrismDeviceTable: View {
                 Image(systemName: facts.deviceIcon(d)).font(.caption).foregroundStyle(Color.accentColor).frame(width: 16)
                 Text(facts.label(for: d)).font(.callout.weight(.medium)).lineLimit(1).truncationMode(.tail)
             }
-            .frame(width: width(for: "device", default: 230), alignment: .leading)
+            .frame(width: width(for: "device", default: 230, in: widths), alignment: .leading)
             ForEach(visibleColumns) { col in
-                deviceCell(col, d).frame(width: width(for: col.key, default: col.width), alignment: .leading)
+                deviceCell(col, d).frame(width: width(for: col.key, default: col.width, in: widths), alignment: .leading)
             }
         }
         .padding(.horizontal, 18).padding(.vertical, 5)
@@ -312,6 +323,7 @@ struct PrismDeviceTable: View {
                 ? [facts.label(for: d), d.serialNumber ?? "", fv(d), comp(d), facts.osVersions[d.id] ?? "", facts.lastSeenText(d)]
                 : [facts.label(for: d), d.serialNumber ?? "", facts.models[d.id] ?? "", facts.osVersions[d.id] ?? "", fv(d), comp(d), facts.lastSeenText(d)]
         }
-        TableCSVExport.save(filename: "\(title).csv", columns: cols, rows: outRows)
+        do { try TableCSVExport.save(filename: "\(title).csv", columns: cols, rows: outRows) }
+        catch { exportError = error.localizedDescription }
     }
 }

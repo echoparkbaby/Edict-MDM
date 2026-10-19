@@ -184,9 +184,11 @@ struct DeclarationsView: View {
                     .tag(id)
                 }
                 .listStyle(.inset)
-                .onChange(of: selectedID) { _, newID in
+                // .task(id:) cancels the previous load on reselect, so a slow
+                // response can't overwrite the newer selection's detail.
+                .task(id: selectedID) {
                     detailJSON = ""; detailSets = []; detailError = nil
-                    if let id = newID { Task { await loadDetail(id: id) } }
+                    if let id = selectedID { await loadDetail(id: id) }
                 }
             }
         }
@@ -265,14 +267,13 @@ struct DeclarationsView: View {
                     ForEach(detailSets, id: \.self) { set in
                         HStack(spacing: 3) {
                             Text(set).font(.caption)
-                            Button {
+                            Button("Remove from \(set)", systemImage: "xmark.circle.fill") {
                                 if let id = selectedID {
                                     Task { await removeFromSet(id: id, set: set) }
                                 }
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.caption2).foregroundStyle(.secondary)
                             }
+                            .labelStyle(.iconOnly)
+                            .font(.caption2).foregroundStyle(.secondary)
                             .buttonStyle(.plain)
                             .help("Remove from “\(set)” — affected devices are notified")
                         }
@@ -323,13 +324,17 @@ struct DeclarationsView: View {
     private func loadDetail(id: String) async {
         detailLoading = true
         detailError = nil
-        defer { detailLoading = false }
+        // A cancelled (superseded) load leaves state to the newer one.
+        defer { if !Task.isCancelled { detailLoading = false } }
         let svc = KMFDDMService(settings: settings)
         do {
             let raw = try await svc.declaration(id: id)
+            let sets = try await svc.setsForDeclaration(id: id).sorted()
+            guard !Task.isCancelled else { return }
             detailJSON = Self.prettyJSON(raw)
-            detailSets = try await svc.setsForDeclaration(id: id).sorted()
+            detailSets = sets
         } catch {
+            guard !Task.isCancelled else { return }
             detailError = error.localizedDescription
         }
     }

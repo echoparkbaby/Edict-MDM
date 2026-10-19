@@ -11,7 +11,7 @@ struct DashboardFacts {
     var osVersions: [String: String]
     var fileVault: [String: String]
     var models: [String: String]
-    var hosts: [BlueSkyHost]
+    let hosts: [BlueSkyHost]
     /// enrollmentID → operator label (non-empty only).
     var deviceLabels: [String: String]
     /// enrollmentID → computer name reported by MunkiReport, so an MDM-only Mac
@@ -21,6 +21,23 @@ struct DashboardFacts {
     var minOS: String
     var driftMissing: [String: [DeploymentLog.Entry]]
     var deploymentCounts: [String: Int]
+    /// lowercased serial → BlueSky host, built once so per-cell / per-sort
+    /// `bscHost(for:)` lookups don't rescan `hosts`.
+    private let hostsBySerial: [String: BlueSkyHost]
+
+    init(osVersions: [String: String], fileVault: [String: String], models: [String: String],
+         hosts: [BlueSkyHost], deviceLabels: [String: String], mrNames: [String: String] = [:],
+         requireFileVault: Bool, minOS: String,
+         driftMissing: [String: [DeploymentLog.Entry]], deploymentCounts: [String: Int]) {
+        self.osVersions = osVersions; self.fileVault = fileVault; self.models = models
+        self.hosts = hosts; self.deviceLabels = deviceLabels; self.mrNames = mrNames
+        self.requireFileVault = requireFileVault; self.minOS = minOS
+        self.driftMissing = driftMissing; self.deploymentCounts = deploymentCounts
+        var idx: [String: BlueSkyHost] = [:]
+        // First match wins, same as the old linear `first(where:)` scan.
+        for h in hosts { if let s = h.serialnum, !s.isEmpty { idx[s.lowercased()] = idx[s.lowercased()] ?? h } }
+        hostsBySerial = idx
+    }
 
     /// An all-empty snapshot, used as the dashboard's initial cached value
     /// before the first load.
@@ -46,9 +63,7 @@ struct DashboardFacts {
 
     func bscHost(for enr: MDMEnrollment) -> BlueSkyHost? {
         guard let serial = enr.serialNumber, !serial.isEmpty else { return nil }
-        return hosts.first {
-            ($0.serialnum ?? "").caseInsensitiveCompare(serial) == .orderedSame
-        }
+        return hostsBySerial[serial.lowercased()]
     }
 
     /// The fleet-table row id this device maps to: its BlueSky host if

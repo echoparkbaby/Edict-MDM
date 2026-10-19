@@ -160,12 +160,13 @@ struct DeclarationLibraryPane: View {
 
     private var list: some View {
         List(library.items, selection: $selectedID) { item in
+            let f = item.fields  // one JSON parse per row
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.summary.title).font(.callout.weight(.medium)).lineLimit(1)
-                Text(item.identifier).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                Text(f.summary.title).font(.callout.weight(.medium)).lineLimit(1)
+                Text(f.identifier).font(.caption2.monospaced()).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
                 HStack(spacing: 6) {
-                    Text(item.kind).font(.caption2)
+                    Text(f.kind).font(.caption2)
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .background(Capsule().fill(Color.secondary.opacity(0.15)))
                         .foregroundStyle(.secondary)
@@ -182,13 +183,14 @@ struct DeclarationLibraryPane: View {
     @ViewBuilder
     private var detail: some View {
         if let item = selected {
-            let summary = item.summary
+            let f = item.fields
+            let summary = f.summary
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(summary.title).font(.title3.weight(.semibold))
-                            Text(item.identifier).font(.caption.monospaced()).foregroundStyle(.secondary)
+                            Text(f.identifier).font(.caption.monospaced()).foregroundStyle(.secondary)
                                 .textSelection(.enabled)
                         }
                         Spacer()
@@ -219,7 +221,7 @@ struct DeclarationLibraryPane: View {
                         .clipShape(.rect(cornerRadius: 8))
                     }
 
-                    if item.kind == "activation" {
+                    if f.kind == "activation" {
                         predicateEditor(item)
                     }
 

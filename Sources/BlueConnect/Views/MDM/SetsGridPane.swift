@@ -25,13 +25,15 @@ struct SetsGridPane: View {
     }
 
     var body: some View {
+        // Build the matrix once per render and hand it down.
+        let matrix = self.matrix
         Group {
             if library.items.isEmpty {
                 empty
             } else {
                 HSplitView {
-                    setList.frame(minWidth: 210, idealWidth: 240, maxWidth: 320)
-                    detail.frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
+                    setList(matrix).frame(minWidth: 210, idealWidth: 240, maxWidth: 320)
+                    detail(matrix).frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
@@ -42,6 +44,7 @@ struct SetsGridPane: View {
 
     /// Land on a sensible default selection (first set, else orphans).
     private func ensureSelection() {
+        let matrix = self.matrix
         let valid: Bool
         switch selection {
         case .set(let s): valid = matrix.sets.contains(s)
@@ -56,7 +59,7 @@ struct SetsGridPane: View {
 
     // MARK: - Left: set list
 
-    private var setList: some View {
+    private func setList(_ matrix: DDMSetsMatrix) -> some View {
         VStack(spacing: 0) {
             HStack {
                 Text("Sets").font(.headline)
@@ -67,10 +70,10 @@ struct SetsGridPane: View {
             Divider()
             List(selection: $selection) {
                 if !matrix.orphans.isEmpty {
-                    orphanRow.tag(Selection.orphans)
+                    orphanRow(matrix).tag(Selection.orphans)
                 }
                 ForEach(matrix.sets, id: \.self) { set in
-                    setRow(set).tag(Selection.set(set))
+                    setRow(set, matrix).tag(Selection.set(set))
                 }
             }
             .listStyle(.sidebar)
@@ -78,7 +81,8 @@ struct SetsGridPane: View {
             HStack(spacing: 6) {
                 TextField("New set name", text: $newSet)
                     .textFieldStyle(.roundedBorder).onSubmit(addSet)
-                Button { addSet() } label: { Image(systemName: "plus") }
+                Button("Add set", systemImage: "plus") { addSet() }
+                    .labelStyle(.iconOnly)
                     .disabled(trimmedNewSet.isEmpty || matrix.sets.contains(trimmedNewSet))
                     .help("Add an empty set, then check declarations into it")
             }
@@ -86,7 +90,7 @@ struct SetsGridPane: View {
         }
     }
 
-    private func setRow(_ set: String) -> some View {
+    private func setRow(_ set: String, _ matrix: DDMSetsMatrix) -> some View {
         let count = matrix.count(for: set)
         let warn = matrix.rows.contains { $0.unactivatedSets.contains(set) }
         return HStack(spacing: 8) {
@@ -105,7 +109,7 @@ struct SetsGridPane: View {
         .padding(.vertical, 2)
     }
 
-    private var orphanRow: some View {
+    private func orphanRow(_ matrix: DDMSetsMatrix) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 1) {
@@ -121,10 +125,10 @@ struct SetsGridPane: View {
     // MARK: - Right: detail
 
     @ViewBuilder
-    private var detail: some View {
+    private func detail(_ matrix: DDMSetsMatrix) -> some View {
         switch selection {
-        case .set(let name): setDetail(name)
-        case .orphans:       orphansDetail
+        case .set(let name): setDetail(name, matrix)
+        case .orphans:       orphansDetail(matrix)
         case nil:            placeholder
         }
     }
@@ -135,7 +139,7 @@ struct SetsGridPane: View {
                                message: "Select a set on the left to see and edit what a Mac assigned it receives.")
     }
 
-    private func setDetail(_ set: String) -> some View {
+    private func setDetail(_ set: String, _ matrix: DDMSetsMatrix) -> some View {
         let members = matrix.rows.filter { $0.isMember(of: set) }
         let unactivated = members.filter { $0.isUnactivated(in: set) }
         let nonMembers = matrix.rows.filter { !$0.isMember(of: set) }.filter {
@@ -216,9 +220,10 @@ struct SetsGridPane: View {
                 .buttonStyle(.borderless).foregroundStyle(.orange)
                 .help("Won't take effect here — add an activation that references it")
             }
-            Button { library.setMembership(row.id, set: set, isMember: false) } label: {
-                Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
+            Button("Remove \(row.title) from \(set)", systemImage: "minus.circle.fill") {
+                library.setMembership(row.id, set: set, isMember: false)
             }
+            .labelStyle(.iconOnly).foregroundStyle(.secondary)
             .buttonStyle(.plain).help("Remove from “\(set)”")
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
@@ -230,9 +235,10 @@ struct SetsGridPane: View {
             declIcon(row, dim: true)
             declText(row)
             Spacer(minLength: 8)
-            Button { library.setMembership(row.id, set: set, isMember: true) } label: {
-                Image(systemName: "plus.circle.fill").foregroundStyle(Color.accentColor)
+            Button("Add \(row.title) to \(set)", systemImage: "plus.circle.fill") {
+                library.setMembership(row.id, set: set, isMember: true)
             }
+            .labelStyle(.iconOnly).foregroundStyle(Color.accentColor)
             .buttonStyle(.plain).help("Add to “\(set)”")
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
@@ -240,7 +246,7 @@ struct SetsGridPane: View {
 
     // MARK: - Orphans detail
 
-    private var orphansDetail: some View {
+    private func orphansDetail(_ matrix: DDMSetsMatrix) -> some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
                 Label("Not in any set", systemImage: "exclamationmark.triangle.fill")
@@ -332,8 +338,8 @@ struct SetsGridPane: View {
     }
 }
 
-/// Small reusable centered empty-state hint (macOS-14 friendly, since
-/// ContentUnavailableView's full API is macOS 15+).
+/// Small reusable centered empty-state hint — kept over ContentUnavailableView
+/// for its smaller, lighter look in these panes.
 private struct ContentUnavailableHint: View {
     let icon: String
     let title: String

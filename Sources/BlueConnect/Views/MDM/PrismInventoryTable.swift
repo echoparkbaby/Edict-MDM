@@ -53,6 +53,7 @@ struct PrismInventoryTable: View {
     @State private var showDevicePicker = false
     @State private var invResizeStart: CGFloat?
     @State private var invLiveResize: (index: Int, width: CGFloat)?
+    @State private var exportError: String?
 
     init(category: String,
          columns: [(String, CGFloat)],
@@ -231,7 +232,7 @@ struct PrismInventoryTable: View {
             Color.clear.frame(width: 8, height: 14)
                 .overlay(Rectangle().fill(Color.secondary.opacity(0.25)).frame(width: 1))
                 .contentShape(Rectangle())
-                .onHover { $0 ? NSCursor.resizeLeftRight.push() : NSCursor.pop() }
+                .pointerStyle(.frameResize(position: .trailing))
                 .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { v in
                         if invResizeStart == nil { invResizeStart = width }
@@ -285,7 +286,8 @@ struct PrismInventoryTable: View {
                 .help("Roll up every Mac, or search to narrow to just one")
                 .popover(isPresented: $showDevicePicker, arrowEdge: .bottom) { devicePickerPopover }
                 Button {
-                    TableCSVExport.save(filename: "\(category).csv", columns: columns.map(\.0), rows: filtered.map(\.cells))
+                    do { try TableCSVExport.save(filename: "\(category).csv", columns: columns.map(\.0), rows: filtered.map(\.cells)) }
+                    catch { exportError = error.localizedDescription }
                 } label: { Image(systemName: "square.and.arrow.up") }
                 .help("Export this view as CSV").disabled(filtered.isEmpty)
                 .accessibilityLabel("Export this view as CSV")
@@ -335,6 +337,9 @@ struct PrismInventoryTable: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .alert("Couldn't save CSV", isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(exportError ?? "") }
     }
 
     /// One category-table row. When `drillDevices` is supplied (rolled-up Apps /

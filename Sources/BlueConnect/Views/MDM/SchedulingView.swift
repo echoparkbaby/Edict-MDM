@@ -63,7 +63,7 @@ struct SchedulingView: View {
 
     private func row(_ t: ScheduledTask) -> some View {
         HStack(spacing: 10) {
-            Toggle("", isOn: Binding(
+            Toggle(t.name, isOn: Binding(
                 get: { t.enabled },
                 set: { v in update(t) { $0.enabled = v } }
             )).labelsHidden().toggleStyle(.switch).controlSize(.small)
@@ -74,10 +74,12 @@ struct SchedulingView: View {
                     .font(.caption2).foregroundStyle(.secondary)
             }
             Spacer()
-            Button { editing = t } label: { Image(systemName: "pencil") }.buttonStyle(.plain)
-            Button(role: .destructive) {
+            Button("Edit \(t.name)", systemImage: "pencil") { editing = t }
+                .labelStyle(.iconOnly).buttonStyle(.plain)
+            Button("Delete \(t.name)", systemImage: "trash", role: .destructive) {
                 settings.scheduledTasks.removeAll { $0.id == t.id }
-            } label: { Image(systemName: "trash") }.buttonStyle(.plain)
+            }
+            .labelStyle(.iconOnly).buttonStyle(.plain)
         }
         .padding(.vertical, 2)
     }
