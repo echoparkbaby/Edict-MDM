@@ -33,6 +33,11 @@ if [[ -f "$PROJECT_ROOT/build-identity.sh" ]]; then
     source "$PROJECT_ROOT/build-identity.sh"
 fi
 PUBLISH_GITHUB="${PUBLISH_GITHUB:-1}"
+# Remotes the release tag is pushed to. build-identity.sh sets this per
+# branch: main (Edict) = "origin edict"; release/1.5 = "github origin".
+TAG_REMOTES="${TAG_REMOTES:-github origin}"
+# Releases are drafts unless RELEASE_DRAFT=0 (publish only on an explicit ask).
+RELEASE_DRAFT="${RELEASE_DRAFT:-1}"
 
 : "${SIGN_ID:?SIGN_ID required for a release build}"
 : "${NOTARY_PROFILE:?NOTARY_PROFILE required for notarization}"
@@ -74,9 +79,10 @@ git tag "$TAG" 2>/dev/null || echo "  (tag already exists, skipping)"
 # (Forgejo home). Older release.sh only pushed to github; the v1.4.0
 # cut showed why that's bad. `|| true` per remote so a single-remote
 # failure doesn't abort the entire release.
-echo "▶ push tag to github + origin"
-git push github "$TAG" 2>/dev/null || echo "  (github tag push skipped)"
-git push origin "$TAG" 2>/dev/null || echo "  (origin tag push skipped)"
+echo "▶ push tag to: $TAG_REMOTES"
+for remote in $TAG_REMOTES; do
+    git push "$remote" "$TAG" 2>/dev/null || echo "  ($remote tag push skipped)"
+done
 
 # Build the Munki-deployable helper pkg (chat client + GUI helper +
 # LaunchAgent plist) as the second release asset. The in-app
@@ -104,24 +110,28 @@ echo "▶ gh release create (GitHub)"
 # which is "most recent stable by date + semver" — usually right, but a
 # stray draft can confuse it. `--prerelease=false` and `--draft=false` are
 # defaults but listed so future-us doesn't have to dig through gh's help.
+if [[ "$RELEASE_DRAFT" == "1" ]]; then
+    GH_STATE=(--draft)
+else
+    GH_STATE=(--latest --prerelease=false --draft=false)
+fi
 if [[ -f "$NOTES" ]]; then
     gh release create "$TAG" "$DMG" "$HELPER_PKG" \
         --repo "$GITHUB_REPO" \
         --title "$TAG" \
         --notes-file "$NOTES" \
-        --latest \
-        --prerelease=false \
-        --draft=false
+        "${GH_STATE[@]}"
 else
     gh release create "$TAG" "$DMG" "$HELPER_PKG" \
         --repo "$GITHUB_REPO" \
         --title "$TAG" \
         --generate-notes \
-        --latest \
-        --prerelease=false \
-        --draft=false
+        "${GH_STATE[@]}"
 fi
 
+if [[ "$RELEASE_DRAFT" == "1" ]]; then
+    echo "  ✓ DRAFT created — publish later with:  gh release edit $TAG --repo $GITHUB_REPO --draft=false --latest"
+else
 # Assert /releases/latest now resolves to this tag. Hard-fail the script
 # if not — that's the only signal we get if a draft/prerelease flag slipped
 # through, or if GitHub ever changes its latest-selection rule.
@@ -133,6 +143,7 @@ if [[ "$LATEST_TAG" != "$TAG" ]]; then
     exit 1
 fi
 echo "  ✓ /releases/latest = $LATEST_TAG"
+fi
 else
     echo "▶ skipping GitHub release (PUBLISH_GITHUB=0 — private v2 track, Forgejo only)"
 fi
@@ -152,7 +163,8 @@ if [[ -n "${FORGEJO_BASE:-}" && -n "${FORGEJO_TOKEN:-}" ]]; then
         --arg tag "$TAG" \
         --arg name "$TAG" \
         --arg body "$BODY" \
-        '{tag_name:$tag,name:$name,body:$body,draft:false,prerelease:false,make_latest:"true"}')
+        --argjson draft "$([[ "$RELEASE_DRAFT" == "1" ]] && echo true || echo false)" \
+        '{tag_name:$tag,name:$name,body:$body,draft:$draft,prerelease:false,make_latest:"true"}')
     REL_RESP=$(curl -sS -X POST \
         -H "Authorization: token $FORGEJO_TOKEN" \
         -H "Content-Type: application/json" \

@@ -21,7 +21,10 @@ DMG_NAME="Edict-MDM.dmg"
 # name inside the bundle, not user-visible, and renaming it would churn
 # Package.swift for no gain.
 
-# Release publish targets. v2 is private: Forgejo only, no GitHub release.
-PUBLISH_GITHUB=0
+# Release publish targets. v2 publishes to its OWN GitHub repo (Edict-MDM),
+# never to BlueConnect-Admin. Wins over GITHUB_REPO in .env-sign.
+PUBLISH_GITHUB=1
+GITHUB_REPO="echoparkbaby/Edict-MDM"
+TAG_REMOTES="origin edict"
 
-export APP_NAME BUNDLE_ID DMG_NAME PUBLISH_GITHUB
+export APP_NAME BUNDLE_ID DMG_NAME PUBLISH_GITHUB GITHUB_REPO TAG_REMOTES
