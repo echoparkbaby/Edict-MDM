@@ -60,23 +60,19 @@ mkdir -p "$ROOT/Library/LaunchAgents"
 mkdir -p "$SCRIPTS"
 
 # Universal-binary build: chat client runs on both Apple Silicon and
-# Intel fleet Macs. SwiftPM doesn't have a single-shot universal flag,
-# so we build each arch in its own .build subdir then `lipo` them into
-# one. The arm64-only build is what the host produces by default —
-# explicitly --arch'ing both ensures the output covers Intel even when
-# this script runs on an Apple Silicon machine.
-echo "▶ swift build -c release --arch arm64 (BlueConnectChat)"
-swift build -c release --arch arm64  --product BlueConnectChat
-ARM64_BIN="$(swift build -c release --arch arm64 --show-bin-path)/BlueConnectChat"
-
-echo "▶ swift build -c release --arch x86_64 (BlueConnectChat)"
-swift build -c release --arch x86_64 --product BlueConnectChat
-X86_64_BIN="$(swift build -c release --arch x86_64 --show-bin-path)/BlueConnectChat"
+# Intel fleet Macs. One multi-arch build — Xcode 27's SwiftPM build
+# system writes every --arch to the same Products/Release path, so two
+# separate --arch builds + lipo just merged x86_64 with itself (same fix
+# as build-app.sh).
+echo "▶ swift build -c release --arch arm64 --arch x86_64 (BlueConnectChat)"
+swift build -c release --arch arm64 --arch x86_64 --product BlueConnectChat
+BUILT_BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/BlueConnectChat"
 
 UNIVERSAL_BIN="$STAGE/blueconnect-chat-universal"
-echo "▶ lipo -create $UNIVERSAL_BIN"
-lipo -create "$ARM64_BIN" "$X86_64_BIN" -output "$UNIVERSAL_BIN"
-echo "  $(lipo -info "$UNIVERSAL_BIN")"
+cp "$BUILT_BIN" "$UNIVERSAL_BIN"
+ARCHS="$(lipo -archs "$UNIVERSAL_BIN")"
+[[ "$ARCHS" == *arm64* && "$ARCHS" == *x86_64* ]] || { echo "✖ chat client not universal: $ARCHS" >&2; exit 1; }
+echo "  architectures: $ARCHS"
 
 # Stage the three payload files. Permissions get a final pass via
 # pkgbuild --analyze/--component-plist, but installing them with the
