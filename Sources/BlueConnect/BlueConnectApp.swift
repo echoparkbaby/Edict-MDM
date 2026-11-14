@@ -29,6 +29,14 @@ struct BlueConnectAdminApp: App {
     @StateObject private var quickActionStore = QuickActionStore()
     @State private var quickActionLauncher = QuickActionLauncher()
 
+    init() {
+        // Every endpoint this app calls is a live admin API. URLSession.shared's
+        // default disk cache served months-old empty KMFDDM status replies, so
+        // the dashboard showed "—" for model/OS/FileVault. No caching, anywhere.
+        URLCache.shared.removeAllCachedResponses()
+        URLCache.shared = URLCache(memoryCapacity: 0, diskCapacity: 0)
+    }
+
     /// The shipping app's display name ("Edict MDM" on main, "BlueConnect
     /// Admin" on the 1.5 line) — driven by CFBundleDisplayName so the
     /// About panel and menus match the build identity.
@@ -112,7 +120,8 @@ struct BlueConnectAdminApp: App {
                 Button("About \(appDisplayName)") {
                     let info = Bundle.main.infoDictionary
                     let appVer = info?["CFBundleShortVersionString"] as? String ?? "0.0.0"
-                    let build = info?["CFBundleVersion"] as? String ?? "0"
+                    let build = [info?["CFBundleVersion"] as? String ?? "0",
+                                 info?["EdictBuildDate"] as? String].compactMap { $0 }.joined(separator: " · ")
                     let bsVer = hosts.lastResponse?.blueSkyVersion?.nilIfEmpty() ?? "—"
                     let phpVer = hosts.lastResponse?.phpVersion ?? "—"
                     let credits = NSAttributedString(

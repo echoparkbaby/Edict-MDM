@@ -204,25 +204,55 @@ struct KMFDDMService {
     /// the dashboard refresh doesn't pay two round-trips per device.
     func fullStatus(enrollmentID: String) async
         -> (os: String?, fileVault: Bool?, model: String?, su: DDMSoftwareUpdate) {
+        // KMFDDM v0.7 never files some items (diskmanagement.filevault.enabled,
+        // softwareupdate.*) into status-values, so the latest raw report is
+        // read first and status-values is the fallback.
+        async let rawReport = latestStatusReport(enrollmentID: enrollmentID)
         let items = (try? await statusValues(enrollmentID: enrollmentID,
                                              pathPrefix: ".StatusItems")) ?? []
+        let report = await rawReport
         func leaf(_ suffix: String) -> String? {
-            guard let raw = items.first(where: { $0.path.hasSuffix(suffix) })?.value else { return nil }
-            let v = raw.trimmingCharacters(in: .whitespaces)
+            let raw = Self.reportValue(report, path: "StatusItems." + suffix)
+                // status-values keeps history rows per path; newest wins.
+                ?? items.filter { $0.path.hasSuffix(suffix) }
+                    .max { ($0.timestamp ?? "") < ($1.timestamp ?? "") }?.value
+            guard let raw else { return nil }
+            let v = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             // Reject capability paths that come back as values.
-            if v.isEmpty || v.hasPrefix(".") || v.hasPrefix("device.")
-                || v.hasPrefix("softwareupdate.") || v.hasPrefix("management.")
-                || v.hasPrefix("StatusItems") { return nil }
+            guard !v.isEmpty, ![".", "device.", "softwareupdate.", "management.", "StatusItems"].contains(where: v.hasPrefix)
+            else { return nil }
             return v
         }
-        let os = leaf("operating-system.version")
-        let model = leaf("model.marketing-name") ?? leaf("model.identifier")
-        let fv = (items.first { $0.path.hasSuffix("filevault.enabled") })?.value
-        let fileVault: Bool? = fv.map { $0 == "true" || $0 == "1" }
-        let su = DDMSoftwareUpdate(installState: leaf("install-state"),
-                                   pendingOS: leaf("pending-version.os-version"),
-                                   failureReason: leaf("failure-reason"))
+        let os = leaf("device.operating-system.version")
+        let model = leaf("device.model.marketing-name") ?? leaf("device.model.identifier")
+        let fileVault: Bool? = ["true": true, "1": true, "false": false, "0": false][leaf("diskmanagement.filevault.enabled") ?? ""]
+        let su = DDMSoftwareUpdate(installState: leaf("softwareupdate.install-state"),
+                                   pendingOS: leaf("softwareupdate.pending-version.os-version"),
+                                   failureReason: leaf("softwareupdate.failure-reason"))
         return (os: os, fileVault: fileVault, model: model, su: su)
+    }
+
+    /// `GET /v1/status-report/<enrollmentID>?index=0` — the device's most
+    /// recent raw DDM status report. nil on any failure.
+    func latestStatusReport(enrollmentID: String) async -> [String: Any]? {
+        guard let (data, _) = try? await request("v1/status-report/\(pathEsc(enrollmentID))",
+                                                 query: [URLQueryItem(name: "index", value: "0")])
+        else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    /// Walk a dotted path (`StatusItems.device.model.identifier`) in a raw
+    /// report. Scalars only: an object/array leaf (e.g. an empty
+    /// `failure-reason: {}`) reads as nil.
+    static func reportValue(_ report: [String: Any]?, path: String) -> String? {
+        var node: Any? = report
+        for key in path.split(separator: ".") { node = (node as? [String: Any])?[String(key)] }
+        switch node {
+        case let s as String: return s
+        case let n as NSNumber:
+            return CFGetTypeID(n) == CFBooleanGetTypeID() ? (n.boolValue ? "true" : "false") : n.stringValue
+        default: return nil
+        }
     }
 
     // MARK: - HTTP

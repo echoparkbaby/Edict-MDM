@@ -20,3 +20,6 @@ BlueConnectHelper.pkg
 
 # Stray cert extractions from `codesign -d --extract-certificates`.
 codesign[0-9]*
+
+# Running build counter for build-app.sh (local to this Mac)
+.build-number

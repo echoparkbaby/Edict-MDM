@@ -431,7 +431,9 @@ struct SettingsView: View {
     }
 
     private var appBuildNumber: String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        let info = Bundle.main.infoDictionary
+        return [info?["CFBundleVersion"] as? String ?? "1", info?["EdictBuildDate"] as? String]
+            .compactMap { $0 }.joined(separator: " · ")
     }
 
     @ViewBuilder

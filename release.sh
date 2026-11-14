@@ -53,16 +53,12 @@ DMG="$PROJECT_ROOT/$DMG_NAME"
 HELPER_PKG_NAME="${HELPER_PKG_NAME:-BlueConnectHelper.pkg}"
 HELPER_PKG="$PROJECT_ROOT/$HELPER_PKG_NAME"
 
-# Derive Info.plist VERSION from the tag (strip leading 'v') and BUILD_NUMBER
-# from the count of git tags + 1 (monotonic without manual bumping). Both are
-# exported so build-app.sh + make-dmg.sh pick them up.
+# Derive Info.plist VERSION from the tag (strip leading 'v'). The build
+# number is build-app.sh's running counter (.build-number), same as dev
+# builds, so re-cutting a release draft never reuses a number.
 export VERSION="${TAG#v}"
-export BUILD_NUMBER="$(($(git tag --list | wc -l | tr -d ' ') + 1))"
-# Signal to build-app.sh that this BUILD_NUMBER is a release-managed
-# counter, not the stale value sourced from .env-sign — so it isn't
-# rewritten to a timestamp.
-export BUILD_NUMBER_EXPLICIT=1
-echo "▶ release VERSION=$VERSION  BUILD_NUMBER=$BUILD_NUMBER (tag=$TAG)"
+unset BUILD_NUMBER_EXPLICIT
+echo "▶ release VERSION=$VERSION (tag=$TAG)"
 
 bash "$PROJECT_ROOT/make-dmg.sh"
 

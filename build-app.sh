@@ -38,9 +38,17 @@ VERSION="${VERSION:-1.0.0}"
 # timestamp so each dev build reports a unique Info.plist version.
 # release.sh sets its own monotonic counter and exports it after sourcing
 # .env-sign, so that path still takes precedence.
+# Build number = a running counter kept in .build-number (gitignored, this
+# Mac only), bumped on EVERY build — dev or release — so each build reads
+# distinctly in About. Starts after 19, the first 2.0.0 draft. The build
+# date goes in EdictBuildDate and shows next to it.
 if [[ -z "${BUILD_NUMBER_EXPLICIT:-}" ]]; then
-    BUILD_NUMBER="$(date +%Y%m%d.%H%M%S)"
+    COUNTER_FILE="$PROJECT_ROOT/.build-number"
+    BUILD_NUMBER=$(( $(cat "$COUNTER_FILE" 2>/dev/null || echo 19) + 1 ))
+    echo "$BUILD_NUMBER" > "$COUNTER_FILE"
 fi
+BUILD_DATE="$(date +%Y-%m-%d)"
+echo "▶ version $VERSION  build $BUILD_NUMBER  ($BUILD_DATE)"
 SIGN_ID="${SIGN_ID:-}"   # empty → ad-hoc signature
 APP_BUNDLE="$PROJECT_ROOT/$APP_NAME.app"
 
@@ -101,6 +109,7 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key>                <string>APPL</string>
     <key>CFBundleShortVersionString</key>         <string>$VERSION</string>
     <key>CFBundleVersion</key>                    <string>$BUILD_NUMBER</string>
+    <key>EdictBuildDate</key>                     <string>$BUILD_DATE</string>
     <key>LSMinimumSystemVersion</key>             <string>15.0</string>
     <key>LSApplicationCategoryType</key>          <string>public.app-category.utilities</string>
     <key>NSHighResolutionCapable</key>            <true/>

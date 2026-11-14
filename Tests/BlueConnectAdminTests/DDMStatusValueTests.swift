@@ -46,4 +46,16 @@ struct DDMStatusValueTests {
         let v = try decode(#"{"path":".x","value":"y","timestamp":"2026-01-01T00:00:00Z"}"#)
         #expect(v.timestamp == "2026-01-01T00:00:00Z")
     }
+
+    /// Raw-report walk used for FileVault / software update, which KMFDDM
+    /// v0.7 never files into status-values.
+    @Test func rawReportValueWalk() throws {
+        let json = #"{"StatusItems":{"diskmanagement":{"filevault":{"enabled":false}},"softwareupdate":{"install-state":"none","failure-reason":{}},"device":{"operating-system":{"version":"27.0.1"}}}}"#
+        let r = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        #expect(KMFDDMService.reportValue(r, path: "StatusItems.diskmanagement.filevault.enabled") == "false")
+        #expect(KMFDDMService.reportValue(r, path: "StatusItems.softwareupdate.install-state") == "none")
+        #expect(KMFDDMService.reportValue(r, path: "StatusItems.softwareupdate.failure-reason") == nil)
+        #expect(KMFDDMService.reportValue(r, path: "StatusItems.device.operating-system.version") == "27.0.1")
+        #expect(KMFDDMService.reportValue(nil, path: "StatusItems.x") == nil)
+    }
 }
