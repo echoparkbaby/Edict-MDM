@@ -27,6 +27,9 @@ struct SidebarView: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
+                    if settings.mdmEnabled {
+                        Text("Remote support").font(.caption).foregroundStyle(.secondary).padding(8)
+                    }
                     statusGroup
                     if settings.mdmEnabled {
                         Divider().padding(.vertical, 6)

@@ -107,7 +107,9 @@ struct SettingsView: View {
             detailPane
         }
         .navigationSplitViewStyle(.balanced)
-        .frame(width: 720, height: 480)
+        // 900 wide: the Terminal pane's theme grid and 16-color grid clip
+        // (both edges) in anything narrower once the sidebar takes ~200.
+        .frame(width: 900, height: 600)
         .background {
             // Hidden Escape-to-close shortcut. macOS Settings windows
             // normally only close on ⌘W / red traffic light — this gives
