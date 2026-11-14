@@ -45,6 +45,14 @@ struct DashboardFacts {
                                       deviceLabels: [:], requireFileVault: false, minOS: "",
                                       driftMissing: [:], deploymentCounts: [:])
 
+    /// MunkiReport fills what MDM didn't report — Macs too old to send DDM
+    /// status (pre-macOS 13). MDM values always win.
+    mutating func fillGaps(_ id: String, from inv: MRHostInventory) {
+        if osVersions[id] == nil { osVersions[id] = inv.machine?.osVersionString }
+        if models[id] == nil { models[id] = inv.machine?.machine_desc ?? inv.machine?.machine_model }
+        if fileVault[id] == nil { fileVault[id] = inv.fileVaultOn.map { $0 ? "true" : "false" } }
+    }
+
     func facts(for enr: MDMEnrollment) -> SmartGroup.DeviceFacts {
         SmartGroup.DeviceFacts(
             osVersion: osVersions[enr.id],

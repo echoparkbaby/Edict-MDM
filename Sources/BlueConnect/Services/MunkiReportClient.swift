@@ -605,3 +605,15 @@ struct MRTimeMachine: Codable, Hashable {
         || (server_display_name?.isEmpty == false)
     }
 }
+
+extension MRHostInventory {
+    /// FileVault state as MunkiReport sees it: status text first, then the
+    /// boot disk's encrypted flag. nil when neither is reported.
+    var fileVaultOn: Bool? {
+        if let s = filevault?.filevault_status?.lowercased(), !s.isEmpty {
+            if s.contains("decrypt") || s.contains("not") || s.contains("off") { return false }
+            if s.contains("encrypt") || s.contains("on") { return true }
+        }
+        return disk_report?.encrypted.map { $0 == 1 }
+    }
+}

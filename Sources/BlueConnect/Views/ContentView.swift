@@ -1427,12 +1427,7 @@ struct ContentView: View {
         if let fv = mdmFleet.entry(forSerial: h.serialnum)?.fileVault { return fv }
         guard let serial = h.serialnum?.trimmingCharacters(in: .whitespaces), !serial.isEmpty,
               let inv = mrInventory.bySerial[serial] else { return nil }
-        if let s = inv.filevault?.filevault_status?.lowercased(), !s.isEmpty {
-            if s.contains("decrypt") || s.contains("not") || s.contains("off") { return false }
-            if s.contains("encrypt") || s.contains("on") { return true }
-        }
-        if let enc = inv.disk_report?.encrypted { return enc == 1 }
-        return nil
+        return inv.fileVaultOn
     }
 
     private var hostsTable: some View {

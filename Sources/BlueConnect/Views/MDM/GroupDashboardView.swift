@@ -162,6 +162,7 @@ struct GroupDashboardView: View {
                             hosts: hostStore.hosts, deviceLabels: deviceLabels, mrNames: knownDeviceNames,
                             requireFileVault: settings.mdmRequireFileVault, minOS: settings.mdmMinOSVersion,
                             driftMissing: driftMissing, deploymentCounts: deploymentCounts)
+        for d in allDevices { if let inv = mr(for: d) { df.fillGaps(d.id, from: inv) } }
     }
     /// enrollmentID → best non-hostname name, so an MDM-only Mac reads as its
     /// real name instead of a bare serial: MunkiReport computer name preferred,
