@@ -48,9 +48,20 @@ struct DashboardFacts {
     /// MunkiReport fills what MDM didn't report — Macs too old to send DDM
     /// status (pre-macOS 13). MDM values always win.
     mutating func fillGaps(_ id: String, from inv: MRHostInventory) {
-        if osVersions[id] == nil { osVersions[id] = inv.machine?.osVersionString }
-        if models[id] == nil { models[id] = inv.machine?.machine_desc ?? inv.machine?.machine_model }
-        if fileVault[id] == nil { fileVault[id] = inv.fileVaultOn.map { $0 ? "true" : "false" } }
+        func fill(_ map: inout [String: String], _ column: String, _ value: String?) {
+            guard map[id] == nil, let value else { return }
+            map[id] = value
+            viaMunkiReport.insert(id + "|" + column)
+        }
+        fill(&osVersions, "os", inv.machine?.osVersionString)
+        fill(&models, "model", inv.machine?.machine_desc ?? inv.machine?.machine_model)
+        fill(&fileVault, "fv", inv.fileVaultOn.map { $0 ? "true" : "false" })
+    }
+    /// "<enrollmentID>|<column>" for every value fillGaps supplied, so the
+    /// table can say which system a value came from.
+    private(set) var viaMunkiReport: Set<String> = []
+    func sourceNote(_ id: String, _ column: String) -> String {
+        viaMunkiReport.contains(id + "|" + column) ? "via MunkiReport" : ""
     }
 
     func facts(for enr: MDMEnrollment) -> SmartGroup.DeviceFacts {

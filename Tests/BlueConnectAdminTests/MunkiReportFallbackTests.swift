@@ -22,5 +22,7 @@ struct MunkiReportFallbackTests {
         var reported = facts(os: ["a": "27.2"])
         reported.fillGaps("a", from: inv)
         #expect(reported.osVersions["a"] == "27.2")
+        #expect(empty.sourceNote("a", "os") == "via MunkiReport")
+        #expect(reported.sourceNote("a", "os") == "")
     }
 }

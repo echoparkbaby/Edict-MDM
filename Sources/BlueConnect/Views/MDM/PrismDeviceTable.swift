@@ -229,9 +229,9 @@ struct PrismDeviceTable: View {
     private func deviceCell(_ col: DeviceColumn, _ d: MDMEnrollment) -> some View {
         switch col.key {
         case "serial": Text(d.serialNumber ?? "—").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-        case "model": Text(facts.models[d.id] ?? "—").font(.callout).foregroundStyle(facts.models[d.id] == nil ? .secondary : .primary).lineLimit(1)
-        case "os": Text(facts.osVersions[d.id] ?? "—").font(.callout).foregroundStyle(facts.osVersions[d.id] == nil ? .secondary : .primary)
-        case "fv": fvCell(d)
+        case "model": Text(facts.models[d.id] ?? "—").font(.callout).foregroundStyle(facts.models[d.id] == nil ? .secondary : .primary).lineLimit(1).help(facts.sourceNote(d.id, "model"))
+        case "os": Text(facts.osVersions[d.id] ?? "—").font(.callout).foregroundStyle(facts.osVersions[d.id] == nil ? .secondary : .primary).help(facts.sourceNote(d.id, "os"))
+        case "fv": fvCell(d).help(facts.sourceNote(d.id, "fv"))
         case "compliance": complianceCell(d)
         case "lastSeen": Text(facts.lastSeenText(d)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
         default: EmptyView()
