@@ -5,7 +5,8 @@ let package = Package(
     name: "BlueConnectAdmin",
     platforms: [.macOS(.v15)],
     dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.2.0"),
+        // SwiftTerm 1.13.0 + the Terminal.app-text patch, vendored (see Vendor/SwiftTerm/README.md).
+        .package(path: "Vendor/SwiftTerm"),
     ],
     targets: [
         .executableTarget(
