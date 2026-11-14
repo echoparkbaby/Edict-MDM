@@ -104,7 +104,7 @@ struct ConnectPanel: View {
     /// actions when it's enrolled (matched by serial), otherwise a hint.
     @ViewBuilder
     private func mdmTab(host: BlueSkyHost) -> some View {
-        if let entry = mdmFleet.entry(forSerial: host.serialnum) {
+        if let entry = mdmFleet.entry(for: host) {
             MDMHostDetail(host: host, entry: entry)
                 .id(entry.enrollmentID)   // fresh state per Mac; stale DDM/inventory otherwise carried over
         } else {

@@ -25,4 +25,15 @@ struct MunkiReportFallbackTests {
         #expect(empty.sourceNote("a", "os") == "via MunkiReport")
         #expect(reported.sourceNote("a", "os") == "")
     }
+
+    /// Some MunkiReport versions send the status as "1"/"0"; it must not
+    /// depend on disk data being present or agreeing.
+    @Test func numericFileVaultStatus() throws {
+        func on(_ json: String) throws -> Bool? {
+            try JSONDecoder().decode(MRHostInventory.self, from: Data(json.utf8)).fileVaultOn
+        }
+        #expect(try on(#"{"serial":"X","filevault":{"filevault_status":"1"}}"#) == true)
+        #expect(try on(#"{"serial":"X","filevault":{"filevault_status":"0"},"disk_report":{"encrypted":1}}"#) == false)
+        #expect(try on(#"{"serial":"X"}"#) == nil)
+    }
 }

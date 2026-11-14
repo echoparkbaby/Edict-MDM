@@ -21,6 +21,7 @@ struct DashboardFacts {
     var minOS: String
     var driftMissing: [String: [DeploymentLog.Entry]]
     var deploymentCounts: [String: Int]
+    var unavailableDeviceIDs: Set<String> = []
     /// lowercased serial → BlueSky host, built once so per-cell / per-sort
     /// `bscHost(for:)` lookups don't rescan `hosts`.
     private let hostsBySerial: [String: BlueSkyHost]
@@ -75,7 +76,8 @@ struct DashboardFacts {
     }
 
     func compliant(for d: MDMEnrollment) -> Bool? {
-        SmartGroup.compliant(facts(for: d), requireFileVault: requireFileVault, minOS: minOS)
+        guard !unavailableDeviceIDs.contains(d.id) else { return nil }
+        return SmartGroup.compliant(facts(for: d), requireFileVault: requireFileVault, minOS: minOS)
     }
 
     func fileVaultOn(for d: MDMEnrollment) -> Bool? { facts(for: d).fileVaultOn }
@@ -167,6 +169,7 @@ struct DashboardFacts {
         clause(["enrolled"], d.isEnabled)
         clause(["out of compliance", "non-compliant", "noncompliant", "not compliant"], compliant(for: d) == false)
         clause(["compliant"], compliant(for: d) == true)
+        clause(["unknown"], compliant(for: d) == nil)
         clause(["needs attention", "at risk"], attentionScore(d).score > 0)
         for (name, major) in [("ventura", 13), ("sonoma", 14), ("sequoia", 15), ("tahoe", 26)] {
             clause([name], (f.osVersion?.split(separator: ".").first).flatMap { Int($0) } == major)

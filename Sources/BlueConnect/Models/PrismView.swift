@@ -10,6 +10,10 @@ struct PrismView: Codable, Identifiable, Hashable {
     /// Smart-group scope; nil = every enrolled device.
     var groupID: UUID?
     var attribute: Attribute
+    var search: String? = nil
+    var hiddenColumns: String? = nil
+    var sortKey: String? = nil
+    var sortAscending: Bool? = nil
 
     /// What to break the fleet down by.
     enum Attribute: String, Codable, CaseIterable, Identifiable {

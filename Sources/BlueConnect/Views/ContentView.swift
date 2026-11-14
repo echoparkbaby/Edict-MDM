@@ -127,7 +127,7 @@ struct ContentView: View {
 
     /// MDM overlay: lets the BSC hosts table double as the merged fleet
     /// view — status per serial + synthetic rows for MDM-only Macs.
-    @State private var mdmFleet = MDMFleetIndex()
+    @Environment(MDMFleetIndex.self) private var mdmFleet
 
     /// One-time offer to import settings from the v1.5 BlueConnect Admin app.
     @State private var showLegacyImport = false
@@ -144,7 +144,7 @@ struct ContentView: View {
         var result = hostStore.hosts
         // Merge in Macs that are MDM-enrolled but not in BlueSky, so the
         // table shows the whole fleet. Skipped entirely when MDM is off.
-        if settings.mdmEnabled { result += mdmFleet.mdmOnly }
+        if settings.mdmEnabled, ![.favorites, .recent, .active, .inactive, .uncategorized].contains(sidebarFilter) { result += mdmFleet.mdmOnly }
         switch sidebarFilter {
         case .all:           break
         case .favorites:     result = result.filter { $0.isFavorite }
@@ -153,7 +153,7 @@ struct ContentView: View {
         case .inactive:      result = result.filter { !$0.active }
         case .uncategorized: result = result.filter { ($0.category ?? "").isEmpty }
         case .category(let c): result = result.filter { ($0.category ?? "") == c }
-        case .mdmDeclarations, .mdmDevices, .mdmProfiles, .mdmEnrollment, .mdmDEP, .mdmScheduling, .mdmDashboard: break  // center pane shows an MDM view, not the table
+        case .mdmDeclarations, .mdmDevices, .mdmProfiles, .mdmEnrollment, .mdmDEP, .mdmScheduling, .mdmDashboard, .mdmSecurity, .mdmUpdates, .mdmActivity: break  // center pane shows an MDM view, not the table
         }
         if !searchText.isEmpty {
             let q = searchText
@@ -177,7 +177,11 @@ struct ContentView: View {
     }
 
     private var selectedHosts: [BlueSkyHost] {
-        filteredAndSorted.filter { selection.contains($0.id) }
+        // MDM selections resolve against the full shared inventory, regardless
+        // of a search left behind in the remote-support table.
+        let available = sidebarFilter.key.hasPrefix("mdm:")
+            ? hostStore.hosts + mdmFleet.mdmOnly : filteredAndSorted
+        return available.filter { selection.contains($0.id) }
     }
 
     /// Run the one-time BlueConnect Admin import and refresh so the
@@ -200,8 +204,10 @@ struct ContentView: View {
     /// Wake the Mac so it checks in (APNs push).
     private func mdmCheckIn(_ h: BlueSkyHost, enrollmentID: String) {
         Task {
-            _ = try? await NanoMDMService(settings: settings).push(enrollmentIDs: enrollmentID)
-            activity.record(.category, title: "MDM check-in pushed", detail: h.displayName)
+            do {
+                _ = try await NanoMDMService(settings: settings).push(enrollmentIDs: enrollmentID)
+                activity.record(.category, title: "APNs notification accepted", detail: h.displayName)
+            } catch { alert = .error("Couldn't request a check-in: \(error.localizedDescription)") }
         }
     }
 
@@ -300,8 +306,13 @@ struct ContentView: View {
         let targets = enrollmentIDs(hosts)
         Task {
             let nano = NanoMDMService(settings: settings)
-            for t in targets { _ = try? await nano.push(enrollmentIDs: t.id) }
-            activity.record(.category, title: "MDM check-in pushed", detail: "\(targets.count) Macs")
+            var accepted = 0
+            for target in targets {
+                do { _ = try await nano.push(enrollmentIDs: target.id); accepted += 1 }
+                catch { activity.record(.error, title: "Check-in notification failed", detail: target.host.displayName) }
+            }
+            activity.record(.category, title: "APNs notifications accepted",
+                            detail: "\(accepted) of \(targets.count) devices. A device check-in is not yet confirmed.")
         }
     }
 
@@ -311,15 +322,18 @@ struct ContentView: View {
             let set = "default"
             let configID = "com.hellocomputer.edict.status-subscriptions"
             let kmf = KMFDDMService(settings: settings)
-            let nano = NanoMDMService(settings: settings)
-            try? await kmf.deploy(configJSON: DDMDeclarations.statusSubscriptions(identifier: configID),
-                                  configID: configID, toSet: set)
-            for t in targets {
-                try? await kmf.assign(enrollmentID: t.id, toSet: set)
-                _ = try? await nano.push(enrollmentIDs: t.id)
-            }
-            activity.record(.category, title: "MDM reporting enabled", detail: "\(targets.count) Macs")
-            await refreshMDMFleet()
+            do {
+                try await kmf.deploy(configJSON: DDMDeclarations.statusSubscriptions(identifier: configID),
+                                     configID: configID, toSet: set)
+                var assigned = 0
+                for target in targets {
+                    do { try await kmf.assign(enrollmentID: target.id, toSet: set); assigned += 1 }
+                    catch { activity.record(.error, title: "Reporting assignment failed", detail: target.host.displayName) }
+                }
+                activity.record(.category, title: "Reporting subscriptions assigned",
+                                detail: "\(assigned) of \(targets.count) devices; waiting for reported facts.")
+                await refreshMDMFleet()
+            } catch { alert = .error("Couldn't assign reporting: \(error.localizedDescription)") }
         }
     }
 
@@ -360,10 +374,21 @@ struct ContentView: View {
     /// Devices/Security table selects that host, and we want the same
     /// right-hand inspector the All-Hosts table gives — so the ConnectPanel
     /// stays visible beside the dashboard.
+    private var mdmDestination: GroupDashboardView.Category {
+        switch sidebarFilter {
+        case .mdmDevices: return .devices
+        case .mdmSecurity: return .security
+        case .mdmUpdates: return .updates
+        default: return .summary
+        }
+    }
+
     private var isMDMFullPane: Bool {
         switch sidebarFilter {
-        case .mdmDeclarations, .mdmProfiles, .mdmEnrollment, .mdmDEP, .mdmScheduling:
+        case .mdmDeclarations, .mdmProfiles, .mdmEnrollment, .mdmDEP, .mdmScheduling, .mdmActivity:
             return true
+        case .mdmDashboard, .mdmDevices, .mdmSecurity, .mdmUpdates:
+            return selection.isEmpty
         default:
             return false
         }
@@ -411,7 +436,7 @@ struct ContentView: View {
                                            nowEpoch: Date().timeIntervalSince1970)
             }
             let failed = ids.count - delivered.count
-            activity.record(.category, title: "Deployed \(name)",
+            activity.record(.category, title: "Queued \(name)",
                             detail: "\(delivered.count) Mac\(delivered.count == 1 ? "" : "s")" + (failed > 0 ? ", \(failed) failed" : ""))
         }
     }
@@ -422,12 +447,13 @@ struct ContentView: View {
             let set = "default"
             let configID = "com.hellocomputer.edict.status-subscriptions"
             let kmf = KMFDDMService(settings: settings)
-            try? await kmf.deploy(configJSON: DDMDeclarations.statusSubscriptions(identifier: configID),
-                                  configID: configID, toSet: set)
-            try? await kmf.assign(enrollmentID: enrollmentID, toSet: set)
-            _ = try? await NanoMDMService(settings: settings).push(enrollmentIDs: enrollmentID)
-            activity.record(.category, title: "MDM reporting enabled", detail: h.displayName)
-            await refreshMDMFleet()
+            do {
+                try await kmf.deploy(configJSON: DDMDeclarations.statusSubscriptions(identifier: configID),
+                                     configID: configID, toSet: set)
+                try await kmf.assign(enrollmentID: enrollmentID, toSet: set)
+                activity.record(.category, title: "Reporting subscription assigned", detail: h.displayName)
+                await refreshMDMFleet()
+            } catch { alert = .error("Couldn't assign reporting: \(error.localizedDescription)") }
         }
     }
 
@@ -443,7 +469,8 @@ struct ContentView: View {
         // policy for any matching Mac. Both need the live enrollment list.
         let groupPolicyActive = settings.smartGroups.contains(where: \.hasOnboardingBaseline)
         if (settings.mdmOnboardingEnabled && settings.hasOnboardingBaseline) || groupPolicyActive,
-           let enrollments = try? await EnrollmentsAPI(settings: settings).list() {
+           mdmFleet.loadError == nil {
+            let enrollments = mdmFleet.enrollments
             let svc = OnboardingService(settings: settings, activity: activity)
             if settings.mdmOnboardingEnabled, settings.hasOnboardingBaseline {
                 _ = await svc.autoOnboardNewDevices(enrollments)
@@ -519,6 +546,8 @@ struct ContentView: View {
                 onConfirm: { p in commitProfileDeploy(data: p.data, name: p.name, to: p.enrollmentIDs, label: p.label) }
             ))
             .environment(mdmFleet)
+            .modifier(MDMFleetViewObserver(selection: selection, filter: sidebarFilter,
+                                            connectPanelVisible: $connectPanelVisible))
             .onChange(of: mdmFleet.version) { _, _ in filteredAndSorted = computeFilteredAndSorted() }
             .onChange(of: settings.mdmEnabled) { _, _ in Task { await refreshMDMFleet() } }
             .onChange(of: settings.notifyOnStateChange) { _, newValue in
@@ -1047,21 +1076,26 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 switch sidebarFilter {
                 case .mdmDeclarations:
-                    DeclarationsView()
+                    MDMPoliciesView(selection: $selection, initialTab: "Declarations")
                 case .mdmProfiles:
-                    ProfilesView()
+                    MDMPoliciesView(selection: $selection)
                 case .mdmEnrollment:
-                    EnrollmentView()
+                    MDMEnrollmentWorkspace()
                 case .mdmDEP:
-                    DEPView()
+                    MDMEnrollmentWorkspace(initialTab: "Automated enrollment")
                 case .mdmScheduling:
-                    SchedulingView()
-                case .mdmDashboard:
-                    GroupDashboardView(selection: $selection)
+                    MDMActivityView(initialTab: "Automation")
+                case .mdmActivity:
+                    MDMActivityView()
+                case .mdmDashboard, .mdmDevices, .mdmSecurity, .mdmUpdates:
+                    GroupDashboardView(selection: $selection, destination: mdmDestination,
+                                       onNavigate: { sidebarFilterRaw = encode($0) })
                 default:
                     topBar
                     Divider()
-                    hostsTable
+                    // ponytail: new identity per sidebar filter so the table starts at the top
+                    // instead of keeping the previous list's scroll offset.
+                    hostsTable.id(sidebarFilterRaw)
                     statusBar
                 }
             }
@@ -2453,7 +2487,10 @@ struct ContentView: View {
         case "inactive": return .inactive
         case "uncat": return .uncategorized
         case "mdm:decl": return .mdmDeclarations
-        case "mdm:dev": return .mdmDashboard   // Devices tab retired → dashboard
+        case "mdm:dev": return .mdmDevices
+        case "mdm:security": return .mdmSecurity
+        case "mdm:updates": return .mdmUpdates
+        case "mdm:activity": return .mdmActivity
         case "mdm:prof": return .mdmProfiles
         case "mdm:enroll": return .mdmEnrollment
         case "mdm:dep": return .mdmDEP
@@ -2476,6 +2513,9 @@ struct ContentView: View {
         case .category(let c): return "cat:\(c)"
         case .mdmDeclarations: return "mdm:decl"
         case .mdmDevices: return "mdm:dev"
+        case .mdmSecurity: return "mdm:security"
+        case .mdmUpdates: return "mdm:updates"
+        case .mdmActivity: return "mdm:activity"
         case .mdmProfiles: return "mdm:prof"
         case .mdmEnrollment: return "mdm:enroll"
         case .mdmDEP: return "mdm:dep"

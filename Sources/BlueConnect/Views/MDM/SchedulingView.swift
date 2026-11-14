@@ -12,6 +12,8 @@ struct SchedulingView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            Label("Runs on this Mac while Edict is open. Sleeping or quitting pauses automation.", systemImage: "desktopcomputer")
+                .font(.callout).foregroundStyle(.secondary).padding(.horizontal, 18).padding(.bottom, 12)
             Divider()
             if settings.scheduledTasks.isEmpty {
                 empty

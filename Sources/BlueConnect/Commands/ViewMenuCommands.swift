@@ -8,6 +8,7 @@ import SwiftUI
 /// remains the single owner of that state (sidebar selection + sortOrder).
 struct ViewMenuCommands: Commands {
     @Bindable var terminals: TerminalSessionsManager
+    @AppStorage("mdmEnabled") private var mdmEnabled = false
     @FocusedValue(\.hostActions) private var actions
 
     var body: some Commands {
@@ -36,7 +37,19 @@ struct ViewMenuCommands: Commands {
 
             Divider()
 
-            Section("Filter") {
+            if mdmEnabled {
+                Menu("Device Management") {
+                    Button("Overview") { actions?.setSidebarFilter(.mdmDashboard) }
+                    Button("Devices") { actions?.setSidebarFilter(.mdmDevices) }
+                    Button("Security") { actions?.setSidebarFilter(.mdmSecurity) }
+                    Button("Updates") { actions?.setSidebarFilter(.mdmUpdates) }
+                    Button("Policies") { actions?.setSidebarFilter(.mdmProfiles) }
+                    Button("Enrollment") { actions?.setSidebarFilter(.mdmEnrollment) }
+                    Button("Activity") { actions?.setSidebarFilter(.mdmActivity) }
+                }
+                Divider()
+            }
+            Section("Remote Support") {
                 Button("All Hosts") { actions?.setSidebarFilter(.all) }
                     .keyboardShortcut("1", modifiers: [.command, .option])
                 Button("Favorites") { actions?.setSidebarFilter(.favorites) }

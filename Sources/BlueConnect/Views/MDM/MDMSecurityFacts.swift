@@ -10,8 +10,12 @@ struct MDMSecurityFacts: Equatable, Codable {
     var firewallBlockAll: Bool?
     var firewallStealth: Bool?
     var sipEnabled: Bool?
+    var fileVaultEnabled: Bool?
+    var personalRecoveryKeyPresent: Bool?
 
     init(securityInfo s: [String: Any]) {
+        fileVaultEnabled = s["FDE_Enabled"] as? Bool
+        personalRecoveryKeyPresent = s["FDE_HasPersonalRecoveryKey"] as? Bool
         sipEnabled = s["SystemIntegrityProtectionEnabled"] as? Bool
         if let fw = s["FirewallSettings"] as? [String: Any] {
             firewallEnabled = fw["FirewallEnabled"] as? Bool
@@ -20,10 +24,21 @@ struct MDMSecurityFacts: Equatable, Codable {
         }
     }
 
+    func merging(_ next: Self) -> Self {
+        var merged = next
+        merged.firewallEnabled = next.firewallEnabled ?? firewallEnabled
+        merged.firewallBlockAll = next.firewallBlockAll ?? firewallBlockAll
+        merged.firewallStealth = next.firewallStealth ?? firewallStealth
+        merged.sipEnabled = next.sipEnabled ?? sipEnabled
+        merged.fileVaultEnabled = next.fileVaultEnabled ?? fileVaultEnabled
+        merged.personalRecoveryKeyPresent = next.personalRecoveryKeyPresent ?? personalRecoveryKeyPresent
+        return merged
+    }
+
     /// True when the response actually carried firewall or SIP data, so the
     /// caller can avoid caching an all-nil "we got nothing" result.
     var hasData: Bool {
-        firewallEnabled != nil || sipEnabled != nil
+        firewallEnabled != nil || sipEnabled != nil || fileVaultEnabled != nil || personalRecoveryKeyPresent != nil
     }
 
     var firewallStateText: String {

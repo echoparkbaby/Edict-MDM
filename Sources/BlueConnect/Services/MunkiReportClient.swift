@@ -315,10 +315,10 @@ struct MRFilevault: Codable, Hashable {
         let p = (has_personal_recovery_key ?? 0) == 1
         let i = (has_institutional_recovery_key ?? 0) == 1
         switch (p, i) {
-        case (true, true):   return "Personal + Institutional escrowed"
-        case (true, false):  return "Personal key escrowed"
-        case (false, true):  return "Institutional key escrowed"
-        case (false, false): return "No recovery key escrowed"
+        case (true, true):   return "Personal + Institutional keys present"
+        case (true, false):  return "Personal key present; escrow unverified"
+        case (false, true):  return "Institutional key present; escrow unverified"
+        case (false, false): return "No recovery key reported"
         }
     }
 }
@@ -610,7 +610,9 @@ extension MRHostInventory {
     /// FileVault state as MunkiReport sees it: status text first, then the
     /// boot disk's encrypted flag. nil when neither is reported.
     var fileVaultOn: Bool? {
-        if let s = filevault?.filevault_status?.lowercased(), !s.isEmpty {
+        if let s = filevault?.filevault_status?.lowercased().trimmingCharacters(in: .whitespaces), !s.isEmpty {
+            if s == "1" { return true }
+            if s == "0" { return false }
             if s.contains("decrypt") || s.contains("not") || s.contains("off") { return false }
             if s.contains("encrypt") || s.contains("on") { return true }
         }

@@ -95,7 +95,7 @@ enum ProfileTemplate: String, CaseIterable, Identifiable {
     }
     var blurb: String {
         switch self {
-        case .fileVault: return "Force-enable disk encryption and escrow the recovery key."
+        case .fileVault: return "Require disk encryption and generate a personal recovery key."
         case .firewall: return "Turn on the application firewall, with stealth mode."
         case .softwareUpdate: return "Automatic update checks, downloads, and installs."
         case .screenLock: return "Require the password after the screen saver or sleep."

@@ -6,9 +6,12 @@ import SwiftUI
 /// own MDM services from settings; reuses LockDeviceSheet from DevicesView.
 struct MDMHostDetail: View {
     @EnvironmentObject private var settings: SettingsStore
+    @Environment(MDMFleetIndex.self) private var fleet
     @Environment(ActivityLog.self) private var activity
     let host: BlueSkyHost
     let entry: MDMFleetIndex.Entry
+    var compact = true
+    @State private var showDetail = false
 
     @State private var deployed: [DeploymentLog.Entry] = []
     @State private var savedProfiles: [SavedProfile] = []
@@ -37,34 +40,36 @@ struct MDMHostDetail: View {
     @State private var invLoading = false
     @State private var invError: String?
 
-    /// Freshly-read DDM facts for this device. The `entry` we're handed is
-    /// a snapshot from the fleet index that never updates on its own, so we
-    /// re-read here on open and after Refresh / Enable reporting — that's
-    /// how the operator sees "Not reported" turn into real values.
-    @State private var live: (os: String?, fileVault: Bool?, model: String?)?
-
     private var nano: NanoMDMService { NanoMDMService(settings: settings) }
 
-    private var os: String? { live?.os ?? entry.os }
-    private var model: String? { live?.model ?? entry.model }
-    private var fileVault: Bool? { live?.fileVault ?? entry.fileVault }
+    private var os: String? { fleet.snapshots[entry.enrollmentID]?.os ?? entry.os }
+    private var model: String? { fleet.snapshots[entry.enrollmentID]?.model ?? entry.model }
+    private var fileVault: Bool? { fleet.snapshots[entry.enrollmentID]?.fileVault ?? entry.fileVault }
 
     private var hasBaseline: Bool {
         settings.mdmRequireFileVault || !settings.mdmMinOSVersion.trimmingCharacters(in: .whitespaces).isEmpty
     }
     private var complianceState: Bool? {
-        SmartGroup.compliant(
+        guard fleet.errors[entry.enrollmentID] == nil, fleet.loadError == nil,
+              entry.lastSeen.map({ Date().timeIntervalSince($0) < 7 * 86400 }) == true else { return nil }
+        return SmartGroup.compliant(
             SmartGroup.DeviceFacts(osVersion: os, fileVaultOn: fileVault, model: model,
                                    matchedBlueSky: false, enrolled: entry.enrolled),
             requireFileVault: settings.mdmRequireFileVault, minOS: settings.mdmMinOSVersion)
     }
 
-    private func loadFacts() async {
-        live = await KMFDDMService(settings: settings).deviceFacts(enrollmentID: entry.enrollmentID)
+    private func loadFacts(force: Bool = false) async {
+        if force || fleet.snapshots[entry.enrollmentID] == nil {
+            await fleet.refreshDevice(entry.enrollmentID, settings: settings)
+        }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if compact {
+                Button("Open device details", systemImage: "arrow.up.left.and.arrow.down.right") { showDetail = true }
+                    .buttonStyle(.bordered)
+            }
             statusGrid
             Divider()
             inventorySection
@@ -88,6 +93,7 @@ struct MDMHostDetail: View {
             savedProfiles = SavedProfilesStore.load()
             await loadFacts()
         }
+        .sheet(isPresented: $showDetail) { MDMDeviceDetailView(host: host, enrollmentID: entry.enrollmentID) }
         .sheet(isPresented: $showLock) {
             LockDeviceSheet(deviceName: host.displayName) { pin, message in
                 await act("Lock command sent") { try await nano.lock(enrollmentID: entry.enrollmentID, pin: pin, message: message) }
@@ -204,7 +210,7 @@ struct MDMHostDetail: View {
 
     private var profilesSection: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Profiles Edict deployed (\(deployed.count))").font(.caption.bold())
+            Text("Profiles Edict queued (\(deployed.count))").font(.caption.bold())
             if deployed.isEmpty {
                 Text("None yet. Deploy from the Profiles tab.").font(.caption2).foregroundStyle(.secondary)
             } else {
@@ -228,7 +234,7 @@ struct MDMHostDetail: View {
                     Task {
                         await act("Pushed — re-read facts in a moment") { try await nano.push(enrollmentIDs: entry.enrollmentID) }
                         try? await Task.sleep(for: .seconds(3))
-                        await loadFacts()
+                        await loadFacts(force: true)
                     }
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
@@ -262,7 +268,7 @@ struct MDMHostDetail: View {
                 .buttonStyle(.bordered).controlSize(.small)
                 .help("Install the onboarding baseline (\(settings.mdmOnboardProfileIDs.count) profile(s), \(settings.mdmOnboardSets.count) set(s)) on this Mac now.")
             }
-            HStack(spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), alignment: .leading)], alignment: .leading, spacing: 8) {
                 Button { renameText = host.displayName; showRename = true } label: { Label("Rename", systemImage: "pencil") }
                 Button { showLock = true } label: { Label("Lock", systemImage: "lock.fill") }
                 Button { Task { await act("Restart command sent") { try await nano.restart(enrollmentID: entry.enrollmentID) } } } label: { Label("Restart", systemImage: "restart") }
@@ -322,10 +328,10 @@ struct MDMHostDetail: View {
                                  configID: configID, toSet: set)
             try await kmf.assign(enrollmentID: entry.enrollmentID, toSet: set)
             _ = try? await nano.push(enrollmentIDs: entry.enrollmentID)
-            notice = "Reporting enabled — facts arrive once the Mac syncs (can take a few minutes). Hit Refresh."
+            notice = "Reporting subscription assigned — facts arrive once the Mac syncs (can take a few minutes). Hit Refresh."
             // Best-effort early re-read in case the Mac answers quickly.
             try? await Task.sleep(for: .seconds(6))
-            await loadFacts()
+            await loadFacts(force: true)
         } catch {
             errorText = error.localizedDescription
         }
@@ -344,7 +350,7 @@ struct MDMHostDetail: View {
                                            matchedBlueSky: host.blueskyid > 0, enrolled: entry.enrolled)
         _ = await svc.enforceGroupBaselines([(entry.enrollmentID, facts)])
         deployed = DeploymentLog.entries(for: entry.enrollmentID)
-        notice = "Onboarded — \(r.profiles) profile\(r.profiles == 1 ? "" : "s"), \(r.sets) set\(r.sets == 1 ? "" : "s")"
+        notice = "Baseline queued — \(r.profiles) profile\(r.profiles == 1 ? "" : "s"), \(r.sets) set\(r.sets == 1 ? "" : "s")"
             + (r.failures > 0 ? ", \(r.failures) failed" : "") + ". The Mac applies them on its next sync."
     }
 
@@ -456,17 +462,23 @@ struct MDMHostDetail: View {
             for _ in 0..<12 {
                 try? await Task.sleep(for: .seconds(2))
                 guard let res = try await api.commandResult(uuid: uuid) else { continue }
+                guard res.acknowledged else {
+                    invError = res.failureDescription
+                    return
+                }
                 switch kind {
                 case .hardware:
                     invItems = Self.formatDeviceInformation(res.dict("QueryResponses"))
                 case .security:
-                    invItems = Self.formatSecurityInfo(res.dict("SecurityInfo"))
+                    let security = res.dict("SecurityInfo")
+                    fleet.recordSecurity(MDMSecurityFacts(securityInfo: security), for: entry.enrollmentID)
+                    invItems = Self.formatSecurityInfo(security)
                 case .profiles:
-                    invItems = res.array("ProfileList").compactMap {
+                    invItems = try res.acknowledgedArray("ProfileList").compactMap {
                         ($0["PayloadDisplayName"] as? String) ?? ($0["PayloadIdentifier"] as? String)
                     }.sorted()
                 case .apps:
-                    invItems = res.array("InstalledApplicationList").compactMap { app in
+                    invItems = try res.acknowledgedArray("InstalledApplicationList").compactMap { app in
                         let name = (app["Name"] as? String) ?? (app["Identifier"] as? String) ?? "?"
                         let ver = app["ShortVersion"] as? String ?? app["Version"] as? String
                         return ver.map { "\(name) \($0)" } ?? name
@@ -511,7 +523,7 @@ struct MDMHostDetail: View {
         var out: [String] = []
         func onOff(_ v: Any?) -> String? { (v as? Bool).map { $0 ? "On" : "Off" } }
         if let fv = onOff(s["FDE_Enabled"]) {
-            let key = (s["FDE_HasPersonalRecoveryKey"] as? Bool) == true ? " (recovery key escrowed)" : ""
+            let key = (s["FDE_HasPersonalRecoveryKey"] as? Bool) == true ? " (personal recovery key exists; escrow unverified)" : ""
             out.append("FileVault: \(fv)\(key)")
         }
         if let fw = s["FirewallSettings"] as? [String: Any] {
@@ -529,7 +541,7 @@ struct MDMHostDetail: View {
     }
 
     private func deploy(_ p: SavedProfile) async {
-        await act("Deployed \(p.name)") {
+        await act("Queued \(p.name) — see Activity for the device result") {
             let data = try await nano.installProfile(enrollmentID: entry.enrollmentID, profile: p.data)
             _ = try? await nano.push(enrollmentIDs: entry.enrollmentID)
             await DeploymentLog.record(profileData: p.data, name: p.name, to: [entry.enrollmentID],

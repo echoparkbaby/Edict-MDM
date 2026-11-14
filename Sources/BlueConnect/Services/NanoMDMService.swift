@@ -55,7 +55,8 @@ struct NanoMDMService {
     /// Multiple IDs may be comma-separated.
     @discardableResult
     func push(enrollmentIDs: String) async throws -> Data {
-        let (data, _) = try await request("v1/push/\(enrollmentIDs)")
+        let (data, _) = try await request("v1/push/\(enrollmentIDs)", acceptAPIResult: true)
+        if try Self.enqueueWarning(data) != nil { throw MDMError.transport("APNs notification failed.") }
         return data
     }
 
@@ -63,9 +64,33 @@ struct NanoMDMService {
     /// push. Multiple IDs may be comma-separated.
     @discardableResult
     func enqueue(enrollmentIDs: String, commandPlist: Data) async throws -> Data {
-        let (data, _) = try await request("v1/enqueue/\(enrollmentIDs)",
-                                          method: "PUT", body: commandPlist)
-        return data
+        do {
+            let (data, _) = try await request("v1/enqueue/\(enrollmentIDs)",
+                                              method: "PUT", body: commandPlist, acceptAPIResult: true)
+            let warning = try Self.enqueueWarning(data)
+            await MDMCommandStore.shared.record(server: baseURL, target: enrollmentIDs, plist: commandPlist, note: warning)
+            return data
+        } catch {
+            await MDMCommandStore.shared.record(server: baseURL, target: enrollmentIDs, plist: commandPlist,
+                                                failure: error.localizedDescription)
+            throw error
+        }
+    }
+
+    /// NanoMDM can return HTTP 207 with per-device command errors, or a
+    /// successful enqueue alongside a failed APNs push. Keep these distinct.
+    static func enqueueWarning(_ data: Data) throws -> String? {
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              object["status"] != nil || object["command_uuid"] != nil || object["command_error"] != nil || object["push_error"] != nil else {
+            throw MDMError.transport("Unexpected enqueue response; server acceptance is unconfirmed.")
+        }
+        func hasError(_ value: Any?) -> Bool { value != nil && !(value is NSNull) }
+        if hasError(object["command_error"]) { throw MDMError.transport("The server rejected the command.") }
+        let statuses = (object["status"] as? [String: [String: Any]]) ?? [:]
+        let rejected = statuses.values.filter { hasError($0["command_error"]) }.count
+        if rejected > 0 { throw MDMError.transport("The server rejected commands for \(rejected) device(s).") }
+        let pushFailed = hasError(object["push_error"]) || statuses.values.contains { hasError($0["push_error"]) }
+        return pushFailed ? "Queued, but APNs notification failed. Delivery awaits a device check-in." : nil
     }
 
     /// Remotely unenroll a device: enqueue a `RemoveProfile` for the
@@ -283,7 +308,8 @@ struct NanoMDMService {
     private func request(_ path: String,
                          method: String = "GET",
                          body: Data? = nil,
-                         authenticated: Bool = true) async throws -> (Data, HTTPURLResponse) {
+                         authenticated: Bool = true,
+                         acceptAPIResult: Bool = false) async throws -> (Data, HTTPURLResponse) {
         let base = baseURL.trimmingCharacters(in: .whitespaces)
         guard !base.isEmpty, (authenticated == false || !apiKey.isEmpty) else {
             throw MDMError.notConfigured
@@ -304,7 +330,7 @@ struct NanoMDMService {
             guard let http = resp as? HTTPURLResponse else {
                 throw MDMError.transport("Non-HTTP response")
             }
-            guard (200...299).contains(http.statusCode) else {
+            guard (200...299).contains(http.statusCode) || (acceptAPIResult && http.statusCode == 500) else {
                 throw MDMError.http(http.statusCode, String(data: data, encoding: .utf8) ?? "")
             }
             return (data, http)

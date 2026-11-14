@@ -160,8 +160,8 @@ struct KMFDDMService {
         let (data, _) = try await request("v1/status-values/\(pathEsc(enrollmentID))",
                                           query: query)
         // Shape: {"<enrollment-id>": [{path, value, timestamp, status_id}]}
-        guard let decoded = try? JSONDecoder().decode([String: [DDMStatusValue]].self, from: data)
-        else { return [] }
+        if data.isEmpty || String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) == "null" { return [] }
+        let decoded = try JSONDecoder().decode([String: [DDMStatusValue]].self, from: data)
         return decoded.values.first ?? []
     }
 
@@ -204,35 +204,55 @@ struct KMFDDMService {
     /// the dashboard refresh doesn't pay two round-trips per device.
     func fullStatus(enrollmentID: String) async
         -> (os: String?, fileVault: Bool?, model: String?, su: DDMSoftwareUpdate) {
-        // KMFDDM v0.7 never files some items (diskmanagement.filevault.enabled,
-        // softwareupdate.*) into status-values, so the latest raw report is
-        // read first and status-values is the fallback.
-        async let rawReport = latestStatusReport(enrollmentID: enrollmentID)
-        let items = (try? await statusValues(enrollmentID: enrollmentID,
-                                             pathPrefix: ".StatusItems")) ?? []
-        let report = await rawReport
+        let s = (try? await checkedStatus(enrollmentID: enrollmentID)) ?? MDMStatusSnapshot()
+        return (s.os, s.fileVault, s.model,
+                DDMSoftwareUpdate(installState: s.updateState, pendingOS: s.pendingOS, failureReason: s.updateFailure))
+    }
+
+    /// Preserve transport failures instead of turning them into empty reports.
+    /// Servers without raw-report support still work through status-values.
+    func checkedStatus(enrollmentID: String) async throws -> MDMStatusSnapshot {
+        var items: [DDMStatusValue] = []
+        var report: [String: Any]?
+        var valuesError: Error?
+        do { items = try await statusValues(enrollmentID: enrollmentID, pathPrefix: ".StatusItems") }
+        catch { valuesError = error }
+        do {
+            let (data, _) = try await request("v1/status-report/\(pathEsc(enrollmentID))",
+                                               query: [URLQueryItem(name: "index", value: "0")])
+            let object = try JSONSerialization.jsonObject(with: data)
+            guard object is NSNull || object is [String: Any] else {
+                throw MDMError.transport("Unexpected DDM status report")
+            }
+            report = object as? [String: Any]
+        } catch {
+            if let valuesError { throw valuesError }
+        }
+        return Self.snapshot(report: report, items: items)
+    }
+
+    static func snapshot(report: [String: Any]?, items: [DDMStatusValue], now: Date = Date()) -> MDMStatusSnapshot {
         func leaf(_ suffix: String) -> String? {
-            let raw = Self.reportValue(report, path: "StatusItems." + suffix)
-                // status-values keeps history rows per path; newest wins.
+            let raw = reportValue(report, path: "StatusItems." + suffix)
                 ?? items.filter { $0.path.hasSuffix(suffix) }
                     .max { ($0.timestamp ?? "") < ($1.timestamp ?? "") }?.value
             guard let raw else { return nil }
             let v = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            // Reject capability paths that come back as values.
             guard !v.isEmpty, ![".", "device.", "softwareupdate.", "management.", "StatusItems"].contains(where: v.hasPrefix)
             else { return nil }
             return v
         }
-        let os = leaf("device.operating-system.version")
-        let model = leaf("device.model.marketing-name") ?? leaf("device.model.identifier")
-        let fileVault: Bool? = ["true": true, "1": true, "false": false, "0": false][leaf("diskmanagement.filevault.enabled") ?? ""]
-        let su = DDMSoftwareUpdate(installState: leaf("softwareupdate.install-state"),
-                                   pendingOS: leaf("softwareupdate.pending-version.os-version"),
-                                   failureReason: leaf("softwareupdate.failure-reason"))
-        return (os: os, fileVault: fileVault, model: model, su: su)
+        let fv = leaf("diskmanagement.filevault.enabled")
+        let bool: Bool? = ["true": true, "1": true, "false": false, "0": false][fv ?? ""]
+        let dates = items.compactMap { $0.timestamp }.compactMap { ISO8601DateFormatter().date(from: $0) }
+        return MDMStatusSnapshot(os: leaf("device.operating-system.version"), fileVault: bool,
+                                 model: leaf("device.model.marketing-name") ?? leaf("device.model.identifier"),
+                                 updateState: leaf("softwareupdate.install-state"),
+                                 pendingOS: leaf("softwareupdate.pending-version.os-version"),
+                                 updateFailure: leaf("softwareupdate.failure-reason"), checkedAt: now,
+                                 reportedAt: dates.min())
     }
 
-    /// `GET /v1/status-report/<enrollmentID>?index=0` — the device's most
     /// recent raw DDM status report. nil on any failure.
     func latestStatusReport(enrollmentID: String) async -> [String: Any]? {
         guard let (data, _) = try? await request("v1/status-report/\(pathEsc(enrollmentID))",

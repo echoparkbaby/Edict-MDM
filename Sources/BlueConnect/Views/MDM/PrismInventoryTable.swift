@@ -303,7 +303,7 @@ struct PrismInventoryTable: View {
             if filtered.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "tray").font(.system(size: 28)).foregroundStyle(.secondary)
-                    Text("Nothing reported yet — MunkiReport fills this in as Macs check in.")
+                    Text(tableSearch.isEmpty ? "No records available for this scope. Check the reporting coverage above." : "No results match this filter.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, minHeight: 160)
@@ -332,6 +332,9 @@ struct PrismInventoryTable: View {
                                 }
                             }
                         }
+                        .deviceArrowKeys(deviceRows && drillDevices == nil ? filtered.map(\.id) : [],
+                                         selected: filtered.first { isRowSelected($0.id) }?.id,
+                                         select: onSelectRow)
                     }
                 }
             }

@@ -9,6 +9,7 @@ import UniformTypeIdentifiers
 struct ProfilesView: View {
 
     @EnvironmentObject private var settings: SettingsStore
+    @Environment(MDMFleetIndex.self) private var fleet
     @Environment(ActivityLog.self) private var activity
 
     @State private var template: ProfileTemplate = .fileVault
@@ -19,9 +20,9 @@ struct ProfilesView: View {
     @State private var dropHighlight = false
 
     // Targets + deploy
-    @State private var devices: [MDMEnrollment] = []
+    private var devices: [MDMEnrollment] { fleet.devices.filter(\.isEnabled) }
     @State private var targetIDs = Set<String>()
-    @State private var loadingDevices = false
+    private var loadingDevices: Bool { fleet.loading }
     @State private var deploying = false
     @State private var result: String?
 
@@ -29,9 +30,9 @@ struct ProfilesView: View {
     @Environment(BlueSkyHostListStore.self) private var hostStore
     @State private var targetMode: TargetMode = .selected
     @State private var groupID: UUID?
-    @State private var osVersions: [String: String] = [:]
-    @State private var fileVault: [String: String] = [:]
-    @State private var models: [String: String] = [:]
+    private var osVersions: [String: String] { fleet.snapshots.compactMapValues(\.os) }
+    private var fileVault: [String: String] { fleet.snapshots.compactMapValues { $0.fileVault.map { $0 ? "true" : "false" } } }
+    private var models: [String: String] { fleet.snapshots.compactMapValues(\.model) }
 
     enum TargetMode: String, CaseIterable, Identifiable {
         case selected = "Pick devices"
@@ -294,7 +295,7 @@ struct ProfilesView: View {
     private var resultLine: some View {
         if let result {
             Text(result).font(.caption)
-                .foregroundStyle(result.hasPrefix("Deployed") || result.hasPrefix("Saved") || result.hasPrefix("Imported") ? .green : .orange)
+                .foregroundStyle(result.hasPrefix("Queued") || result.hasPrefix("Saved") || result.hasPrefix("Imported") ? .green : .orange)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -463,31 +464,12 @@ struct ProfilesView: View {
 
     @MainActor
     private func loadDevices() async {
-        guard settings.mdmEnabled, settings.mdmConfigured,
-              !settings.mdmDevicesAPIBaseURL.trimmingCharacters(in: .whitespaces).isEmpty
-        else { return }
-        loadingDevices = true
-        defer { loadingDevices = false }
-        do {
-            devices = try await EnrollmentsAPI(settings: settings).list().filter(\.isDevice)
-        } catch {
-            devices = []
-            result = "Couldn't load devices: \(error.localizedDescription)"
+        if fleet.refreshedAt == nil && !fleet.loading {
+            await fleet.refresh(settings: settings,
+                                bscSerials: Set(hostStore.hosts.compactMap { $0.serialnum?.uppercased() }))
         }
-        // Resolve real computer names from MDM (cached) for anything that
-        // would otherwise show a bare serial. Runs in the background so the
-        // list appears immediately and names fill in as they come back.
+        if let error = fleet.loadError { result = "Couldn't load devices: \(error)" }
         Task { await resolveDeviceNames() }
-        // Facts for smart-group membership.
-        let svc = KMFDDMService(settings: settings)
-        var os: [String: String] = [:], fv: [String: String] = [:], mdl: [String: String] = [:]
-        for d in devices {
-            let f = await svc.deviceFacts(enrollmentID: d.id)
-            if let v = f.os { os[d.id] = v }
-            if let v = f.model { mdl[d.id] = v }
-            if let v = f.fileVault { fv[d.id] = v ? "true" : "false" }
-        }
-        osVersions = os; fileVault = fv; models = mdl
     }
 
     /// Build the current template and deploy it.
@@ -620,9 +602,9 @@ struct ProfilesView: View {
         await DeploymentLog.record(profileData: data, name: name, to: deployedTo,
                                    nowEpoch: Date().timeIntervalSince1970)
         result = failed == 0
-            ? "Deployed \(name) to \(ok) device\(ok == 1 ? "" : "s")"
-            : "Deployed to \(ok), failed \(failed)"
-        activity.record(.category, title: "Deployed profile: \(name)",
+            ? "Queued \(name) to \(ok) device\(ok == 1 ? "" : "s")"
+            : "Queued to \(ok), failed \(failed)"
+        activity.record(.category, title: "Queued profile: \(name)",
                         detail: "\(ok) device\(ok == 1 ? "" : "s")" + (failed > 0 ? ", \(failed) failed" : ""))
     }
 

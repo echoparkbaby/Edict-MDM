@@ -14,7 +14,7 @@ struct TemplateFormView: View {
         case .fileVault:
             Form {
                 Toggle("Defer until next logout", isOn: $form.fvDefer)
-                Text("Forces FileVault on and escrows the recovery key with the MDM. With defer on, the user is prompted to enable it the next time they log out (the standard, least-disruptive flow).")
+                Text("Requires FileVault and generates a personal recovery key on the Mac. Edict does not escrow this key; keep a separate recovery process. With defer on, the user is prompted at the next logout.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             .formStyle(.columns)

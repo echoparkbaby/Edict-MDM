@@ -16,28 +16,39 @@ struct GroupDashboardView: View {
     @Environment(BlueSkyHostListStore.self) private var hostStore
     @Environment(MunkiReportInventoryStore.self) private var mrInventory
 
-    @State private var enrollments: [MDMEnrollment] = []
-    @State private var osVersions: [String: String] = [:]
-    @State private var fileVault: [String: String] = [:]
-    @State private var models: [String: String] = [:]
-    @State private var loading = false
-    @State private var loadError: String?
+    @Environment(MDMFleetIndex.self) private var fleet
+    let destination: Category
+    let onNavigate: (SidebarFilter) -> Void
 
-    /// nil = every enrolled device. Otherwise a smart group's id.
-    @State private var selectedGroupID: UUID?
+    init(selection: Binding<Set<Int>>, destination: Category = .summary,
+         onNavigate: @escaping (SidebarFilter) -> Void = { _ in }) {
+        _selection = selection
+        self.destination = destination
+        self.onNavigate = onNavigate
+        _category = State(initialValue: destination)
+    }
 
-    // Drift sweep (on demand — it queries ProfileList per device).
-    @State private var driftMissing: [String: [DeploymentLog.Entry]] = [:]
+    private var enrollments: [MDMEnrollment] { fleet.enrollments }
+    private var osVersions: [String: String] { fleet.snapshots.compactMapValues(\.os) }
+    private var fileVault: [String: String] { fleet.snapshots.compactMapValues { $0.fileVault.map { $0 ? "true" : "false" } } }
+    private var models: [String: String] { fleet.snapshots.compactMapValues(\.model) }
+    private var loading: Bool { fleet.loading }
+    private var loadError: String? { actionError ?? fleet.loadError }
+    private var selectedGroupID: UUID? {
+        get { fleet.selectedGroupID }
+        nonmutating set { fleet.selectedGroupID = newValue }
+    }
+    private var driftMissing: [String: [DeploymentLog.Entry]] {
+        fleet.drift.filter { $0.value.outcome == .verified }.mapValues(\.missing)
+    }
+    private var driftCheckedAt: Date? { scoped.compactMap { fleet.drift[$0.id]?.checkedAt }.max() }
     @State private var driftChecking = false
-    @State private var driftCheckedAt: Date?
-
-    /// Which summary card is expanded to its device list (nil = none).
-    @State private var drillKey: String?
+    @State private var actionError: String?
+    @State private var showUpdate = false
 
     // Prism saved views — now scope bookmarks (the Breakdown card shows every
     // attribute at once, so a view just captures which scope to flip to).
     @State private var savedViews: [PrismView] = []
-    @State private var activeViewID: UUID?
     /// enrollmentID → count of profiles Edict deployed (for the profile
     /// attribute), loaded alongside the facts.
     @State private var deploymentCounts: [String: Int] = [:]
@@ -82,13 +93,7 @@ struct GroupDashboardView: View {
             }
         }
     }
-    @State var category: Category = .devices
-    /// Draggable width of the Prism category rail (persisted). The live width
-    /// during a drag is held in memory so we don't write UserDefaults per tick.
-    @AppStorage("prismRailWidth") private var railWidthStored: Double = 178
-    @State private var railResizeStart: Double?
-    @State private var railLiveWidth: Double?
-    private var railWidth: CGFloat { CGFloat(railLiveWidth ?? railWidthStored) }
+    @State var category: Category = .summary
     /// Inventory-table sort — kept here (not in PrismInventoryTable) so the
     /// reset-on-category `.onChange` below stays unchanged. nil = natural order.
     @State var invSortCol: Int?
@@ -102,28 +107,17 @@ struct GroupDashboardView: View {
     // Transient table-local UI state (filter text, device-picker popover, live
     // column-drag width, per-category persisted widths) lives in
     // PrismInventoryTable.
-    /// Live firewall + SIP pulled from MDM (enrollmentID → facts), overriding
-    /// MunkiReport for those Macs. Populated by the "Pull via MDM" action.
-    @State private var mdmSec: [String: MDMSecurityFacts] = [:]
-    /// When each device's MDM SecurityInfo was last pulled — drives the
-    /// "checked Xm ago" line and persists with the facts so firewall/SIP
-    /// survive relaunch (cached until the next Pull via MDM).
-    @State private var mdmSecAt: [String: Date] = [:]
-    /// Software-update posture from the DDM status channel, by device id.
-    @State private var mdmSU: [String: KMFDDMService.DDMSoftwareUpdate] = [:]
-    /// When the DDM facts (OS/FileVault/model/software-update) were last read.
-    @State private var factsAt: Date?
-    /// Live `DeviceName` pulled from each Mac via MDM DeviceInformation, cached
-    /// persistently so an MDM-only Mac with no hostname reads as its real name.
-    @State private var mdmNames: [String: String] = [:]
-    @State private var mdmNamesAt: [String: Date] = [:]
-    /// Guards the one automatic name pull per view session (the cache makes it
-    /// a one-time cost per device thereafter).
-    @State private var namesPulled = false
+    private var mdmSec: [String: MDMSecurityFacts] { fleet.security }
+    private var mdmSecAt: [String: Date] { fleet.securityAt }
+    private var mdmSU: [String: KMFDDMService.DDMSoftwareUpdate] {
+        fleet.snapshots.mapValues { .init(installState: $0.updateState, pendingOS: $0.pendingOS, failureReason: $0.updateFailure) }
+    }
+    private var factsAt: Date? { fleet.refreshedAt }
+    private var mdmNames: [String: String] { fleet.names }
     @State var pullingSecurity = false
     @State private var enablingAll = false
     @State private var editingGroup: SmartGroup?
-    @State private var pushCert: PushCertInfo?
+    private var pushCert: PushCertInfo? { fleet.pushCert }
 
     var body: some View {
         Group {
@@ -136,6 +130,9 @@ struct GroupDashboardView: View {
             }
         }
         .task { await refresh() }
+        .onChange(of: destination) { _, value in category = value; inventoryDeviceID = nil }
+        .onChange(of: fleet.version) { _, _ in rebuildFacts() }
+        .onChange(of: hostStore.hosts) { _, _ in rebuildFacts() }
         .onChange(of: settings.mdmRequireFileVault) { _, _ in rebuildFacts() }
         .onChange(of: settings.mdmMinOSVersion) { _, _ in rebuildFacts() }
         .onChange(of: selectedGroupID) { _, _ in inventoryDeviceID = nil; expandedInventoryRow = nil }
@@ -143,7 +140,7 @@ struct GroupDashboardView: View {
         .onChange(of: inventoryDeviceID) { _, _ in expandedInventoryRow = nil }
         // When MunkiReport inventory lands, rebuild facts so computer names
         // (and anything else MR-derived) refresh into the labels.
-        .onChange(of: mrInventory.bySerial.count) { _, _ in rebuildFacts() }
+        .onChange(of: mrInventory.bySerial) { _, _ in rebuildFacts() }
     }
 
     // MARK: - Membership / facts
@@ -163,6 +160,10 @@ struct GroupDashboardView: View {
                             requireFileVault: settings.mdmRequireFileVault, minOS: settings.mdmMinOSVersion,
                             driftMissing: driftMissing, deploymentCounts: deploymentCounts)
         for d in allDevices { if let inv = mr(for: d) { df.fillGaps(d.id, from: inv) } }
+        df.unavailableDeviceIDs = Set(allDevices.filter {
+            fleet.errors[$0.id] != nil || fleet.loadError != nil
+                || $0.lastSeenDate.map { Date().timeIntervalSince($0) >= 7 * 86400 } != false
+        }.map(\.id))
     }
     /// enrollmentID → best non-hostname name, so an MDM-only Mac reads as its
     /// real name instead of a bare serial: MunkiReport computer name preferred,
@@ -208,33 +209,12 @@ struct GroupDashboardView: View {
     /// (e.g. Macs too old for DDM that will never report). They drop out of
     /// compliance, the attention strip, and the breakdown; the Hidden section
     /// lists them with an Unhide.
-    private var graded: [MDMEnrollment] {
-        scoped.filter { !settings.isIgnoredForAttention($0.id) }
-    }
     private var hiddenFromAttention: [MDMEnrollment] {
         scoped.filter { settings.isIgnoredForAttention($0.id) }
     }
 
-    // MARK: - Rollups
-
-    private struct Tally { var compliant = 0, nonCompliant = 0, unknown = 0 }
-
-    private var compliance: Tally {
-        var t = Tally()
-        for d in graded {
-            switch SmartGroup.compliant(facts(for: d),
-                                        requireFileVault: settings.mdmRequireFileVault,
-                                        minOS: settings.mdmMinOSVersion) {
-            case .some(true): t.compliant += 1
-            case .some(false): t.nonCompliant += 1
-            case nil: t.unknown += 1
-            }
-        }
-        return t
-    }
-
-    private var driftDeviceCount: Int { driftMissing.values.filter { !$0.isEmpty }.count }
-    private var driftProfileCount: Int { driftMissing.values.reduce(0) { $0 + $1.count } }
+    private var driftDeviceCount: Int { scoped.filter { !(driftMissing[$0.id] ?? []).isEmpty }.count }
+    private var driftProfileCount: Int { scoped.reduce(0) { $0 + (driftMissing[$1.id]?.count ?? 0) } }
 
     // MARK: - Content
 
@@ -242,16 +222,16 @@ struct GroupDashboardView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            HStack(spacing: 0) {
-                // layoutPriority pins the rail's width so a wide content pane
-                // (long category title + toolbar) can never squeeze/shift it.
-                categoryRail
-                    .layoutPriority(1)
-                railDivider
-                categoryPanel
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
+            if destination == .devices {
+                Picker("Inventory", selection: $category) {
+                    Text("Devices").tag(Category.devices)
+                    Text("Managed apps").tag(Category.apps)
+                    Text("Local users").tag(Category.users)
+                    Text("Storage").tag(Category.storage)
+                }
+                .pickerStyle(.segmented).padding(.horizontal, 18).padding(.vertical, 10)
             }
+            categoryPanel.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .sheet(isPresented: $showSaveView) { saveViewSheet }
@@ -269,89 +249,37 @@ struct GroupDashboardView: View {
         .padding(.horizontal, 18).padding(.vertical, 12)
     }
 
-    // MARK: - Category rail (the Prism left list)
-
-    var categoryRail: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(Category.allCases) { c in
-                let on = category == c
-                Button { category = c } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: c.icon).frame(width: 16)
-                            .foregroundStyle(on ? Color.accentColor : .secondary)
-                        Text(c.rawValue).font(.callout).fontWeight(on ? .semibold : .regular)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(on ? Color.accentColor.opacity(0.14) : .clear))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-            Spacer()
-        }
-        .padding(10)
-        .frame(width: railWidth, alignment: .top)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
-    }
-
-    /// The divider between the category rail and the content — draggable to
-    /// resize the rail (persisted), so a narrow rail leaves more room for the
-    /// inventory tables' device-name column.
-    private var railDivider: some View {
-        Divider()
-            .overlay(
-                Color.clear
-                    .frame(width: 10)
-                    .contentShape(Rectangle())
-                    .pointerStyle(.frameResize(position: .trailing))
-                    .gesture(
-                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                            .onChanged { v in
-                                if railResizeStart == nil { railResizeStart = railWidthStored }
-                                let w = (railResizeStart ?? railWidthStored) + Double(v.translation.width)
-                                railLiveWidth = min(320, max(130, w))
-                            }
-                            .onEnded { _ in
-                                if let w = railLiveWidth { railWidthStored = w }
-                                railLiveWidth = nil; railResizeStart = nil
-                            }
-                    )
-                    .accessibilityHidden(true)
-            )
-    }
-
     // MARK: - Category panel
 
     @ViewBuilder
     var categoryPanel: some View {
+        @Bindable var fleet = fleet
         if loading && enrollments.isEmpty {
             VStack { Spacer(); HStack { ProgressView().controlSize(.small); Text("Loading fleet…").foregroundStyle(.secondary) }; Spacer() }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if enrollments.isEmpty, let error = fleet.loadError {
+            ContentUnavailableView("Inventory unavailable", systemImage: "wifi.exclamationmark",
+                                   description: Text(error))
         } else if scoped.isEmpty {
             emptyScope
         } else {
             switch category {
-            case .devices, .security:
+            case .security:
+                MDMSecurityPane(devices: scoped, facts: df, snapshots: fleet.snapshots,
+                                live: mdmSec, liveAt: mdmSecAt, errors: fleet.errors,
+                                selection: $selection, pulling: pullingSecurity,
+                                onRefresh: { Task { await pullSecurityViaMDM() } })
+            case .devices:
                 PrismDeviceTable(title: category.rawValue, security: category == .security,
                                  devices: scoped, facts: df, selection: $selection,
                                  enablingAll: enablingAll,
-                                 onEnableReporting: { Task { await enableReportingAll() } })
+                                 onEnableReporting: { Task { await enableReportingAll() } }, tableSearch: $fleet.deviceQuery)
             case .summary:
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        savedViewsBar
-                        heroCard
-                        // Drill list sits directly under the hero stats so clicking
-                        // e.g. "Not reporting" reveals exactly which Macs, right there.
-                        if let drillKey, !drillDevices(drillKey).isEmpty { drillList(drillKey) }
-                        attentionStrip
-                        PrismChart(devices: graded, facts: df,
-                                   onSelect: { selection = [df.hostID(for: $0)] })
-                        hiddenSection
-                    }
-                    .padding(18).frame(maxWidth: .infinity, alignment: .leading)
-                }
+                MDMOverviewPane(devices: scoped, facts: df, snapshots: fleet.snapshots,
+                                errors: fleet.errors, loadError: fleet.loadError, cert: pushCert,
+                                excludedIDs: Set(hiddenFromAttention.map(\.id)),
+                                onNavigate: onNavigate,
+                                onSelect: { selection = [df.hostID(for: $0)] })
             case .profiles:
                 ScrollView { assignmentsCard.padding(18) }
             case .drift:
@@ -364,7 +292,7 @@ struct GroupDashboardView: View {
             case .users:
                 inventoryTable(columns: userColumns, rows: userRows,
                                source: InvSource(name: "MunkiReport", checkedAt: mrOldestFetch(),
-                                                 note: "MDM can't enumerate local accounts", coverage: mrCoverage()),
+                                                 note: "Local-account inventory from MunkiReport", coverage: mrCoverage()),
                                drillDevices: inventoryDeviceID == nil ? { macsWithUser($0) } : nil)
             case .storage:
                 inventoryTable(columns: [("Device", 180), ("Free", 100), ("Total", 100), ("Encrypted", 100), ("SMART", 90)], rows: storageRows,
@@ -372,10 +300,23 @@ struct GroupDashboardView: View {
                                                  coverage: mrCoverage()),
                                deviceRows: true)
             case .updates:
-                inventoryTable(columns: [("Device", 180), ("macOS", 84), ("Update state", 150), ("Detail", 260)], rows: updateRows,
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("Approved OS target and device-reported installation progress.")
+                            .font(.callout).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Enforce update…", systemImage: "arrow.down.circle") { showUpdate = true }
+                    }.padding(18)
+                    inventoryTable(columns: [("Device", 180), ("macOS", 84), ("Baseline OS", 100), ("Installation", 180), ("Detail", 260)], rows: updateRows,
                                source: InvSource(name: "DDM status (Edict), MunkiReport fallback", checkedAt: factsAt,
-                                                 note: "“Behind” = older than your fleet’s newest macOS", coverage: mdmSUCoverage()),
+                                                 note: "Target is the minimum macOS version configured in Settings", coverage: mdmSUCoverage()),
                                deviceRows: true)
+                }
+                .sheet(isPresented: $showUpdate) {
+                    UpdateEnforcementSheet { config, id, set in
+                        try await KMFDDMService(settings: settings).deploy(configJSON: config, configID: id, toSet: set)
+                    }
+                }
             case .attention:
                 inventoryTable(columns: [("Device", 180), ("Issues", 400), ("Score", 64)], rows: attentionRows,
                                deviceRows: true)
@@ -524,26 +465,21 @@ struct GroupDashboardView: View {
     }
 
     private var updateRows: [(id: String, cells: [String])] {
-        let newest = fleetNewestOS
-        return inventoryScope.compactMap { d -> (id: String, cells: [String])? in
-            let ddm = mdmSU[d.id]                      // DDM status channel (Edict)
-            let mrSU = mr(for: d)?.software_updates    // MunkiReport (fallback)
-            let os = osVersions[d.id]
-            guard ddm != nil || mrSU != nil || os != nil else { return nil }
-            let behind = os.flatMap { o in newest.map { df.osRank(o) < df.osRank($0) } } ?? false
-            let state: String
-            if let s = ddm?.installState, !s.isEmpty { state = s }
-            else if let pending = mrSU?.recommendedupdates?.value, pending > 0 { state = "\(pending) pending" }
-            else if behind { state = "Behind" }
-            else if os != nil, newest != nil { state = "Current" }   // newest in fleet — not an absolute "up to date"
-            else { state = "—" }
+        let target = settings.mdmMinOSVersion.trimmingCharacters(in: .whitespaces)
+        return inventoryScope.map { d in
+            let update = mdmSU[d.id]
+            let states = ["none": "No installation pending", "waiting": "Waiting", "downloading": "Downloading",
+                          "prepared": "Ready to install", "installing": "Installing", "failed": "Failed"]
+            let installation = update?.installState.map { states[$0] ?? $0 } ?? "Not reported"
             let detail: String
-            if let fr = ddm?.failureReason, !fr.isEmpty { detail = "Failed: \(fr)" }
-            else if let pv = ddm?.pendingOS, !pv.isEmpty { detail = "→ macOS \(pv)" }
-            else if behind, let newest { detail = "Fleet newest: \(newest)" }
-            else if let last = mrSU?.lastsuccessfuldate, !last.isEmpty { detail = "Checked \(last)" }
-            else { detail = "—" }
-            return (id: d.id, cells: [label(for: d), os ?? "—", state, detail])
+            if let error = fleet.errors[d.id] { detail = "Read failed: \(error)" }
+            else if let failure = update?.failureReason { detail = "Failed: \(failure)" }
+            else if let pending = update?.pendingOS { detail = "Installing macOS \(pending)" }
+            else if !target.isEmpty, let os = osVersions[d.id] {
+                detail = SmartGroup.atLeast(os, target) ? "Meets baseline OS target" : "Below baseline OS target"
+            } else { detail = "No baseline OS target configured" }
+            return (id: d.id, cells: [label(for: d), osVersions[d.id] ?? "Unknown",
+                                      target.isEmpty ? "Not set" : target, installation, detail])
         }
     }
     /// How many scoped Macs report software-update status via the DDM channel.
@@ -584,99 +520,29 @@ struct GroupDashboardView: View {
     /// each Mac online.
     @MainActor
     private func pullSecurityViaMDM() async {
-        pullingSecurity = true
+        pullingSecurity = true; actionError = nil
         defer { pullingSecurity = false }
         let nano = NanoMDMService(settings: settings)
         let api = EnrollmentsAPI(settings: settings)
-        for d in inventoryScope {
-            guard let uuid = try? await nano.requestSecurityInfo(enrollmentID: d.id) else { continue }
-            _ = try? await nano.push(enrollmentIDs: d.id)
-            for _ in 0..<10 {
-                try? await Task.sleep(for: .seconds(2))
-                if let res = try? await api.commandResult(uuid: uuid) {
-                    let facts = MDMSecurityFacts(securityInfo: res.dict("SecurityInfo"))
-                    if facts.hasData { mdmSec[d.id] = facts; mdmSecAt[d.id] = Date() }
-                    break
-                }
-            }
-        }
-        saveSecurityCache()
-    }
-
-    // MARK: - MDM security cache (persistent + timestamped)
-
-    private struct CachedSecurity: Codable { var facts: MDMSecurityFacts; var at: Date }
-    private static var securityCacheURL: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return base.appendingPathComponent("EdictMDM", isDirectory: true)
-            .appendingPathComponent("mdm-security-cache.json")
-    }
-    /// Rehydrate firewall/SIP from disk so the tables show last-known posture
-    /// immediately on launch (cached until a fresh Pull via MDM).
-    private func loadSecurityCache() {
-        guard let data = try? Data(contentsOf: Self.securityCacheURL),
-              let map = try? JSONDecoder().decode([String: CachedSecurity].self, from: data)
-        else { return }
-        for (id, c) in map where mdmSec[id] == nil { mdmSec[id] = c.facts; mdmSecAt[id] = c.at }
-    }
-    private func saveSecurityCache() {
-        var map: [String: CachedSecurity] = [:]
-        for (id, f) in mdmSec { map[id] = CachedSecurity(facts: f, at: mdmSecAt[id] ?? Date()) }
-        let url = Self.securityCacheURL
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if let data = try? JSONEncoder().encode(map) { try? data.write(to: url, options: .atomic) }
-    }
-
-    // MARK: - Live device names (MDM DeviceInformation, cached)
-
-    private struct CachedName: Codable { var name: String; var at: Date }
-    private static var namesCacheURL: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return base.appendingPathComponent("EdictMDM", isDirectory: true)
-            .appendingPathComponent("mdm-names-cache.json")
-    }
-    private func loadNamesCache() {
-        guard let data = try? Data(contentsOf: Self.namesCacheURL),
-              let map = try? JSONDecoder().decode([String: CachedName].self, from: data) else { return }
-        for (id, c) in map where mdmNames[id] == nil { mdmNames[id] = c.name; mdmNamesAt[id] = c.at }
-    }
-    private func saveNamesCache() {
-        var map: [String: CachedName] = [:]
-        for (id, n) in mdmNames { map[id] = CachedName(name: n, at: mdmNamesAt[id] ?? Date()) }
-        let url = Self.namesCacheURL
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if let data = try? JSONEncoder().encode(map) { try? data.write(to: url, options: .atomic) }
-    }
-
-    /// Pull the live computer name from each Mac that still reads as a bare
-    /// serial (no hostname, no MunkiReport name, no cached name) via an MDM
-    /// DeviceInformation query. One-time per device — the result is cached.
-    @MainActor
-    private func pullDeviceNames() async {
-        let targets = allDevices.filter { d in
-            knownDeviceNames[d.id] == nil
-                && bscHost(for: d) == nil
-                && (deviceLabels[d.id]?.isEmpty ?? true)
-        }
-        guard !targets.isEmpty else { return }
-        let nano = NanoMDMService(settings: settings)
-        let api = EnrollmentsAPI(settings: settings)
+        var answered = 0
+        let targets = inventoryScope
         for d in targets {
-            guard let uuid = try? await nano.requestDeviceInformation(enrollmentID: d.id) else { continue }
-            _ = try? await nano.push(enrollmentIDs: d.id)
-            for _ in 0..<10 {
-                try? await Task.sleep(for: .seconds(2))
-                if let res = try? await api.commandResult(uuid: uuid) {
-                    if let name = res.dict("QueryResponses")["DeviceName"] as? String,
-                       !name.trimmingCharacters(in: .whitespaces).isEmpty {
-                        mdmNames[d.id] = name; mdmNamesAt[d.id] = Date()
+            do {
+                let uuid = try await nano.requestSecurityInfo(enrollmentID: d.id)
+                for _ in 0..<6 {
+                    try await Task.sleep(for: .seconds(2))
+                    if let result = try await api.commandResult(uuid: uuid) {
+                        guard result.acknowledged else { break }
+                        let facts = MDMSecurityFacts(securityInfo: result.dict("SecurityInfo"))
+                        if facts.hasData { fleet.recordSecurity(facts, for: d.id); answered += 1 }
+                        break
                     }
-                    break
                 }
-            }
+            } catch { actionError = error.localizedDescription }
         }
-        saveNamesCache()
-        rebuildFacts()
+        if answered < targets.count {
+            actionError = "Security refreshed for \(answered) of \(targets.count) devices. Others retain last-known evidence; see Activity for command results."
+        }
     }
 
     // MARK: - Source + freshness, per category
@@ -738,66 +604,26 @@ struct GroupDashboardView: View {
 
     // MARK: - Prism (saved, configurable views)
 
-    private var savedViewsBar: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(savedViews) { v in
-                    let isActive = activeViewID == v.id
-                    HStack(spacing: 4) {
-                        Button { apply(v) } label: {
-                            Label(v.name, systemImage: "bookmark.fill").font(.caption)
-                        }
-                        .buttonStyle(.plain)
-                        if isActive {
-                            Button { deleteView(v) } label: { Image(systemName: "xmark.circle.fill").font(.caption2) }
-                                .buttonStyle(.plain).foregroundStyle(.secondary)
-                                .accessibilityLabel("Delete saved view “\(v.name)”")
-                        }
-                    }
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(Capsule().fill(isActive ? Color.accentColor.opacity(0.2) : Color(NSColor.controlBackgroundColor)))
-                    .overlay(Capsule().stroke(isActive ? Color.accentColor : .clear, lineWidth: 1))
-                }
-                Button { saveViewName = suggestedViewName; showSaveView = true } label: {
-                    Label("Save view", systemImage: "plus").font(.caption)
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 10).padding(.vertical, 5)
-                .background(Capsule().strokeBorder(Color.secondary.opacity(0.4), style: StrokeStyle(lineWidth: 1, dash: [3])))
-            }
-        }
-        .scrollIndicators(.hidden)
-    }
-
     private var suggestedViewName: String {
         selectedGroup?.name ?? "All devices"
-    }
-
-    private func apply(_ v: PrismView) {
-        activeViewID = v.id
-        selectedGroupID = v.groupID
-    }
-
-    private func deleteView(_ v: PrismView) {
-        savedViews.removeAll { $0.id == v.id }
-        settings.prismViews = savedViews
-        if activeViewID == v.id { activeViewID = nil }
     }
 
     private func saveCurrentView() {
         let name = saveViewName.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
-        let v = PrismView(name: name, groupID: selectedGroupID, attribute: .osVersion)
+        let v = PrismView(name: name, groupID: selectedGroupID, attribute: .osVersion, search: fleet.deviceQuery,
+                          hiddenColumns: UserDefaults.standard.string(forKey: "prismHiddenColumns"),
+                          sortKey: UserDefaults.standard.string(forKey: "mdmDeviceSortKey"),
+                          sortAscending: UserDefaults.standard.object(forKey: "mdmDeviceSortAscending") as? Bool)
         savedViews.append(v)
         settings.prismViews = savedViews
-        activeViewID = v.id
         showSaveView = false
     }
 
     private var saveViewSheet: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Save Prism View").font(.headline)
-            Text("Saves the current scope (\(selectedGroup?.name ?? "All devices")) so you can flip back to it from the bar above.")
+            Text("Save Device View").font(.headline)
+            Text("Saves search, columns, sort order, and scope (\(selectedGroup?.name ?? "All devices")) so you can flip back to it from the bar above.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             TextField("View name", text: $saveViewName).textFieldStyle(.roundedBorder)
             HStack {
@@ -812,14 +638,18 @@ struct GroupDashboardView: View {
 
 
     private var groupPicker: some View {
-        HStack(spacing: 12) {
+        @Bindable var fleet = fleet
+        return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Fleet Dashboard").font(.title2).bold()
+                Text(destination == .summary ? "Overview" : destination.rawValue).font(.title2).bold()
                 Text(selectedGroup.map { "Smart group: \($0.name)" } ?? "All enrolled devices")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            Picker("", selection: $selectedGroupID) {
+            if destination == .devices {
+                Button("Save view", systemImage: "bookmark") { saveViewName = suggestedViewName; showSaveView = true }
+            }
+            Picker("", selection: $fleet.selectedGroupID) {
                 Text("All devices").tag(UUID?.none)
                 ForEach(settings.smartGroups) { g in
                     Text(g.name).tag(UUID?.some(g.id))
@@ -848,7 +678,7 @@ struct GroupDashboardView: View {
                     .help("MDM push certificate expires in \(days) days (topic \(cert.topic))")
             }
             Button {
-                Task { await refresh() }
+                Task { await forceRefresh() }
             } label: {
                 if loading { ProgressView().controlSize(.small) }
                 else { Image(systemName: "arrow.clockwise") }
@@ -869,230 +699,6 @@ struct GroupDashboardView: View {
         }
     }
 
-    // MARK: - Hero (compliance ring + stat legend)
-
-    private var heroCard: some View {
-        let c = compliance
-        let total = graded.count
-        return HStack(alignment: .center, spacing: 24) {
-            complianceRing(compliant: c.compliant, total: total)
-            VStack(alignment: .leading, spacing: 6) {
-                statRow("All devices", total, .accentColor, "laptopcomputer", drill: "all")
-                statRow("Compliant", c.compliant, .green, "checkmark.seal.fill", drill: "compliant")
-                statRow("Out of compliance", c.nonCompliant,
-                        c.nonCompliant == 0 ? .secondary : .red, "xmark.seal.fill", drill: "nonCompliant")
-                statRow("Not reporting", c.unknown,
-                        c.unknown == 0 ? .secondary : .yellow, "questionmark.circle", drill: "unknown")
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color(NSColor.controlBackgroundColor)))
-    }
-
-    private func complianceRing(compliant: Int, total: Int) -> some View {
-        let fraction = total > 0 ? Double(compliant) / Double(total) : 0
-        let pct = Int((fraction * 100).rounded())
-        let color: Color = total == 0 ? .secondary : (fraction >= 0.9 ? .green : (fraction >= 0.7 ? .yellow : .red))
-        return ZStack {
-            Circle().stroke(Color.secondary.opacity(0.15), lineWidth: 14)
-            Circle().trim(from: 0, to: max(0.0001, fraction))
-                .stroke(color, style: StrokeStyle(lineWidth: 14, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .animation(.easeOut(duration: 0.4), value: fraction)
-            VStack(spacing: 0) {
-                Text(total == 0 ? "—" : "\(pct)%")
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
-                    .foregroundStyle(color)
-                Text("compliant").font(.caption2).foregroundStyle(.secondary)
-            }
-        }
-        .frame(width: 132, height: 132)
-        .accessibilityElement()
-        .accessibilityLabel("\(pct) percent compliant, \(compliant) of \(total)")
-    }
-
-    private func statRow(_ title: String, _ count: Int, _ color: Color, _ icon: String, drill: String) -> some View {
-        let isOpen = drillKey == drill
-        return Button { drillKey = (drillKey == drill) ? nil : drill } label: {
-            HStack(spacing: 10) {
-                Image(systemName: icon).foregroundStyle(color).frame(width: 18)
-                Text(title).font(.callout)
-                Spacer(minLength: 24)
-                Text("\(count)").font(.title3.weight(.semibold).monospacedDigit())
-                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(isOpen ? 90 : 0))
-            }
-            .padding(.vertical, 4).padding(.horizontal, 8)
-            .background(RoundedRectangle(cornerRadius: 6).fill(isOpen ? color.opacity(0.12) : .clear))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .frame(minWidth: 240)
-    }
-
-    // MARK: - Attention strip (actionable alerts)
-
-    private struct DashAlert: Identifiable {
-        let text: String; let icon: String; let color: Color; let drill: String?
-        var id: String { drill ?? text }
-    }
-
-    private var needsOnboardingCount: Int {
-        guard settings.hasOnboardingBaseline else { return 0 }
-        return graded.filter { $0.isEnabled && !settings.isOnboarded($0.id) }.count
-    }
-
-    private var dashAlerts: [DashAlert] {
-        let c = compliance
-        var a: [DashAlert] = []
-        if c.nonCompliant > 0 {
-            a.append(.init(text: "\(c.nonCompliant) out of compliance", icon: "xmark.seal.fill", color: .red, drill: "nonCompliant"))
-        }
-        let needs = needsOnboardingCount
-        if needs > 0 {
-            a.append(.init(text: "\(needs) need onboarding", icon: "shippingbox", color: .orange, drill: nil))
-        }
-        if driftCheckedAt != nil && driftProfileCount > 0 {
-            a.append(.init(text: "\(driftProfileCount) profile\(driftProfileCount == 1 ? "" : "s") drifted on \(driftDeviceCount)", icon: "exclamationmark.triangle.fill", color: .orange, drill: nil))
-        }
-        if c.unknown > 0 {
-            a.append(.init(text: "\(c.unknown) not reporting", icon: "questionmark.circle", color: .yellow, drill: "unknown"))
-        }
-        return a
-    }
-
-    /// Macs the operator hid from grading (e.g. too old for DDM) — collapsed,
-    /// with an Unhide each. Only shown when something is hidden.
-    @ViewBuilder
-    private var hiddenSection: some View {
-        let hidden = hiddenFromAttention
-        if !hidden.isEmpty {
-            DisclosureGroup {
-                ForEach(hidden, id: \.id) { d in
-                    HStack(spacing: 8) {
-                        Image(systemName: "laptopcomputer").foregroundStyle(.secondary)
-                        Text(label(for: d)).font(.callout)
-                        Spacer()
-                        Button("Unhide") { settings.setIgnoredForAttention(d.id, false) }
-                            .buttonStyle(.link).font(.caption)
-                    }
-                    .padding(.vertical, 2)
-                }
-            } label: {
-                Label("\(hidden.count) hidden from attention", systemImage: "eye.slash")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .help("Excluded from compliance, attention, and the breakdown — typically Macs too old to report via DDM.")
-            }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color(NSColor.controlBackgroundColor)))
-        }
-    }
-
-    @ViewBuilder
-    private var attentionStrip: some View {
-        let alerts = dashAlerts
-        if alerts.isEmpty {
-            Label("Everything looks good across \(graded.count) device\(graded.count == 1 ? "" : "s").",
-                  systemImage: "checkmark.circle.fill")
-                .font(.callout).foregroundStyle(.green)
-                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.08)))
-        } else {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 10)], alignment: .leading, spacing: 10) {
-                ForEach(alerts) { alert in alertChip(alert) }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func alertChip(_ alert: DashAlert) -> some View {
-        let content = HStack(spacing: 8) {
-            Image(systemName: alert.icon).foregroundStyle(alert.color)
-            Text(alert.text).font(.callout).foregroundStyle(.primary).lineLimit(1).truncationMode(.tail)
-            Spacer(minLength: 0)
-            if alert.drill != nil { Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary) }
-        }
-        .padding(.horizontal, 12).padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(alert.color.opacity(0.12)))
-        .contentShape(Rectangle())
-        if let d = alert.drill {
-            Button { drillKey = (drillKey == d) ? nil : d } label: { content }.buttonStyle(.plain)
-        } else {
-            content
-        }
-    }
-
-    /// Devices matching a summary-card category, for the drill-down list.
-    private func drillDevices(_ key: String) -> [MDMEnrollment] {
-        switch key {
-        case "all": return graded
-        case "compliant", "nonCompliant", "unknown":
-            return graded.filter { d in
-                switch SmartGroup.compliant(facts(for: d),
-                                            requireFileVault: settings.mdmRequireFileVault,
-                                            minOS: settings.mdmMinOSVersion) {
-                case .some(true): return key == "compliant"
-                case .some(false): return key == "nonCompliant"
-                case nil: return key == "unknown"
-                }
-            }
-        default: return []
-        }
-    }
-
-    private func drillList(_ key: String) -> some View {
-        let title: String = ["all": "All devices", "compliant": "Compliant devices",
-                             "nonCompliant": "Out of compliance", "unknown": "Not yet reported"][key] ?? ""
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(title).font(.subheadline.bold())
-                Spacer()
-                Button { drillKey = nil } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Close")
-            }
-            ForEach(drillDevices(key), id: \.id) { d in
-                HStack(spacing: 8) {
-                    Button { selection = [df.hostID(for: d)] } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "laptopcomputer").foregroundStyle(.secondary)
-                            Text(label(for: d)).font(.callout)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Show \(label(for: d)) in the inspector")
-                    Spacer()
-                    if let os = osVersions[d.id] { Text("macOS \(os)").font(.caption).foregroundStyle(.secondary) }
-                    fileVaultChip(for: d)
-                    Button("Hide \(label(for: d)) from attention", systemImage: "eye.slash") {
-                        settings.setIgnoredForAttention(d.id, true)
-                    }
-                    .labelStyle(.iconOnly).font(.caption)
-                    .buttonStyle(.plain).foregroundStyle(.secondary)
-                    .help("Hide from attention — for a Mac too old to report via DDM")
-                }
-                .padding(.vertical, 2)
-                Divider()
-            }
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.accentColor.opacity(0.06)))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.accentColor.opacity(0.25), lineWidth: 1))
-    }
-
-    @ViewBuilder
-    private func fileVaultChip(for enr: MDMEnrollment) -> some View {
-        switch facts(for: enr).fileVaultOn {
-        case .some(true): Label("FV", systemImage: "lock.fill").font(.caption2).foregroundStyle(.green)
-        case .some(false): Label("FV off", systemImage: "lock.open").font(.caption2).foregroundStyle(.red)
-        case nil: EmptyView()
-        }
-    }
-
     private var driftCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -1106,12 +712,18 @@ struct GroupDashboardView: View {
                 }
                 .disabled(driftChecking)
             }
+            let checked = scoped.compactMap { fleet.drift[$0.id] }
+            let verified = checked.filter { $0.outcome == .verified }.count
+            let waiting = checked.filter { $0.outcome == .waiting }.count
+            let failed = checked.filter { $0.outcome == .failed }.count
+            Text("\(verified) verified · \(waiting) waiting · \(failed) failed · \(scoped.count - checked.count + checked.filter { $0.outcome == .untracked }.count) untracked")
+                .font(.callout).foregroundStyle(.secondary)
             if let at = driftCheckedAt {
-                if driftProfileCount == 0 {
-                    Label("All tracked profiles present across \(scoped.count) device(s).",
+                if driftProfileCount == 0 && verified > 0 {
+                    Label("No missing profiles found in verified responses.",
                           systemImage: "checkmark.circle.fill")
                         .font(.callout).foregroundStyle(.green)
-                } else {
+                } else if driftProfileCount > 0 {
                     Label("\(driftProfileCount) profile(s) missing on \(driftDeviceCount) device(s).",
                           systemImage: "exclamationmark.triangle.fill")
                         .font(.callout).foregroundStyle(.orange)
@@ -1124,7 +736,7 @@ struct GroupDashboardView: View {
                         }
                     }
                 }
-                Text("Last checked \(at, style: .time) — the Scheduling tab can re-push these automatically.")
+                Text("Last checked \(at, style: .time) — automation is available in Activity.")
                     .font(.caption2).foregroundStyle(.secondary)
             } else {
                 Text("Compares each device's installed profiles against what Edict deployed. Runs a live ProfileList query per device, so it's on demand.")
@@ -1213,11 +825,14 @@ struct GroupDashboardView: View {
                         }
                     }
                 }
-                Text("A ✓ means Edict deployed that profile. Click a device to inspect it; run a drift check to confirm it's still installed.")
+                Text("A ✓ means Edict queued that profile. Run verification to confirm it is installed.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }
         .padding(16)
+        .deviceArrowKeys(rows.map { df.hostID(for: $0.enr) },
+                         selected: rows.map { df.hostID(for: $0.enr) }.first(where: selection.contains),
+                         select: { selection = [$0] })
         .frame(maxWidth: 820, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(NSColor.controlBackgroundColor)))
     }
@@ -1259,83 +874,48 @@ struct GroupDashboardView: View {
     /// the table's Model / macOS / FileVault columns stop showing "—".
     @MainActor
     private func enableReportingAll() async {
-        enablingAll = true
+        enablingAll = true; actionError = nil
         defer { enablingAll = false }
+        let targets = scoped.filter(\.isEnabled)
         let set = "default"
         let configID = "com.hellocomputer.edict.status-subscriptions"
         let kmf = KMFDDMService(settings: settings)
-        let nano = NanoMDMService(settings: settings)
-        try? await kmf.deploy(configJSON: DDMDeclarations.statusSubscriptions(identifier: configID),
-                              configID: configID, toSet: set)
-        for d in scoped {
-            try? await kmf.assign(enrollmentID: d.id, toSet: set)
-            _ = try? await nano.push(enrollmentIDs: d.id)
-        }
-        // Give the fleet a moment to process, then re-read facts.
-        try? await Task.sleep(for: .seconds(8))
-        await refresh()
+        var assigned = 0
+        do {
+            try await kmf.deploy(configJSON: DDMDeclarations.statusSubscriptions(identifier: configID),
+                                 configID: configID, toSet: set)
+            for device in targets {
+                do { try await kmf.assign(enrollmentID: device.id, toSet: set); assigned += 1 }
+                catch { actionError = error.localizedDescription }
+            }
+            if assigned < targets.count {
+                actionError = "Reporting subscription assigned to \(assigned) of \(targets.count) devices. Some assignments failed."
+            }
+            await forceRefresh()
+        } catch { actionError = "Couldn't assign reporting: \(error.localizedDescription)" }
     }
 
     @MainActor
     private func refresh() async {
         savedViews = settings.prismViews
-        loadSecurityCache()
-        loadNamesCache()
-        let log = DeploymentLog.load()
-        deploymentLog = log
-        deploymentCounts = log.mapValues { $0.count }
-        guard settings.mdmEnabled, settings.mdmConfigured,
-              !settings.mdmDevicesAPIBaseURL.trimmingCharacters(in: .whitespaces).isEmpty
-        else { return }
-        loading = true
-        loadError = nil
-        defer { loading = false }
-        do {
-            let api = EnrollmentsAPI(settings: settings)
-            // Retry the enrollments list a couple times — the tailnet link to
-            // the sidecar can blip (e.g. right after wake), and one transient
-            // failure shouldn't flash a "network error" when a retry succeeds.
-            // On persistent failure we throw and keep the previously-loaded
-            // fleet (enrollments isn't reassigned).
-            var listed: [MDMEnrollment]?
-            var lastErr: Error?
-            for attempt in 0..<3 {
-                do { listed = try await api.list(); break }
-                catch {
-                    lastErr = error
-                    if attempt < 2 { try? await Task.sleep(for: .milliseconds(600)) }
-                }
-            }
-            guard let listed else { throw lastErr ?? MDMError.transport("enrollments list failed") }
-            enrollments = listed
-            pushCert = try? await api.pushCert()
-            let svc = KMFDDMService(settings: settings)
-            var os: [String: String] = [:], fv: [String: String] = [:], mdl: [String: String] = [:]
-            var su: [String: KMFDDMService.DDMSoftwareUpdate] = [:]
-            for d in allDevices {
-                let f = await svc.fullStatus(enrollmentID: d.id)
-                if let v = f.os { os[d.id] = v }
-                if let v = f.model { mdl[d.id] = v }
-                if let v = f.fileVault { fv[d.id] = v ? "true" : "false" }
-                if f.su.hasData { su[d.id] = f.su }
-            }
-            osVersions = os; fileVault = fv; models = mdl; mdmSU = su; factsAt = Date()
-            rebuildFacts()
-            // Pull MunkiReport inventory for the category tables (Apps,
-            // Users, Storage, Updates). loadIfNeeded dedupes.
-            if settings.isMunkiReportAPIConfigured {
-                for d in allDevices {
-                    if let s = d.serialNumber?.trimmingCharacters(in: .whitespaces), !s.isEmpty {
-                        mrInventory.loadIfNeeded(serial: s, settings: settings)
-                    }
-                }
-            }
-            // One-time per session: name the Macs that still read as serials by
-            // pulling their live MDM DeviceName in the background.
-            if !namesPulled { namesPulled = true; Task { await pullDeviceNames() } }
-        } catch {
-            loadError = error.localizedDescription
+        deploymentLog = DeploymentLog.load()
+        deploymentCounts = deploymentLog.mapValues { $0.count }
+        if fleet.refreshedAt == nil && !fleet.loading {
+            let serials = Set(hostStore.hosts.compactMap { $0.serialnum?.uppercased() })
+            await fleet.refresh(settings: settings, bscSerials: serials)
         }
+        rebuildFacts()
+        if settings.isMunkiReportAPIConfigured {
+            for d in allDevices {
+                if let serial = d.serialNumber { mrInventory.loadIfNeeded(serial: serial, settings: settings) }
+            }
+        }
+    }
+
+    private func forceRefresh() async {
+        let serials = Set(hostStore.hosts.compactMap { $0.serialnum?.uppercased() })
+        await fleet.refresh(settings: settings, bscSerials: serials)
+        await refresh()
     }
 
     /// For each scoped device, ask for its installed ProfileList and diff
@@ -1347,26 +927,19 @@ struct GroupDashboardView: View {
         let nano = NanoMDMService(settings: settings)
         let api = EnrollmentsAPI(settings: settings)
         let log = DeploymentLog.load()
-        var result: [String: [DeploymentLog.Entry]] = [:]
         for d in scoped {
             let tracked = log[d.id] ?? []
-            guard !tracked.isEmpty else { continue }
-            guard let uuid = try? await nano.requestProfileList(enrollmentID: d.id) else { continue }
-            _ = try? await nano.push(enrollmentIDs: d.id)
-            var installed: Set<String>?
-            for _ in 0..<10 {
-                try? await Task.sleep(for: .seconds(2))
-                if let res = try? await api.commandResult(uuid: uuid) {
-                    installed = Set(res.array("ProfileList").compactMap { $0["PayloadIdentifier"] as? String })
-                    break
+            guard !tracked.isEmpty else { fleet.drift[d.id] = .init(outcome: .untracked); continue }
+            do {
+                let uuid = try await nano.requestProfileList(enrollmentID: d.id)
+                var reply: CommandResult?
+                for _ in 0..<6 {
+                    try await Task.sleep(for: .seconds(2))
+                    if let response = try await api.commandResult(uuid: uuid) { reply = response; break }
                 }
-            }
-            guard let present = installed else { continue }
-            let missing = tracked.filter { !present.contains($0.identifier) }
-            if !missing.isEmpty { result[d.id] = missing }
+                fleet.drift[d.id] = MDMDriftAssessment.evaluate(reply, tracked: tracked)
+            } catch { fleet.drift[d.id] = .init(outcome: .failed, detail: error.localizedDescription) }
         }
-        driftMissing = result
-        driftCheckedAt = Date()
         rebuildFacts()
     }
 }

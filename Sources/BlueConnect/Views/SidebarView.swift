@@ -6,6 +6,7 @@ struct SidebarView: View {
     @Environment(BlueSkyHostListStore.self) var hostStore
     @Environment(CategoryStore.self) var categories
     @Environment(RecentConnectStore.self) var recents
+    @Environment(MDMFleetIndex.self) private var fleet
     @Binding var selection: SidebarFilter
     let onAssign: ([Int], String) -> Void
     let onFavorite: ([Int]) -> Void
@@ -121,7 +122,7 @@ struct SidebarView: View {
             case "all":
                 return StatusItem(key: key, filter: .all, label: "All Hosts",
                                   icon: "tray.full", iconColor: .accentColor,
-                                  count: hostStore.hosts.count, acceptsHostDrop: false)
+                                  count: hostStore.hosts.count + (settings.mdmEnabled ? fleet.mdmOnly.count : 0), acceptsHostDrop: false)
             case "favorites":
                 return StatusItem(key: key, filter: .favorites, label: "Favorites",
                                   icon: "star.fill", iconColor: .yellow,
@@ -198,7 +199,7 @@ struct SidebarView: View {
                           ? "chevron.right" : "chevron.down")
                         .font(.caption2).foregroundStyle(.secondary)
                         .frame(width: 10)
-                    Text("Categories").font(.caption).bold().foregroundStyle(.secondary)
+                    Text(settings.mdmEnabled ? "Support categories" : "Categories").font(.caption).bold().foregroundStyle(.secondary)
                     Spacer()
                     if settings.sidebarCategoriesCollapsed {
                         Text("\(categories.categories.count)")
@@ -272,13 +273,32 @@ struct SidebarView: View {
             .buttonStyle(.plain)
             .padding(.bottom, 2)
             if !settings.sidebarMDMCollapsed {
-                // Alphabetical, with Enrollment pinned to the bottom.
-                mdmRow(.mdmDashboard, label: "Dashboard", icon: "chart.bar.xaxis")
-                mdmRow(.mdmDeclarations, label: "Declarations", icon: "doc.badge.gearshape")
-                mdmRow(.mdmProfiles, label: "Profiles", icon: "doc.text.fill")
-                mdmRow(.mdmScheduling, label: "Scheduling", icon: "clock.badge.checkmark")
+                mdmRow(.mdmDashboard, label: "Overview", icon: "square.grid.2x2")
+                mdmRow(.mdmDevices, label: "Devices", icon: "laptopcomputer")
+                mdmRow(.mdmSecurity, label: "Security", icon: "lock.shield")
+                mdmRow(.mdmUpdates, label: "Updates", icon: "arrow.down.circle")
+                mdmRow(.mdmProfiles, label: "Policies", icon: "doc.badge.gearshape")
                 mdmRow(.mdmEnrollment, label: "Enrollment", icon: "qrcode")
-                mdmRow(.mdmDEP, label: "Auto-Enroll (DEP)", icon: "sparkles.rectangle.stack")
+                mdmRow(.mdmActivity, label: "Activity", icon: "clock.arrow.circlepath")
+                if !settings.prismViews.isEmpty {
+                    Text("Saved device views").font(.caption).foregroundStyle(.secondary).padding(.top, 12).padding(.leading, 8)
+                    ForEach(settings.prismViews) { view in
+                        Button {
+                            fleet.selectedGroupID = view.groupID
+                            fleet.deviceQuery = view.search ?? ""
+                            if let columns = view.hiddenColumns { UserDefaults.standard.set(columns, forKey: "prismHiddenColumns") }
+                            if let sort = view.sortKey { UserDefaults.standard.set(sort, forKey: "mdmDeviceSortKey") }
+                            if let ascending = view.sortAscending { UserDefaults.standard.set(ascending, forKey: "mdmDeviceSortAscending") }
+                            selection = .mdmDevices
+                        } label: { Label(view.name, systemImage: "line.3.horizontal.decrease.circle").lineLimit(1) }
+                        .buttonStyle(.plain).padding(.horizontal, 8).padding(.vertical, 5)
+                        .contextMenu {
+                            Button("Delete saved view", role: .destructive) {
+                                settings.prismViews.removeAll { $0.id == view.id }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

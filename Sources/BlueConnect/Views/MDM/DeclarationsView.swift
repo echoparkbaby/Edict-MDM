@@ -10,6 +10,7 @@ import SwiftUI
 /// pushes it to those devices immediately — KMFDDM fires the
 /// DeclarativeManagement command on every association/content change.
 struct DeclarationsView: View {
+    var serverOnly = false
     @EnvironmentObject private var settings: SettingsStore
     @Environment(ActivityLog.self) private var activity
 
@@ -41,6 +42,7 @@ struct DeclarationsView: View {
                 notConfigured
             } else {
                 VStack(spacing: 0) {
+                    if !serverOnly {
                     Picker("", selection: $mode) {
                         Text("Library").tag(Mode.library)
                         Text("Sets").tag(Mode.sets)
@@ -49,7 +51,8 @@ struct DeclarationsView: View {
                     .pickerStyle(.segmented).labelsHidden().fixedSize()
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     Divider()
-                    switch mode {
+                    }
+                    switch serverOnly ? Mode.server : mode {
                     case .library: DeclarationLibraryPane()
                     case .sets:    SetsGridPane()
                     case .server:  browser

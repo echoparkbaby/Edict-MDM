@@ -42,7 +42,7 @@ It also treats **Declarative Device Management (DDM)** as a core feature. The pa
 
 ## Screenshots
 
-> All screenshots use a fictional fleet. Names, serial numbers and servers are made up.
+> All screenshots use a fictional fleet. Names, serial numbers and servers are made up. These captures predate the workspace redesign below.
 
 | | |
 |---|---|
@@ -60,7 +60,13 @@ It also treats **Declarative Device Management (DDM)** as a core feature. The pa
 **Fleet**
 - One table merging BlueSkyConnect hosts and MDM enrollments, matched by serial number. Columns for MDM status, OS, FileVault and the logged-in macOS user.
 - One detail pane for each Mac: live inventory, DDM status, compliance, and remote-support actions (Screen Share, SSH, run a command, send a file).
-- Prism dashboard: a compliance ring, an attention strip you can act on (out of compliance, needs onboarding, drift, not reporting), and a breakdown by any attribute. Smart groups and saved scopes.
+- One primary MDM navigation: **Overview, Devices, Security, Updates, Policies, Enrollment, Activity**. Remote-support filters and categories remain separately labeled.
+- Overview prioritizes management health, missing evidence, actionable device findings, and recent command outcomes. Hardware and OS breakdowns are secondary.
+- Security compares FileVault, firewall, SIP, Gatekeeper, and recovery-key evidence without hiding devices that have not reported.
+- Devices share one app-owned fleet store with the dashboard, policy target picker, and inspector. Saved device views preserve search, columns, sort order, and group scope.
+- Expand the inspector into a full device-details window with command history.
+- Activity persists command metadata and distinguishes server acceptance, waiting, deferred, device acknowledgement, and failure. Profile presence is verified separately through acknowledged ProfileList responses.
+- No configured baseline means **not evaluated**, never compliant. Failed reads retain last-known evidence and remain visible. FileVault key existence does not establish escrow; Edict's built-in encryption profile does not escrow recovery keys.
 
 **Declarative Device Management**
 - A declaration **library** with a gallery of plain-English templates, so the common cases need no hand-typed JSON. Templates: enforce a macOS update, software-update settings, status reporting, passcode policy, screen sharing, external and network-drive restrictions, install a certificate, and manage service config files (sshd, sudo, pam and others).

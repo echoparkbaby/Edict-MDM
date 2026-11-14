@@ -92,7 +92,8 @@ final class MDMScheduler {
             for _ in 0..<10 {
                 try? await Task.sleep(for: .seconds(2))
                 if let res = try? await api.commandResult(uuid: uuid) {
-                    installed = Set(res.array("ProfileList").compactMap { $0["PayloadIdentifier"] as? String })
+                    guard let profiles = try? res.acknowledgedArray("ProfileList") else { break }
+                    installed = Set(profiles.compactMap { $0["PayloadIdentifier"] as? String })
                     break
                 }
             }
@@ -105,7 +106,7 @@ final class MDMScheduler {
             }
         }
         if repushed > 0 {
-            notifier?.notify(title: "Profile drift corrected", body: "Re-pushed \(repushed) missing profile(s).", identifier: "edict-sched")
+            notifier?.notify(title: "Profile remediation queued", body: "Re-pushed \(repushed) missing profile(s).", identifier: "edict-sched")
             activity?.record(.category, title: "Scheduled: re-pushed \(repushed) drifted profile(s)")
         }
         note("Drift sweep: \(repushed) re-pushed")
@@ -164,7 +165,7 @@ final class MDMScheduler {
             notifier?.notify(title: "FileVault remediation", body: "Pushed FileVault to \(fixed) device(s).", identifier: "edict-sched")
             activity?.record(.category, title: "Scheduled: FileVault pushed to \(fixed) device(s)")
         }
-        note("FileVault sweep: \(fixed) remediated")
+        note("FileVault sweep: \(fixed) queued")
     }
 
     private func reapply(_ t: ScheduledTask, _ settings: SettingsStore) async {

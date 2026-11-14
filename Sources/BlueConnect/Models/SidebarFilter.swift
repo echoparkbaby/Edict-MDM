@@ -13,6 +13,9 @@ enum SidebarFilter: Hashable {
     case mdmDeclarations
     /// Edict MDM: swaps the center pane to the managed-devices view.
     case mdmDevices
+    case mdmSecurity
+    case mdmUpdates
+    case mdmActivity
     /// Edict MDM: configuration-profile library.
     case mdmProfiles
     /// Edict MDM: enrollment-profile builder.
@@ -35,6 +38,9 @@ enum SidebarFilter: Hashable {
         case .category(let c): "cat:\(c)"
         case .mdmDeclarations: "mdm:decl"
         case .mdmDevices: "mdm:dev"
+        case .mdmSecurity: "mdm:security"
+        case .mdmUpdates: "mdm:updates"
+        case .mdmActivity: "mdm:activity"
         case .mdmProfiles: "mdm:prof"
         case .mdmEnrollment: "mdm:enroll"
         case .mdmDEP: "mdm:dep"

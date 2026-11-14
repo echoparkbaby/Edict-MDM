@@ -102,6 +102,21 @@ struct CommandResult: Decodable {
         return obj
     }
 
+    var acknowledged: Bool { status == "Acknowledged" }
+
+    var failureDescription: String {
+        let chain = array("ErrorChain").compactMap { ($0["LocalizedDescription"] as? String) ?? ($0["USEnglishDescription"] as? String) }
+        return chain.isEmpty ? "Device response: \(status)" : chain.joined(separator: " · ")
+    }
+
+    func acknowledgedArray(_ key: String) throws -> [[String: Any]] {
+        guard acknowledged else { throw MDMError.transport(failureDescription) }
+        guard let value = plist[key] as? [[String: Any]] else {
+            throw MDMError.transport("The device response did not contain \(key).")
+        }
+        return value
+    }
+
     /// Parse a top-level array out of the result plist by key, e.g.
     /// "ProfileList" or "InstalledApplicationList", as dictionaries.
     func array(_ key: String) -> [[String: Any]] {

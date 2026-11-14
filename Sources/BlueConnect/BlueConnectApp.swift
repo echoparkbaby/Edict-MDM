@@ -15,6 +15,7 @@ struct BlueConnectAdminApp: App {
     @State private var terminals = TerminalSessionsManager()
     @State private var notifier = HostStateNotifier()
     @State private var mdmScheduler = MDMScheduler()
+    @State private var mdmFleet = MDMFleetIndex()
     @State private var idleLock = IdleLockMonitor()
     @State private var rendezvous = LocalRendezvousBrowser()
     @State private var tailscale = TailscaleBrowser()
@@ -84,6 +85,8 @@ struct BlueConnectAdminApp: App {
             .environmentObject(quickActionStore)
             .environment(quickActionLauncher)
             .environment(mdmScheduler)
+            .environment(mdmFleet)
+            .environment(MDMCommandStore.shared)
             .task {
                 Log.info("App", "BlueConnect Admin starting")
                 // Upgrade any pre-existing secrets to device-only accessibility
@@ -97,6 +100,7 @@ struct BlueConnectAdminApp: App {
                 settings.loadUnifiAPIKeyFromKeychain()
                 settings.loadMDMKeysFromKeychain()
                 settings.loadSCEPChallengeFromKeychain()
+                MDMCommandStore.shared.start(settings: settings)
                 mdmScheduler.start(settings: settings, notifier: notifier, activity: activity)
                 if settings.localNetworkEnabled { rendezvous.start() }
                 tailscale.settings = settings

@@ -83,6 +83,8 @@ struct SmartGroup: Codable, Hashable, Identifiable {
 
     /// nil when a required fact isn't reported (can't determine).
     static func compliant(_ f: DeviceFacts, requireFileVault: Bool, minOS: String) -> Bool? {
+        guard requireFileVault || !minOS.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        guard f.enrolled else { return false }
         var failed = false, unknown = false
         if requireFileVault {
             switch f.fileVaultOn {

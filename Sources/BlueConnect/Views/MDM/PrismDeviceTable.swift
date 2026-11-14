@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-enum DeviceSortKey { case name, serial, model, os, fileVault, compliance, lastSeen }
+enum DeviceSortKey: String { case name, serial, model, os, fileVault, compliance, lastSeen }
 
 /// One column of the device table (Device is always shown; the rest are
 /// reorderable per layout and hideable via the column menu).
@@ -28,9 +28,9 @@ struct PrismDeviceTable: View {
     let enablingAll: Bool
     let onEnableReporting: () -> Void
 
-    @State private var tableSearch = ""
-    @State private var sortKey: DeviceSortKey = .name
-    @State private var sortAsc = true
+    @Binding var tableSearch: String
+    @AppStorage("mdmDeviceSortKey") private var sortKey: DeviceSortKey = .name
+    @AppStorage("mdmDeviceSortAscending") private var sortAsc = true
     @State private var hoveredRow: String?
     @AppStorage("prismHiddenColumns") private var hiddenColumnsRaw = ""
     /// User-dragged column widths, keyed by column key ("device" is the name
@@ -45,6 +45,19 @@ struct PrismDeviceTable: View {
     @State private var liveResize: (key: String, width: CGFloat)?
 
     @State private var exportError: String?
+
+    // Row control-click menu.
+    @EnvironmentObject private var settings: SettingsStore
+    @Environment(MDMFleetIndex.self) private var fleet
+    @AppStorage("connectPanelVisible") private var connectPanelVisible = true
+    @AppStorage("connectPanelTab") private var connectPanelTab = "mdm"
+    @State private var actionError: String?
+    @Environment(ActivityLog.self) private var activity
+    /// Brief "it worked" line at the bottom of the table; clears itself.
+    @State private var notice: String?
+    @State private var lockTarget: MDMEnrollment?
+    @State private var restartTarget: MDMEnrollment?
+    @State private var unenrollTarget: MDMEnrollment?
 
     /// The persisted width map, decoded once per body (not per cell).
     private var savedWidths: [String: Double] {
@@ -106,6 +119,9 @@ struct PrismDeviceTable: View {
                             }
                         }
                     }
+                    .deviceArrowKeys(rows.map { facts.hostID(for: $0) },
+                                     selected: rows.map { facts.hostID(for: $0) }.first(where: selection.contains),
+                                     select: { selection = [$0] })
                 }
             }
         }
@@ -113,6 +129,53 @@ struct PrismDeviceTable: View {
         .alert("Couldn't save CSV", isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(exportError ?? "") }
+        .alert("Couldn't complete that", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(actionError ?? "") }
+        .overlay(alignment: .bottom) {
+            if let notice {
+                Label(notice, systemImage: "checkmark.circle.fill")
+                    .font(.callout).padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(.regularMaterial, in: Capsule())
+                    .padding(.bottom, 12)
+                    .task(id: notice) {
+                        try? await Task.sleep(for: .seconds(3))
+                        if !Task.isCancelled { self.notice = nil }
+                    }
+            }
+        }
+        .sheet(item: $lockTarget) { d in
+            LockDeviceSheet(deviceName: facts.label(for: d)) { pin, message in
+                await perform("Lock command sent", [d]) {
+                    _ = try await NanoMDMService(settings: settings).lock(enrollmentID: d.id, pin: pin, message: message)
+                    _ = try? await NanoMDMService(settings: settings).push(enrollmentIDs: d.id)
+                }
+            }
+        }
+        .alert("Restart \(restartTarget.map(facts.label(for:)) ?? "")?",
+               isPresented: Binding(get: { restartTarget != nil }, set: { if !$0 { restartTarget = nil } }),
+               presenting: restartTarget) { d in
+            Button("Cancel", role: .cancel) {}
+            Button("Restart", role: .destructive) {
+                Task { await perform("Restart command sent", [d]) {
+                    _ = try await NanoMDMService(settings: settings).restart(enrollmentID: d.id)
+                    _ = try? await NanoMDMService(settings: settings).push(enrollmentIDs: d.id)
+                } }
+            }
+        } message: { _ in Text("The Mac restarts when it receives the command. Unsaved work may be lost. It must be online now.") }
+        .alert("Remove \(unenrollTarget.map(facts.label(for:)) ?? "") from MDM?",
+               isPresented: Binding(get: { unenrollTarget != nil }, set: { if !$0 { unenrollTarget = nil } }),
+               presenting: unenrollTarget) { d in
+            Button("Cancel", role: .cancel) {}
+            Button("Unenroll", role: .destructive) {
+                Task { await perform("Unenroll command sent", [d]) {
+                    _ = try await NanoMDMService(settings: settings).unenroll(enrollmentID: d.id, profileIdentifier: settings.mdmEnrollmentProfileID)
+                    _ = try? await NanoMDMService(settings: settings).push(enrollmentIDs: d.id)
+                } }
+            }
+        } message: { _ in
+            Text("Sends RemoveProfile for the enrollment profile. The Mac drops management, declarations, and its MDM certificate the moment it receives the push. It must be online.")
+        }
     }
 
     private func toolbar(count: Int) -> some View {
@@ -159,7 +222,7 @@ struct PrismDeviceTable: View {
          DeviceColumn(key: "model", title: "Model", width: 138, sort: .model),
          DeviceColumn(key: "os", title: "macOS", width: 66, sort: .os),
          DeviceColumn(key: "fv", title: "FileVault", width: 84, sort: .fileVault),
-         DeviceColumn(key: "compliance", title: "Compliance", width: 104, sort: .compliance),
+         DeviceColumn(key: "compliance", title: "Baseline", width: 140, sort: .compliance),
          DeviceColumn(key: "lastSeen", title: "Last check-in", width: 104, sort: .lastSeen)]
     }
     private var hiddenColumns: Set<String> { Set(hiddenColumnsRaw.split(separator: ",").map(String.init)) }
@@ -204,7 +267,13 @@ struct PrismDeviceTable: View {
     private func tableRow(_ d: MDMEnrollment, _ widths: [String: Double]) -> some View {
         let hovered = hoveredRow == d.id
         let selected = selection.contains(facts.hostID(for: d))
-        return HStack(spacing: 12) {
+        return Button {
+            let id = facts.hostID(for: d)
+            if NSEvent.modifierFlags.contains(.command) {
+                if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
+            } else { selection = [id] }
+        } label: {
+        HStack(spacing: 12) {
             HStack(spacing: 7) {
                 Image(systemName: facts.deviceIcon(d)).font(.caption).foregroundStyle(Color.accentColor).frame(width: 16)
                 Text(facts.label(for: d)).font(.callout.weight(.medium)).lineLimit(1).truncationMode(.tail)
@@ -218,11 +287,106 @@ struct PrismDeviceTable: View {
         .background(selected ? Color.accentColor.opacity(0.18)
                     : (hovered ? Color.accentColor.opacity(0.06) : .clear))
         .contentShape(Rectangle())
-        .onTapGesture { selection = [facts.hostID(for: d)] }
+        }
+        .buttonStyle(.plain)
         .onHover { hoveredRow = $0 ? d.id : (hoveredRow == d.id ? nil : hoveredRow) }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
         .accessibilityLabel(facts.label(for: d))
+        .contextMenu { rowMenu(d) }
+    }
+
+    /// The rows a menu action applies to: every selected row when the
+    /// clicked row is part of a multi-selection, otherwise just that row.
+    private func targets(_ d: MDMEnrollment) -> [MDMEnrollment] {
+        guard selection.count > 1, selection.contains(facts.hostID(for: d)) else { return [d] }
+        return rows.filter { selection.contains(facts.hostID(for: $0)) }
+    }
+
+    /// Safe one-shot actions up top. Restart / lock / unenroll sit under
+    /// "More", one Mac at a time, each behind a confirmation. Erase stays in
+    /// the device details panel only.
+    @ViewBuilder
+    private func rowMenu(_ d: MDMEnrollment) -> some View {
+        let ts = targets(d)
+        let many = ts.count > 1
+        let suffix = many ? " (\(ts.count) Macs)" : ""
+        Button("Check In Now" + suffix) {
+            Task { await perform("Check-in requested", ts) {
+                _ = try await NanoMDMService(settings: settings).push(enrollmentIDs: ts.map(\.id).joined(separator: ","))
+            } }
+        }
+        if !many {
+            Button("Open Device Details") {
+                selection = [facts.hostID(for: d)]
+                connectPanelTab = "mdm"
+                connectPanelVisible = true
+            }
+        }
+        let serials = ts.compactMap(\.serialNumber).filter { !$0.isEmpty }
+        Button(many ? "Copy Serial Numbers" + suffix : "Copy Serial Number") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(serials.joined(separator: "\n"), forType: .string)
+        }
+        .disabled(serials.isEmpty)
+        Button(many ? "Refresh These Macs" + suffix : "Refresh This Mac") {
+            Task {
+                for t in ts { await fleet.refreshDevice(t.id, settings: settings) }
+                let failed = ts.filter { fleet.errors[$0.id] != nil }
+                if let first = failed.first {
+                    actionError = failed.count == 1
+                        ? "\(facts.label(for: first)): \(fleet.errors[first.id] ?? "")"
+                        : "\(failed.count) of \(ts.count) Macs couldn't be refreshed. First: \(facts.label(for: first)) — \(fleet.errors[first.id] ?? "")"
+                } else {
+                    notice = many ? "Refreshed \(ts.count) Macs" : "Refreshed \(facts.label(for: d))"
+                }
+            }
+        }
+        let eligible = ts.filter(canEnableReporting)
+        if !eligible.isEmpty {
+            Button("Enable Reporting" + (many ? " (\(eligible.count) Macs)" : "")) {
+                Task { await perform("Reporting subscription assigned", eligible) {
+                    let configID = "com.hellocomputer.edict.status-subscriptions"
+                    let kmf = KMFDDMService(settings: settings)
+                    try await kmf.deploy(configJSON: DDMDeclarations.statusSubscriptions(identifier: configID),
+                                         configID: configID, toSet: "default")
+                    for t in eligible { try await kmf.assign(enrollmentID: t.id, toSet: "default") }
+                    for t in eligible { await fleet.refreshDevice(t.id, settings: settings) }
+                } }
+            }
+        }
+        Divider()
+        let allHidden = ts.allSatisfy { settings.isIgnoredForAttention($0.id) }
+        Button((allHidden ? "Unhide from Needs Attention" : "Hide from Needs Attention") + suffix) {
+            for t in ts { settings.setIgnoredForAttention(t.id, !allHidden) }
+        }
+        if !many, d.isEnabled {
+            Divider()
+            Menu("More") {
+                Button("Restart…") { restartTarget = d }
+                Button("Lock…") { lockTarget = d }
+                Button("Unenroll…", role: .destructive) { unenrollTarget = d }
+            }
+        }
+    }
+
+    /// Offered only when MDM has no facts for the Mac and it isn't known to
+    /// be too old to send them (DDM status needs macOS 13).
+    private func canEnableReporting(_ d: MDMEnrollment) -> Bool {
+        guard d.isEnabled, fleet.snapshots[d.id]?.hasData != true else { return false }
+        guard let major = facts.osVersions[d.id]?.split(separator: ".").first.flatMap({ Int($0) }) else { return true }
+        return major >= 13
+    }
+
+    /// Run a menu action; on success show a brief confirmation and write
+    /// the Activity log, on failure show the reason.
+    private func perform(_ title: String, _ ts: [MDMEnrollment], _ work: () async throws -> Void) async {
+        let who = ts.count > 1 ? "\(ts.count) Macs" : ts.first.map(facts.label(for:)) ?? ""
+        do {
+            try await work()
+            activity.record(.category, title: title, detail: ts.map(facts.label(for:)).joined(separator: ", "))
+            notice = "\(title) — \(who)"
+        } catch { actionError = error.localizedDescription }
     }
 
     @ViewBuilder
@@ -248,8 +412,8 @@ struct PrismDeviceTable: View {
 
     @ViewBuilder private func complianceCell(_ d: MDMEnrollment) -> some View {
         switch facts.compliant(for: d) {
-        case .some(true): pill("Compliant", .green)
-        case .some(false): pill("Out", .orange)
+        case .some(true): pill("Meets baseline", .green)
+        case .some(false): pill("Outside baseline", .orange)
         case nil: pill("Unknown", .gray)
         }
     }

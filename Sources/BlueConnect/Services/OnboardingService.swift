@@ -40,7 +40,7 @@ struct OnboardingService {
         let saved = SavedProfilesStore.load()
         let nano = NanoMDMService(settings: settings)
         for pid in settings.mdmOnboardProfileIDs {
-            guard let sp = saved.first(where: { $0.id == pid }) else { continue }
+            guard let sp = saved.first(where: { $0.id == pid }) else { failures += 1; continue }
             do {
                 _ = try await nano.installProfile(enrollmentID: enrollmentID, profile: sp.data)
                 _ = try? await nano.push(enrollmentIDs: enrollmentID)
@@ -54,7 +54,7 @@ struct OnboardingService {
         // (server down, bad profile) must stay retryable on the next refresh
         // rather than being recorded as done and skipped forever.
         if failures == 0 { settings.markOnboarded(enrollmentID) }
-        activity.record(.category, title: "Onboarded \(deviceLabel)",
+        activity.record(.category, title: "Baseline delivery for \(deviceLabel)",
                         detail: "\(profiles) profile\(profiles == 1 ? "" : "s"), \(sets) set\(sets == 1 ? "" : "s")"
                               + (failures > 0 ? ", \(failures) failed — will retry" : ""))
         return Outcome(profiles: profiles, sets: sets, failures: failures)
