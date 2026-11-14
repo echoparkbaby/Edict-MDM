@@ -188,7 +188,7 @@ services:
     networks: [mdm]
 ```
 
-The sidecar source is `enrollments-api/app.py` in this repo's `server/` tree. Its Dockerfile is a three-line `python:3.12-alpine` + `pymysql cryptography`.
+The sidecar source is [`server/mdm/enrollments-api/`](../server/mdm/enrollments-api/) in this repo: `app.py` plus a five-line `python:3.12-alpine` + `pymysql cryptography` Dockerfile. Copy that folder into your stack as `enrollments-api/`.
 
 ## Database init
 

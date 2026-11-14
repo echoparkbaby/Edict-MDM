@@ -8,6 +8,26 @@ The common ways the stack goes sideways, and what actually fixes them.
 - **Connection refused / timeout:** the service is bound to `${ADMIN_BIND}` and you're connecting from somewhere that can't reach that interface. If you set it to a tailnet IP, confirm both machines are on the tailnet. If you set `127.0.0.1`, the app must run on the Docker host.
 - Confirm from the host: `curl -u nanomdm:$NANOMDM_API_KEY http://<admin-bind>:9090/version`.
 
+## Everything broke after the Docker host rebooted ("Could not connect to the server")
+
+If `ADMIN_BIND` is a **tailnet IP**, Docker can start before Tailscale has brought that address up. The containers that publish ports on it (KMFDDM, the enrollments sidecar) then start **without their network**: `docker compose ps` shows `mdm-kmfddm` stuck in `Restarting`, `mdm-enrollments` lists no ports, and the KMFDDM log repeats a DNS error like `lookup mdm-db ... network is unreachable`. Services bound to `0.0.0.0` (NanoMDM, SCEP) look fine, which makes it confusing.
+
+**Fix now** (once Tailscale is up): `docker compose up -d --force-recreate kmfddm enrollments`
+
+**Stop it happening again:** make Docker wait for the tailnet address at boot. Create `/etc/systemd/system/docker.service.d/wait-tailscale.conf` (replace `100.x.y.z` with your `ADMIN_BIND`):
+
+```ini
+[Unit]
+After=tailscaled.service
+Wants=tailscaled.service
+
+[Service]
+# Wait up to 90s for the tailnet address, then start Docker regardless.
+ExecStartPre=/bin/sh -c "for i in $$(seq 90); do ip -4 -o addr show tailscale0 2>/dev/null | grep -q 100.x.y.z/ && exit 0; sleep 1; done; exit 0"
+```
+
+Then `sudo systemctl daemon-reload`. It takes effect on the next boot; running containers aren't touched. (`$$` is how systemd spells a literal `$`.) This assumes Tailscale runs as the `tailscaled` system service, not in a container.
+
 ## A Mac won't enroll
 
 - **Public reachability:** the device must reach `https://mdm.example.com/mdm` from wherever it is. Test from off-LAN. DNS must resolve publicly and the route must hit your proxy.
