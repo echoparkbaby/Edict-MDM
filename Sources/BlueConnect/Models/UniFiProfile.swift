@@ -15,7 +15,7 @@ struct UniFiProfile: Codable, Hashable, Identifiable {
     /// list. Free-form: "Home UDM", "Client – ACME", etc.
     var label: String
     /// Same shape as the legacy `unifiBaseURL` field —
-    /// `https://10.0.0.1` or `https://unifi.example.com`.
+    /// `https://192.0.2.1` or `https://unifi.example.com`.
     var baseURL: String
     /// UniFi site short name. Empty string is treated as `"default"`
     /// at call time (matches the legacy field's behavior).

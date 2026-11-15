@@ -2,7 +2,7 @@
 # install-blocklist-cron.sh — one-shot installer for the BlueConnect
 # blocked-host cron sweeper on the bluesky LXC.
 #
-# Run this once on the bluesky LXC (192.0.2.21). Idempotent — re-running
+# Run this once on the BlueSky server. Idempotent — re-running
 # updates the cron line in place. Removes nothing existing.
 
 set -euo pipefail

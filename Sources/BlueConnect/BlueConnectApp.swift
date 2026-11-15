@@ -36,6 +36,8 @@ struct BlueConnectAdminApp: App {
         // the dashboard showed "—" for model/OS/FileVault. No caching, anywhere.
         URLCache.shared.removeAllCachedResponses()
         URLCache.shared = URLCache(memoryCapacity: 0, diskCapacity: 0)
+        // Plain http:// only to hosts the operator entered in Settings.
+        URLProtocol.registerClass(PlainHTTPGate.self)
     }
 
     /// The shipping app's display name ("Edict MDM" on main, "BlueConnect

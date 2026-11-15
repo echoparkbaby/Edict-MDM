@@ -104,7 +104,9 @@ struct LoginView: View {
         errorMessage = nil
         defer { checking = false }
 
-        // Probe the API with the entered credentials.
+        // Probe the API with the entered credentials. The address isn't saved
+        // yet, so tell the plain-HTTP gate the operator typed it.
+        PlainHTTPGate.operatorEntered(u)
         do {
             _ = try await BlueSkyAPI.shared.fetchBlueSkyHosts(
                 apiURL: u, username: n, password: p

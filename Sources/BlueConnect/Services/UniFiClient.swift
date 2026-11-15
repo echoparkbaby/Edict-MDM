@@ -166,8 +166,10 @@ struct UniFiClient {
         req.timeoutInterval = 5
 
         let pinDelegate = PinningTrustDelegate()
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [PlainHTTPGate.self] + (config.protocolClasses ?? [])
         let session = URLSession(
-            configuration: .ephemeral,
+            configuration: config,
             delegate: pinDelegate,
             delegateQueue: nil
         )

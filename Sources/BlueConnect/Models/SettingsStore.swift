@@ -11,7 +11,7 @@ final class SettingsStore: ObservableObject {
     /// Full URL for the JSON host-list endpoint's *base*. The app appends
     /// `/bs_hosts.json.php` to this. Examples:
     ///   https://bluesky.example.com
-    ///   http://10.0.0.10:8095
+    ///   http://192.0.2.20:8095
     /// Empty by default — user fills it in via the LoginView on first launch.
     @AppStorage("apiURL") var apiURL: String = ""
     @AppStorage("apiUsername") var apiUsername: String = "admin"
@@ -431,7 +431,7 @@ final class SettingsStore: ObservableObject {
 
     // MARK: Munki repo (Wasabi / S3-compatible / proxy-fronted)
     /// Hostname-style endpoint for the Munki repo, e.g.
-    /// `munki.macfaqulty.com` or `s3.us-east-1.wasabisys.com`. No scheme.
+    /// `munki.example.com` or `s3.us-east-1.wasabisys.com`. No scheme.
     @AppStorage("munkiRepoEndpoint") var munkiRepoEndpoint: String = ""
     /// Bucket name. Often empty if the endpoint already IS the bucket
     /// (virtual-hosted style with a CNAME, or a Worker that has the bucket baked in).

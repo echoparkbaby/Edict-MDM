@@ -121,63 +121,15 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
         <string>_ssh._tcp</string>
         <string>_rfb._tcp</string>
     </array>
-    <!-- App Transport Security. The Edict MDM admin APIs (NanoMDM/KMFDDM/
-         DEP/devices) and some internal services are reached over plain
-         HTTP at fixed private IPs — the tailnet/LAN (WireGuard/Tailscale)
-         is the encryption boundary. Rather than disable ATS globally
-         (NSAllowsArbitraryLoads), ATS stays ON and plain HTTP is allowed
-         only for the specific hosts below. ATS matches per-host, not
-         per-port, so one entry covers every port on that host.
-
-         Note: Tailscale's 100.64.0.0/10 (CGNAT) is NOT an RFC1918 private
-         range, so NSAllowsLocalNetworking does not cover tailnet hosts —
-         they need an explicit entry here. NSExceptionDomains keys are exact
-         IPs or hostnames; CIDR ranges are not supported.
-
-         TO ADD A NEW PLAIN-HTTP HOST (e.g. a MunkiReport server on the LAN):
-         copy one entry below and replace the <key> with its IP/hostname.
-         HTTPS hosts (mdm.example.com, or a self-signed UniFi
-         controller handled by the app's trust delegate) need NO entry. -->
+    <!-- App Transport Security. The MDM admin APIs and some internal
+         services are reached over plain HTTP on a private network or
+         tailnet, at addresses only the operator knows. ATS is fixed at
+         build time and cannot read Settings, so it is relaxed here and the
+         app enforces the rule itself: PlainHTTPGate refuses http:// to any
+         host that is not local and was not entered in Settings. -->
     <key>NSAppTransportSecurity</key>
     <dict>
-        <key>NSAllowsArbitraryLoads</key>             <false/>
-        <!-- Allows .local and unqualified (dot-less) hostnames + loopback/
-             link-local, e.g. a "munkireport.local" or a bare LAN name. -->
-        <key>NSAllowsLocalNetworking</key>            <true/>
-        <key>NSExceptionDomains</key>
-        <dict>
-            <!-- MDM stack (NanoMDM 9090 / KMFDDM 9093 / DEP 9001 / devices 9095) -->
-            <key>192.0.2.10</key>
-            <dict>
-                <key>NSExceptionAllowsInsecureHTTPLoads</key> <true/>
-            </dict>
-            <key>192.0.2.11</key>
-            <dict>
-                <key>NSExceptionAllowsInsecureHTTPLoads</key> <true/>
-            </dict>
-            <!-- bluesky BSC — only needed if you reach the JSON endpoint over
-                 http directly instead of the https public URL -->
-            <key>192.0.2.20</key>
-            <dict>
-                <key>NSExceptionAllowsInsecureHTTPLoads</key> <true/>
-            </dict>
-            <key>192.0.2.21</key>
-            <dict>
-                <key>NSExceptionAllowsInsecureHTTPLoads</key> <true/>
-            </dict>
-            <!-- MunkiReport — inventory dashboard (plain http on the LAN) -->
-            <key>192.0.2.30</key>
-            <dict>
-                <key>NSExceptionAllowsInsecureHTTPLoads</key> <true/>
-            </dict>
-            <!-- Template — to allow another plain-http host, copy a block
-                 above and set its IP/hostname:
-            <key>10.0.0.NN</key>
-            <dict>
-                <key>NSExceptionAllowsInsecureHTTPLoads</key> <true/>
-            </dict>
-            -->
-        </dict>
+        <key>NSAllowsArbitraryLoads</key>             <true/>
     </dict>
 </dict>
 </plist>

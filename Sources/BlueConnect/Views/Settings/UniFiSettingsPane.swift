@@ -141,7 +141,7 @@ struct UniFiSettingsPane: View {
                       prompt: Text("Home UDM"))
                 .help("Friendly name shown in the Network Scan switcher")
             TextField("Controller URL", text: binding(\.baseURL, for: profile.id, fallback: profile.baseURL),
-                      prompt: Text(verbatim: "https://10.0.0.1"))
+                      prompt: Text(verbatim: "https://192.0.2.1"))
                 .help("Base URL of the UniFi Network Application. Self-signed certs are accepted.")
             SecureField("API Key", text: $apiKeyBuffer)
                 .onChange(of: apiKeyBuffer) { _, newValue in
