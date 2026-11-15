@@ -34,6 +34,10 @@ Requires **macOS 15 or later**.
 - VoiceOver labels on about 40 controls.
 - New shortcuts: ⌥⌘1–6 for sidebar filters and ⌥⌘B for menu bar search (these used to clash with system shortcuts).
 
+### Full changelog
+
+Every change since 1.5.6, grouped by area: [CHANGELOG.md](https://github.com/echoparkbaby/Edict-MDM/blob/main/CHANGELOG.md)
+
 ### Assets
 
 - `Edict-MDM.dmg`: the app, signed and notarized. Drag it to Applications.
