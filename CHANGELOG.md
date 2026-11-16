@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.1 (2026-11-15)
+
+- Plain `http://` connections are allowed to the servers entered in Settings or on the sign-in screen, and to local addresses, instead of a fixed list built into the app. Anything else over plain HTTP is refused with an explanation.
+- The app no longer relies on macOS App Transport Security exceptions; it enforces its own plain-HTTP rule. HTTPS is unchanged.
+- GUI Helper links download `BlueConnectHelper.pkg` from the Edict-MDM releases.
+
 ## 2.0.0 (2026-11-15)
 
 Changes since BlueConnect Admin 1.5.6. 188 commits between June and November 2026. Grouped by area, in roughly the order the work landed.

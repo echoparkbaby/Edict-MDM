@@ -1075,7 +1075,7 @@ extension QuickAction {
             **TWO ways to install:**
 
             1. Run this Quick Action. It prompts once for sudo, installs the files, and loads the agent for the current console user.
-            2. Install [BlueConnectHelper.pkg](https://github.com/echoparkbaby/BlueConnect-Admin/releases/latest/download/BlueConnectHelper.pkg) (signed/notarized).
+            2. Install [BlueConnectHelper.pkg](https://github.com/echoparkbaby/Edict-MDM/releases/latest/download/BlueConnectHelper.pkg) (signed/notarized).
 
             Note: Fullscreen texts require Largetype — [github.com/abdusco/largetype](https://github.com/abdusco/largetype).
             """,

@@ -251,7 +251,7 @@ struct QuickActionSheet: View {
     /// binary (`abdusco/largetype`), so its hint lists both
     /// requirements; notify-user is GUI Helper only.
     private static func guiHelperHintMarkdown(actionID: String) -> String? {
-        let guiHelperLine = "**Quick Action** — \"GUI Helper\" or **Package Install** — [BlueConnectHelper.pkg](https://github.com/echoparkbaby/BlueConnect-Admin/releases/latest/download/BlueConnectHelper.pkg)"
+        let guiHelperLine = "**Quick Action** — \"GUI Helper\" or **Package Install** — [BlueConnectHelper.pkg](https://github.com/echoparkbaby/Edict-MDM/releases/latest/download/BlueConnectHelper.pkg)"
         switch actionID {
         case "largeTypeShow":
             return """
